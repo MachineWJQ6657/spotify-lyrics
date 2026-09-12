@@ -72,7 +72,6 @@ export function nearestLine(lines: LyricLine[], targetMs: number, toleranceMs = 
  */
 export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: LyricLine[], leadToleranceMs = 1200): Array<LyricLine | undefined> {
   const buckets: LyricLine[][] = Array.from({ length: baseLines.length }, () => [])
-  const placedAt = new Map<LyricLine, number>()
   if (!baseLines.length) return []
   for (const line of secondaryLines) {
     let index = activeLineIndex(baseLines, line.startMs + leadToleranceMs)
@@ -82,7 +81,6 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
     const naturalEnd = baseLines[index + 1]?.startMs ?? base.endMs ?? base.startMs + 12_000
     if (line.startMs < base.startMs - leadToleranceMs || line.startMs > naturalEnd + 2200) continue
     buckets[index].push(line)
-    placedAt.set(line, index)
   }
   const aligned = buckets.map((bucket, index) => {
     if (!bucket.length) return undefined
@@ -90,24 +88,11 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
     if (!texts.length) return undefined
     return { startMs: baseLines[index].startMs, endMs: baseLines[index].endMs, text: texts.join('　') }
   })
-  // A translation provider may keep a sentence as one row while the selected
-  // source timeline splits it into two short phrases. Preserve that sentence
-  // across at most two nearby continuation rows until the translation's next
-  // timestamp. The tight time/gap bounds prevent a sparse translation from
-  // lingering through an instrumental section or unrelated missing lines.
-  for (let index = 1; index < baseLines.length; index += 1) {
-    if (aligned[index]) continue
-    const base = baseLines[index]
-    const secondaryIndex = activeLineIndex(secondaryLines, base.startMs + 200)
-    const candidate = secondaryLines[secondaryIndex]
-    const originIndex = candidate ? placedAt.get(candidate) : undefined
-    if (!candidate || originIndex == null || originIndex >= index || index - originIndex > 2) continue
-    const ageMs = base.startMs - candidate.startMs
-    const precedingGapMs = base.startMs - baseLines[index - 1].startMs
-    const candidateEndMs = candidate.endMs ?? secondaryLines[secondaryIndex + 1]?.startMs
-    if (ageMs < 0 || ageMs > 8000 || precedingGapMs > 5000 || candidateEndMs == null || base.startMs >= candidateEndMs - 300) continue
-    aligned[index] = { startMs: base.startMs, endMs: base.endMs, text: candidate.text }
-  }
+  // An LRC end time is only the next timestamp, not proof that a translation
+  // describes intervening original rows. Do not copy it into empty buckets:
+  // alternate verses and missing translations can have equally short gaps.
+  // Explicit repeated timestamps still work, and split translated phrases
+  // remain joined in their owning source interval above.
   return aligned
 }
 

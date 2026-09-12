@@ -24,14 +24,22 @@ describe('LRC parsing', () => {
     expect(aligned[1]?.text).toBe('下一行')
   })
 
-  it('keeps one translated sentence visible across short split source phrases', () => {
+  it('does not infer translation ownership from a short gap alone', () => {
     const original = parseLrc('[01:00.88]きっと人生最後の日を\n[01:04.38]前に思うのだろう\n[01:06.29]全部全部言い足りなくて')
     const translated = parseLrc('[01:00.88]想必在人生最后那天会想起吧\n[01:06.29]虽然没能说完所有话很遗憾')
     const aligned = alignSecondaryTrack(original, translated)
     expect(aligned.map(line => line?.text)).toEqual([
       '想必在人生最后那天会想起吧',
-      '想必在人生最后那天会想起吧',
+      undefined,
       '虽然没能说完所有话很遗憾'
+    ])
+  })
+
+  it('does not repeat a sparse translation across a divergent bridge', () => {
+    const original = parseLrc('[00:10.00]朝が来れば大抵安堵\n[00:13.00]時が去った今\n[00:16.00]隣に立つ貴方はもう居ないから\n[00:20.00]次の歌')
+    const translated = parseLrc('[00:10.00]不知不觉间走不动路了\n[00:20.00]下一段歌')
+    expect(alignSecondaryTrack(original, translated).map(line => line?.text)).toEqual([
+      '不知不觉间走不动路了', undefined, undefined, '下一段歌'
     ])
   })
 

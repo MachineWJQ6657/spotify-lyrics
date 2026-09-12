@@ -22,6 +22,8 @@ const checks = {
   pointerCaptureCleanup: renderer.includes('onLostPointerCapture'),
   timelineLabel: renderer.includes('SPOTIFY TIMELINE'),
   noUnsupportedAccuracyClaim: !renderer.includes('FRAME-ACCURATE CLOCK'),
+  translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
+  providerRevision32: renderer.includes('LYRICS_PROVIDER_REVISION = 32'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

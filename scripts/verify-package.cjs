@@ -24,6 +24,8 @@ const checks = {
   noUnsupportedAccuracyClaim: !renderer.includes('FRAME-ACCURATE CLOCK'),
   translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
   providerRevision33: renderer.includes('LYRICS_PROVIDER_REVISION = 33'),
+  duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
+  exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

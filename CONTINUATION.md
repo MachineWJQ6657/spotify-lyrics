@@ -1,6 +1,10 @@
-# Syllable continuation checkpoint — 2026-09-12 / 0.4.17 candidate
+# Syllable continuation checkpoint — 2026-09-12 / 0.4.18 candidate
 
-## Latest source: 0.4.17 (candidate, not fully accepted)
+## Latest source: 0.4.18 (candidate, not fully accepted)
+
+- 0.4.18 full suite208/208 passed (175 deterministic +33 online); session6959 exit0. Build/ZIP/NSIS session61964 exit0. No active handles. Package includes revision31 credits, pointer lifecycle recovery, narrow header label, durationRatio diagnostic and honest timeline watermark.
+- ZIP181091986 bytes SHA256 96D78A8DEEC0B433E003238A19071983266B57257EF12AA71C0B589AFCB08848; Setup134955237 bytes SHA256 C6355E71964E92DE9FAFC0A181DD96F3D7CE6D531BA6DEDC0338CE7998003EE7. Fresh extraction release/verified-0418-20260912-003800/Syllable.exe; extracted app.asar matches build SHA256 92278573E9C5C15B2CAF5C3BA7F984B8F3B4F8311B38849E45DB4F20DAC9229F.
+- Added read-only scripts/verify-package.cjs. Run `node scripts/verify-package.cjs release/verified-0418-20260912-003800`; passed actual extraction. It verifies identity/code presence, NOT runtime behavior or audible sync. Candidate0.4.18 not launched yet;0.4.17 QA process remains running from verified-0417-20260912-002600 (last observed four responsive processes). Next replace only that QA instance with0.4.18, secondary-screen interaction/capture-loss/drag/font/credits acceptance, then resource and audible clock tests. Never manipulate Spotify during these UI tests.
 
 - Latest source-only overlay fix: pointerup/cancel/lostcapture/blur/unmount/lock-change share finishPointerDrag, clear local ownership before sending end IPC and finish active movement at most once. Second pointers cannot overwrite a live drag. Main ignores duplicate starts, non-owner moves/end and inactive end events. Two deterministic lifecycle tests added; actual Windows drag acceptance remains unproven. Shortened connection badge and added single-line ellipsis to address observed narrow header wrapping. Final offline175 passed, online33 skipped; build passed (session86215 terminal0). These changes are NOT in running0.4.17 package.
 

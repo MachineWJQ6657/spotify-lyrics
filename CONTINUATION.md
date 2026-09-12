@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.17 (candidate, not fully accepted)
 
+- Latest source-only overlay fix: pointerup/cancel/lostcapture/blur/unmount/lock-change share finishPointerDrag, clear local ownership before sending end IPC and finish active movement at most once. Second pointers cannot overwrite a live drag. Main ignores duplicate starts, non-owner moves/end and inactive end events. Two deterministic lifecycle tests added; actual Windows drag acceptance remains unproven. Shortened connection badge and added single-line ellipsis to address observed narrow header wrapping. Final offline175 passed, online33 skipped; build passed (session86215 terminal0). These changes are NOT in running0.4.17 package.
+
 - Source-only follow-up AFTER0.4.17 packaging: shared src/lib/lyric-metadata.ts recognizes precise engineering credits at any timestamp. Provider sanitization/scoring, renderer/import parsing and cached rendering share it. Cached supplemental rows exactly anchored to original credits are hidden without mutating storage. Revision31 refreshes auto-provider caches. Tests cover ordinary-text false positives and corrupt cached romaji.
 - QA duration diagnostic renamed scale -> durationRatio (not an applied tempo); UI watermark now SPOTIFY TIMELINE rather than FRAME-ACCURATE CLOCK. Running0.4.17 package does NOT contain these source changes. Need uniquely named rebuild before claiming it does.
 - Validation:173 offline passed,33 online skipped by default; original32 online cases passed plus newly added tayori 春を待つ credit case passed separately. Final build passed (session73568 terminal0); no active handles. Narrow connection badge wrapping and full overlay/audible tests still outstanding.

@@ -1,4 +1,5 @@
-import { useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { finishPointerDrag } from './lib/pointer-drag'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { usePosition } from './hooks/usePosition'
 import { useAppStore } from './store/useAppStore'
@@ -21,7 +22,13 @@ export function Overlay() {
   const alignedSecondaries = useMemo(() => base ? tracks.filter(track => track.id !== base.id).map(track => ({ track, lines: alignSecondaryTrack(base.lines, track.lines) })) : [], [base, tracks])
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
+  useEffect(() => {
+    const cancel = () => finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
+    window.addEventListener('blur', cancel)
+    return () => { window.removeEventListener('blur', cancel); cancel() }
+  }, [settings.positionLocked])
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current) return
     if (settings.positionLocked || event.button !== 0 || event.clientX < 9 || event.clientY < 9 || event.clientX > window.innerWidth - 9 || event.clientY > window.innerHeight - 9) return
     dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -38,10 +45,7 @@ export function Overlay() {
     window.syllable.overlay.moveTo(event.screenX, event.screenY)
   }
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (drag?.pointerId !== event.pointerId) return
-    dragRef.current = null
-    if (drag.active) window.syllable.overlay.endMove()
+    if (!finishPointerDrag(dragRef, () => window.syllable.overlay.endMove(), event.pointerId)) return
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
   useLayoutEffect(() => {
@@ -94,7 +98,7 @@ export function Overlay() {
 
   return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
     <div className="overlay-surface">
-      <div className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+      <div className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
         <div lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-primary karaoke-line ${baseClass}`}>{line?.words?.length ? line.words.map((word, wordIndex) => <span className={position >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line?.text?.trim() || '♪'}</div>
         {secondaries.map(({ track, line: sibling }) => {
           const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'

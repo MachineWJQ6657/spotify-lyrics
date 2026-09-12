@@ -92,7 +92,7 @@ export function App() {
           <div className="now-track-heading">
             <div className="header-cover">{playback?.track?.coverUrl ? <img src={playback.track.coverUrl} /> : <BrandMark size={46} title="Syllable" />}</div>
             <div>
-            <span className={`eyebrow ${demoMode ? 'demo' : ''}`}><Radio size={12} /> {demoMode ? '演示模式 · 尚未同步 SPOTIFY' : localConnected ? '本机 SPOTIFY 实时同步' : 'SPOTIFY WEB API 实时同步'}</span>
+            <span className={`eyebrow ${demoMode ? 'demo' : ''}`} title={demoMode ? '演示模式，尚未同步 Spotify' : localConnected ? '已连接本机 Spotify 媒体会话' : '已连接 Spotify Web API'}><Radio size={12} /><span>{demoMode ? '演示模式 · 未连接' : localConnected ? 'Spotify 桌面端' : 'Spotify Web API'}</span></span>
             <h1 {...titlePresentation}>{playback?.track?.name ?? '等待 Spotify 播放'}</h1>
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></p>
             </div>

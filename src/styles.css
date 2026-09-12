@@ -681,6 +681,9 @@ strong, h1, h2, h3, .brand, .eyebrow, .setting-label, .track-mini strong { font-
   min-width: 0;
 }
 .now-track-heading { flex: 1 1 auto; overflow: hidden; }
+.now-track-heading .eyebrow { min-width: 0; white-space: nowrap; }
+.now-track-heading .eyebrow > svg { flex-shrink: 0; }
+.now-track-heading .eyebrow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .now-header h1 { max-width: 100%; }
 
 .chinese-text {

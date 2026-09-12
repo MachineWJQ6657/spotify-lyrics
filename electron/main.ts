@@ -885,6 +885,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return overlayWindow.getBounds()
   })
   ipcMain.on('overlay:move-start', event => {
+    if (overlayPointerDrag) return
     if (!overlayMovable || (event.sender !== overlayWindow?.webContents && event.sender !== overlayControlsWindow?.webContents) || !overlayWindow) return
     const fromControls = event.sender === overlayControlsWindow?.webContents
     const controlsWereVisible = overlayControlsWindow?.isVisible() ?? false
@@ -905,6 +906,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     // resize drift when passed through directly.
     const point = screen.getCursorScreenPoint()
     const origin = overlayPointerDrag
+    if ((event.sender === overlayControlsWindow?.webContents) !== origin.fromControls) return
     const x = origin.bounds.x + point.x - origin.cursor.x
     const y = origin.bounds.y + point.y - origin.cursor.y
     const area = screen.getDisplayNearestPoint(point).workArea
@@ -919,6 +921,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.on('overlay:move-end', event => {
     if (event.sender !== overlayWindow?.webContents && event.sender !== overlayControlsWindow?.webContents) return
     const origin = overlayPointerDrag
+    if (!origin || (event.sender === overlayControlsWindow?.webContents) !== origin.fromControls) return
     if (origin && overlayWindow && !overlayWindow.isDestroyed()) {
       const bounds = overlayWindow.getBounds()
       if (bounds.width !== origin.bounds.width || bounds.height !== origin.bounds.height) setExactOverlaySize(origin.bounds.width, origin.bounds.height)

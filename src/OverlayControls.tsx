@@ -4,6 +4,7 @@ import { useAppStore } from './store/useAppStore'
 import { useWindowSync } from './hooks/useWindowSync'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { BrandMark } from './components/BrandMark'
+import { finishPointerDrag } from './lib/pointer-drag'
 
 export function OverlayControls() {
   usePlaybackConnection(false, false)
@@ -13,7 +14,12 @@ export function OverlayControls() {
   const [pendingSkipTrackId, setPendingSkipTrackId] = useState<string | null>(null)
   const transportPendingRef = useRef(false)
   const pendingReleaseTimer = useRef<number | undefined>(undefined)
-  const dragPointer = useRef<{ id: number; startX: number; startY: number; active: boolean } | null>(null)
+  const dragPointer = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
+  useEffect(() => {
+    const cancel = () => finishPointerDrag(dragPointer, () => window.syllable.overlay.endMove())
+    window.addEventListener('blur', cancel)
+    return () => { window.removeEventListener('blur', cancel); cancel() }
+  }, [settings.positionLocked])
   useEffect(() => {
     // Spotify briefly publishes no media session between queue items. Keep the
     // skip lock through that gap and release it only after a real replacement
@@ -68,14 +74,15 @@ export function OverlayControls() {
     void window.syllable.overlay.hide()
   }
   const beginDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (dragPointer.current) return
     if (settings.positionLocked || event.button !== 0) return
-    dragPointer.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY, active: false }
+    dragPointer.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false }
     event.currentTarget.setPointerCapture(event.pointerId)
     event.preventDefault()
   }
   const continueDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
     const drag = dragPointer.current
-    if (!drag || drag.id !== event.pointerId) return
+    if (!drag || drag.pointerId !== event.pointerId) return
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return
       drag.active = true
@@ -84,15 +91,12 @@ export function OverlayControls() {
     window.syllable.overlay.moveTo(event.screenX, event.screenY)
   }
   const endDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    const drag = dragPointer.current
-    if (!drag || drag.id !== event.pointerId) return
-    dragPointer.current = null
-    if (drag.active) window.syllable.overlay.endMove()
+    if (!finishPointerDrag(dragPointer, () => window.syllable.overlay.endMove(), event.pointerId)) return
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
   return <div className={`overlay-controls-shell ${settings.positionLocked ? 'position-locked' : ''}`} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
-    <span className="controls-drag" title={settings.positionLocked ? '位置已锁定' : '拖动悬浮窗'} onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><GripVertical size={15} /></span>
+    <span className="controls-drag" title={settings.positionLocked ? '位置已锁定' : '拖动悬浮窗'} onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}><GripVertical size={15} /></span>
     <button type="button" title="上一首（播放超过 3 秒时先回到开头）" aria-label="上一首" disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport('previous')}><SkipBack size={15} fill="currentColor" /></button>
     <button type="button" className="controls-play" title={playback?.isPlaying ? '暂停' : '播放'} aria-label={playback?.isPlaying ? '暂停' : '播放'} disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport(playback?.isPlaying ? 'pause' : 'play')}>{playback?.isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button>
     <button type="button" title={pendingSkipTrackId ? '正在等待 Spotify 换曲…' : '下一首'} aria-label="下一首" disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport('next')}><SkipForward size={15} fill="currentColor" /></button>

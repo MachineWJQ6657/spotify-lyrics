@@ -8,6 +8,15 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('requires independent release evidence for mixed-script artist localization', () => {
+    const query = { track: 'Blue Day', artist: 'Example鬍子男Band', album: 'Blue Day', durationMs: 237836 }
+    const score = (artist: string, duration = 237837, album = 'Blue Day') => weightedScore('Blue Day', artist, duration, query, true, album)
+    expect(score('Example髭男Band')).toBeGreaterThan(score('Unrelated髭男Band'))
+    expect(score('Example髭男Band')).toBeGreaterThan(score('Example髭男Band', 247837))
+    expect(score('Example髭男Band')).toBeGreaterThan(score('Example髭男Band', 237837, 'Another Album'))
+    expect(score('Example別Band')).toBeLessThan(score('Example髭男Band'))
+  })
+
   it('removes provider-native headers and early short-form credits, retaining real lyric phrases', () => {
     const cleaned = stripTimedTrackMetadata('[00:00.10]Same Blue - Official髭男dism\n[00:01.00]词：Composer\n[00:02.00]曲：Composer\n[00:10.00]曲がり角で待っている\n[00:20.00]Same Blue',
       { name: 'Same Blue', artist: 'Official髭男dism' })
@@ -77,6 +86,22 @@ describe('conservative repeated-word repair', () => {
 })
 
 describe('lyrics provider request budget', () => {
+  it('rejects an exact-get studio response for an explicitly live request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/api/get')) return new Response(JSON.stringify({ trackName: 'Version Test', artistName: 'Artist', albumName: 'Studio', duration: 100,
+        syncedLyrics: '[00:05.00]wrong recording\n[00:40.00]second phrase\n[01:30.00]ending' }))
+      if (url.includes('lrclib.net')) return new Response('[]')
+      if (url.includes('music.163.com')) return new Response('{"result":{"songs":[]}}')
+      if (url.includes('songsearch.kugou.com')) return new Response('{"data":{"lists":[]}}')
+      throw new Error('unexpected test URL')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-explicit-live-identity', name: 'Version Test (Live)', artist: 'Artist', album: 'Live at Test Hall', durationMs: 100000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics ?? null).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('keeps same-title recording editions in separate provider cache keys', () => {
     const base = { id: 'song', name: 'Same Song', artist: 'Artist', album: 'Studio', coverUrl: '', durationMs: 200_400 }
     expect(lyricsCacheKey(base, false)).not.toBe(lyricsCacheKey({ ...base, album: 'Live' }, false))

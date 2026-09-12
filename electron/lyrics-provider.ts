@@ -1038,6 +1038,15 @@ export function weightedScore(candidateTrack: string, candidateArtist: string, c
   const hasAlbumEvidence = Boolean(query.album && candidateAlbum)
   const album = hasAlbumEvidence ? scriptAwareSimilarity(candidateAlbum, query.album!) : 0
   const durationDelta = query.durationMs && candidateDurationMs ? Math.abs(candidateDurationMs - query.durationMs) : 0
+  // A mixed-script brand may localize just its Han characters. Require the
+  // same substantial Latin skeleton, a shared Han character, exact title and
+  // album, and a close recording duration; never use this as an alias table.
+  const latinSkeleton = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^a-z]/g, '')
+  const queryLatin = latinSkeleton(query.artist)
+  const sharedHan = [...query.artist].some(character => HAN.test(character) && candidateArtist.includes(character))
+  if (artist < .78 && track >= .98 && album >= .98 && query.durationMs && candidateDurationMs
+    && durationDelta <= 1500 && queryLatin.length >= 8 && HAN.test(query.artist) && HAN.test(candidateArtist)
+    && queryLatin === latinSkeleton(candidateArtist) && sharedHan) artist = .78
   // Spotify can localize a Japanese title while Asian providers keep its
   // native script. Artist+duration is useful retrieval evidence, but never a
   // near-exact identity: the same artist commonly has unrelated songs of
@@ -1142,7 +1151,11 @@ export async function searchLyrics(query: { track: string; artist: string; album
     new URLSearchParams({ track_name: cleanedTrack, artist_name: cleanedArtist }),
     new URLSearchParams({ q: `${cleanedTrack} ${cleanedArtist}` })
   ]
-  const settled = await Promise.allSettled(variants.map(async params => {
+  // Mixed-script localized artist names can hide the exact release entirely.
+  // Title-only retrieval still passes the strict identity/edition scorer.
+  if (HAN.test(cleanedArtist) && /[a-z]{3}/i.test(cleanedArtist)) variants.push(new URLSearchParams({ track_name: query.track }))
+  const uniqueVariants = [...new Map(variants.map(params => [params.toString(), params])).values()]
+  const settled = await Promise.allSettled(uniqueVariants.map(async params => {
     const response = await fetchWithTimeout(`${LRCLIB_API}/search?${params}`, { headers }, 4200, 2, signal)
     if (!response.ok) throw new Error(`歌词搜索暂时不可用 (${response.status})`)
     return await response.json() as LrcLibRecord[]
@@ -1171,10 +1184,14 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
     new URLSearchParams({ artist_name: primaryArtist(track.artist), track_name: cleanTrackTitle(track.name) })
   ]
   const [exactResults, searched] = await Promise.all([
-    Promise.allSettled(exactQueries.map(async query => {
+    Promise.allSettled([...new Map(exactQueries.map(query => [query.toString(), query])).values()].map(async query => {
       const response = await fetchWithTimeout(`${LRCLIB_API}/get?${query}`, { headers }, 4200, 2, signal)
       if (response.ok) {
         const data = await response.json() as LrcLibRecord
+        // Cleaned /get variants may strip "Live" or "Acoustic". An HTTP
+        // exact hit does not override a contradictory recording edition.
+        if (recordingEdition(`${data.trackName ?? ''} ${data.albumName ?? ''}`)
+          !== recordingEdition(`${track.name} ${track.album}`)) return null
         if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
       }
       if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)

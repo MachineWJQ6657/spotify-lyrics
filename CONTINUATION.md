@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.21 (candidate, not fully accepted)
 
+- SOURCE compact-main layout: <=1260px columns190/min520/314 ->160/min0/280; main horizontal padding22->20; lyrics viewport54->24. Preserves configured font size. Built-source secondary QA .qa-0421-layout-profile exited0; qa-0421-layout.png visually inspected: current Japanese sentence2 lines at52px, sidebar/settings readable, titlebar now0.4.21. Screenshot1683x1085 at secondary1.5scale; not an exact same-size before/after comparison with sky's previous scaled capture. Scroll3030->2850 target2850.3 passed=true. No Spotify controls. Runtime titlebar/layout fixes still not packaged; existing verified0.4.21 main from previous turn remains older code. No active handles.
+
 - Actual secondary pointer acceptance this turn via computer-use sky: selected exact verified-0421-20260912-180300 executable window49352350, activated it after occluded capture. Native scroll at550,415 moved main lyrics and exposed return-current button; native click615,533 returned active 痩せ細る手... row and removed button, verified screenshots. No Spotify controls. Overlay tool windows not returned by list_windows, so overlay physical controls/drag remain unverified. Candidate stays running using .qa-0421-profile / qa-0421-live.log.
 - Real screenshot exposed titlebar stale hardcoded0.4.19 despite verified0.4.21 executable. SOURCE fix Titlebar imports package.json version; server-render regression verifies displayed label equals manifest. Targeted test/build passed. This and QA-only assertions are not in current0.4.21 package; do not claim running label fixed. Need unique rebuild before next visual acceptance; narrow main lyric viewport still wraps Japanese sentence into4 rows at52px.
 

@@ -589,8 +589,9 @@ button, input { font-family: inherit; font-synthesis: none; }
 .size-presets button, .segmented button, .language-grid button { font-size: 11px; }
 
 @media (max-width: 1260px) {
-  .body-grid { grid-template-columns: 190px minmax(520px, 1fr) 314px; }
-  .main-content { padding-left: 22px; padding-right: 22px; }
+  .body-grid { grid-template-columns: 160px minmax(0, 1fr) 280px; }
+  .main-content { padding-left: 20px; padding-right: 20px; }
+  .lyrics-viewport { padding-left: 24px; padding-right: 24px; }
   .header-cover { width: 64px; height: 64px; }
   .now-header h1 { font-size: 25px; }
   .settings-panel { padding-left: 18px; padding-right: 18px; }

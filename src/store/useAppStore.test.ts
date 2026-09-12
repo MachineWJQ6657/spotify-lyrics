@@ -3,6 +3,25 @@ import { createReferenceDeduplicatingStorage, useAppStore } from './useAppStore'
 import type { LyricsDocument } from '../types'
 
 describe('application-state persistence', () => {
+  it('retries the same state after a failed write instead of marking it saved', () => {
+    let attempts = 0
+    let saved = ''
+    const backend = { getItem: () => null, removeItem: () => undefined,
+      setItem: (_name: string, value: string) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('storage unavailable')
+        saved = value
+      }
+    } as unknown as Storage
+    const storage = createReferenceDeduplicatingStorage(backend)
+    const state = { state: { settings: {}, library: { song: { trackId: 'song' } } } } as unknown as Parameters<typeof storage.setItem>[1]
+    expect(() => storage.setItem('preferences', state)).toThrow('storage unavailable')
+    storage.setItem('preferences', state)
+    expect(attempts).toBe(2)
+    expect(JSON.parse(saved)).toEqual(state)
+    storage.setItem('preferences', state)
+    expect(attempts).toBe(2)
+  })
   it('does not serialize unchanged settings and lyrics library on playback-only updates', () => {
     const values = new Map<string, string>()
     let writes = 0

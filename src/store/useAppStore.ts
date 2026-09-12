@@ -78,9 +78,11 @@ export function createReferenceDeduplicatingStorage(storage: Storage): PersistSt
     },
     setItem(name, value) {
       if (value.state.settings === previousSettings && value.state.library === previousLibrary) return
+      // Commit the deduplication marker only after serialization and storage
+      // succeed. A failed quota/disk write must remain eligible for retry.
+      storage.setItem(name, JSON.stringify(value))
       previousSettings = value.state.settings
       previousLibrary = value.state.library
-      storage.setItem(name, JSON.stringify(value))
     },
     removeItem(name) {
       previousSettings = undefined

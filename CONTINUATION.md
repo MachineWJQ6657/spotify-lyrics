@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.21 (candidate, not fully accepted)
 
+- SOURCE persistence reliability: reference-deduplicating storage marked settings/library saved BEFORE storage.setItem; reproduced failed write then same-state retry skipped (attempts1 instead of2). Now advance references only after JSON serialization and backend write succeed. Regression covers failure->successful retry->dedup, existing playback-only no-write remains passing.203 offline pass,33 online skipped; build86251 exit0. This does not add quota cleanup/error UI/backoff and is not proof of lower runtime memory. No active handles/UI/Spotify commands. Not in0.4.21 artifacts; next package must include accumulated source-only changes.
+
 - SOURCE shape clipping: extracted overlayShape helper, drops nonfinite/nonpositive/fully-offscreen text rectangles instead of manufacturing1px out-of-bounds areas; intersects padded partial regions, preserves bounded native resize edges and clickthrough behavior. Four geometry regressions;202 offline pass,33 online skipped; build/diff-check pass. Secondary built-source overlay-hit-regions13274 exit0, qa-0421-shape.log passed=true764->180->764 width at fixed820x220. This is observer/IPC shape smoke plus unit geometry, NOT native physical hit test or transparency acceptance. No active handles/Spotify commands. Still unbundled after0.4.21, keep candidate distinct on next build.
 
 - SOURCE overlay hit-region refresh: now observes primary/secondary elements as well as fixed surface; effect keys include actual texts/track IDs and fontWeight, preventing stale region publication after async translation/text changes or late font metrics while container size stays fixed.198 offline and build pass.

@@ -1,9 +1,9 @@
 import { toRomaji } from 'wanakana'
 import type { LyricLine, LyricsDocument, LyricTrack } from '../types'
+import { isLyricCredit } from './lyric-metadata'
 
 const TIME = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g
 const WORD_TIME = /<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>/g
-const CREDIT_LINE = /^(?:作词|作詞|作曲|编曲|編曲|制作人|製作人|混音|母带|母帶|录音|錄音|composer|lyricist|lyrics?|arrang(?:er|ed by)|produ(?:cer|ced by)|mix(?:er|ed by)|master(?:ing|ed by))\s*[:：]/i
 
 function milliseconds(minute: string, second: string, fraction = '0') {
   const fractionMs = Number(fraction.padEnd(3, '0').slice(0, 3))
@@ -33,7 +33,7 @@ export function parseLrc(source: string): LyricLine[] {
   // Empty timestamp markers are commonly appended at the end of provider LRC
   // files. Keeping them makes the active line become a zero-size element, so a
   // transparent overlay appears to vanish and can no longer be dragged.
-  const cleaned = lines.filter(line => line.text.trim() && !(line.startMs < 30_000 && CREDIT_LINE.test(line.text)))
+  const cleaned = lines.filter(line => line.text.trim() && !isLyricCredit(line.text))
   return cleaned.map((line, index) => ({ ...line, endMs: cleaned[index + 1]?.startMs }))
 }
 
@@ -113,6 +113,8 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
 
 export function visibleTracks(document: LyricsDocument | null, enabled: string[], romanization: boolean) {
   if (!document) return []
+  const creditTimes = new Set(document.tracks.filter(track => track.kind === 'original')
+    .flatMap(track => track.lines.filter(line => isLyricCredit(line.text)).map(line => line.startMs)))
   return document.tracks
     // The source-language track is the alignment anchor and must never be
     // replaced by a selected translation merely because its language toggle is
@@ -120,7 +122,8 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
     .filter(track => (track.kind === 'original' || enabled.includes(track.language)) && (track.kind !== 'romanization' || romanization))
     .map(track => {
       // Also sanitize already-persisted tracks created by older versions.
-      const lines = track.lines.filter(line => line.text.trim() && !(line.startMs < 30_000 && CREDIT_LINE.test(line.text)))
+      const lines = track.lines.filter(line => line.text.trim() && !isLyricCredit(line.text)
+        && (track.kind === 'original' || !creditTimes.has(line.startMs)))
       const normalizedLines: LyricLine[] = lines.map((line, index) => ({ ...line, endMs: lines[index + 1]?.startMs }))
       return { ...track, lines: normalizedLines }
     })

@@ -833,8 +833,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     const result = await fetchLyrics(track, await spotify.getAccessToken().catch(() => null), Boolean(options?.bypassCache))
     const lyricsDurationMs = track?.sourceDurationMs ?? track?.durationMs
     const stats = timedLyricsStats(result?.syncedLyrics, lyricsDurationMs)
-    const scale = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1
-    qaLog(`lyrics: ${result?.source ?? 'not found'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; scale=${scale.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
+    const durationRatio = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1
+    qaLog(`lyrics: ${result?.source ?? 'not found'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
     return result
   })
   ipcMain.handle('lyrics:search', (_event, query) => searchLyrics(query))

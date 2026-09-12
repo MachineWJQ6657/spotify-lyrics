@@ -101,7 +101,7 @@ export function App() {
         </div>
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />
-          <div className="card-watermark"><Sparkles size={14} /> FRAME-ACCURATE CLOCK</div>
+          <div className="card-watermark"><Sparkles size={14} /> SPOTIFY TIMELINE</div>
         <LyricsStage document={activeLyrics} positionMs={lyricPosition} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics} />
         </div>
         </>}

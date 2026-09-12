@@ -1,4 +1,5 @@
 import type { PlaybackSnapshot } from './spotify'
+import { isLyricCredit } from '../src/lib/lyric-metadata'
 
 export interface SupplementalLyrics {
   language: string
@@ -25,7 +26,6 @@ export interface LyricsCandidate {
 }
 
 const LRC_TIMESTAMP = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?]/g
-const CREDIT_LINE = /^(?:作词|作詞|作曲|编曲|編曲|制作人|製作人|混音|母带|母帶|录音|錄音|composer|lyricist|lyrics?|arrang(?:er|ed by)|produ(?:cer|ced by)|mix(?:er|ed by)|master(?:ing|ed by))\s*[:：]/i
 const KANA = /[\u3040-\u30ff]/
 const HAN = /[\u3400-\u9fff]/
 const LATIN = /[a-z]/i
@@ -49,7 +49,7 @@ export function parseTimedRows(value: string | null | undefined): TimedLyricsRow
   return (value?.split(/\r?\n/) ?? []).flatMap(raw => {
     const timestamps = raw.match(LRC_TIMESTAMP) ?? []
     const text = raw.replace(LRC_TIMESTAMP, '').trim()
-    if (!timestamps.length || !text || CREDIT_LINE.test(text)) return []
+    if (!timestamps.length || !text || isLyricCredit(text)) return []
     const normalizedText = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
     return timestamps.flatMap(timestamp => {
       const timeMs = timestampMs(timestamp)
@@ -107,7 +107,7 @@ export function splitEmbeddedTranslation(result: LyricsResult): LyricsResult {
       : []
   })
   const japaneseRowCount = sourceTimedRows.filter(row => KANA.test(row.content)).length
-  const hanOnlyRowCount = sourceTimedRows.filter(row => HAN.test(row.content) && !KANA.test(row.content) && !CREDIT_LINE.test(row.content)).length
+  const hanOnlyRowCount = sourceTimedRows.filter(row => HAN.test(row.content) && !KANA.test(row.content) && !isLyricCredit(row.content)).length
   const hasAlternatingEmbeddedTranslation = alternatingPairs.length >= 4
     && alternatingPairs.length / Math.max(1, Math.min(japaneseRowCount, hanOnlyRowCount)) >= .55
   const alternatingTranslationRows = new Set(hasAlternatingEmbeddedTranslation ? alternatingPairs.map(pair => pair.translation.physicalIndex) : [])
@@ -934,10 +934,11 @@ export function stripTimedTrackMetadata(value: string | null | undefined, track:
   return value.replace(/\r/g, '').split('\n').filter(raw => {
     const timestamps = raw.match(LRC_TIMESTAMP) ?? []
     if (!timestamps.length) return true
+    const text = raw.replace(LRC_TIMESTAMP, '').trim()
+    if (isLyricCredit(text)) return false
     const timeMs = timestampMs(timestamps[0]!)
     if (!Number.isFinite(timeMs) || timeMs > 15_000) return true
-    const text = raw.replace(LRC_TIMESTAMP, '').trim()
-    if (labelledMetadata.test(text) || CREDIT_LINE.test(text) || /^(?:词|詞|曲)\s*[:：]/.test(text)) return false
+    if (labelledMetadata.test(text)) return false
     const normalizedText = normalize(text)
     const containsTitle = titleVariants.some(title => normalizedText.includes(title))
     const containsArtist = artistVariants.some(artist => normalizedText.includes(artist))

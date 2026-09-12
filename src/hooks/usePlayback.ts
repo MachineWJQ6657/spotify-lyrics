@@ -13,7 +13,7 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // invalidated exact-provider timelines that silently omitted short repeated
 // outro refrains; revision 23 covered translated rewrites and collaboration
 // releases whose producer credit exists only in album aliases.
-const LYRICS_PROVIDER_REVISION = 30
+const LYRICS_PROVIDER_REVISION = 31
 // Maps a provider context to the retry token of its one allowed automatic
 // recovery generation. Token ownership prevents a stale async continuation
 // from clearing (or re-arming) a newer generation's guard.

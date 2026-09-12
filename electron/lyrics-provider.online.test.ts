@@ -4,6 +4,13 @@ import { fetchLyrics, parseTimedRows, timedLyricsStats } from './lyrics-provider
 const runOnline = process.env.SYLLABLE_ONLINE_QA === '1' ? describe : describe.skip
 
 runOnline('online lyrics provider smoke tests', () => {
+  it('does not turn tayori outro engineering credits into sung lyrics', async () => {
+    const result = await fetchLyrics({ id: 'qa-haru-wo-matsu-credits', name: '春を待つ', artist: 'tayori', album: 'memento', durationMs: 244723, coverUrl: '' }, null, true)
+    expect(parseTimedRows(result?.syncedLyrics).length).toBeGreaterThan(35)
+    expect(result?.syncedLyrics).not.toMatch(/(?:母[带帶]|混音)工程[师師]\s*[:：]/)
+    expect(result?.additionalTracks?.some(track => track.language === 'zh-Hans')).toBe(true)
+  }, 30000)
+
   it('finds synchronized lyrics when Spotify and provider artist names use different scripts', async () => {
     const result = await fetchLyrics({
       id: 'qa-haruru', name: '晴るる', artist: 'Atarayo', album: '極夜において月は語らず',

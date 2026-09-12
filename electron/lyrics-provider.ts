@@ -586,7 +586,8 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     sourceMs: ownerRows[anchor.subjectIndex].timeMs,
     targetMs: baseRows[anchor.referenceIndex].timeMs
   }))
-  const byOwner = new Map(anchors.map(anchor => [anchor.subjectIndex, anchor]))
+  type SupplementalAnchor = typeof anchors[number] & { targetIndices?: number[] }
+  const byOwner = new Map<number, SupplementalAnchor>(anchors.map(anchor => [anchor.subjectIndex, anchor]))
   // A base row may combine several provider rows. Recover those translations
   // only when the complete ordered original text proves the grouping, not
   // merely because the timestamps happen to be nearby.
@@ -606,25 +607,57 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
       }
     }
   }
-  const remap = (sourceMs: number) => {
+  // Inverse grouping: a translation of one complete provider sentence can
+  // cover several displayed phrases, but only after exact ordered-text proof.
+  // Bound candidates by surrounding monotonic anchors to disambiguate choruses.
+  for (let ownerIndex = 0; ownerIndex < ownerRows.length; ownerIndex += 1) {
+    const before = anchors.filter(anchor => anchor.subjectIndex < ownerIndex).at(-1)
+    const after = anchors.find(anchor => anchor.subjectIndex > ownerIndex)
+    const candidates: number[][] = []
+    for (let start = (before?.referenceIndex ?? -1) + 1; start < (after?.referenceIndex ?? baseRows.length); start += 1) {
+      for (let end = start + 1; end < Math.min(start + 4, after?.referenceIndex ?? baseRows.length); end += 1) {
+        if (baseRows.slice(start, end + 1).map(row => row.text).join('') === ownerRows[ownerIndex].text) {
+          candidates.push(Array.from({ length: end - start + 1 }, (_, index) => start + index))
+        }
+      }
+    }
+    if (candidates.length !== 1) continue
+    const targetIndices = candidates[0]
+    byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex: targetIndices[0], sourceMs: ownerRows[ownerIndex].timeMs,
+      targetMs: baseRows[targetIndices[0]].timeMs, targetIndices })
+  }
+  const ownerAt = (sourceMs: number) => {
     let ownerIndex = -1
     for (let index = 0; index < ownerRows.length; index += 1) {
       if (ownerRows[index].timeMs <= sourceMs + 200) ownerIndex = index
       else break
     }
+    return ownerIndex
+  }
+  const translatedRows = parseTimedRows(track.syncedLyrics)
+  const translationCounts = new Map<number, number>()
+  for (const row of translatedRows) {
+    const index = ownerAt(row.timeMs)
+    translationCounts.set(index, (translationCounts.get(index) ?? 0) + 1)
+  }
+  const remap = (sourceMs: number): number[] => {
+    const ownerIndex = ownerAt(sourceMs)
     const anchor = byOwner.get(ownerIndex)
-    if (!anchor) return null
+    if (!anchor) return []
+    if (anchor.targetIndices && translationCounts.get(ownerIndex) === 1 && Math.abs(sourceMs - anchor.sourceMs) <= 200) {
+      return anchor.targetIndices.map(index => baseRows[index].timeMs)
+    }
     // A translated phrase belongs to its original provider row, not the
     // nearest shared anchor. Never extrapolate a divergent verse from a
     // whole-song median offset or snap an extra chorus to the beginning.
     const mapped = anchor.targetMs + sourceMs - anchor.sourceMs
-    const targetEnd = baseRows[anchor.referenceIndex + 1]?.timeMs
-    return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? mapped : null
+    const targetEnd = baseRows[(anchor.targetIndices?.at(-1) ?? anchor.referenceIndex) + 1]?.timeMs
+    return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? [mapped] : []
   }
-  const syncedLyrics = parseTimedRows(track.syncedLyrics).flatMap(row => {
-    const mapped = remap(row.timeMs)
-    return mapped == null ? [] : [`${lrcTimestamp(mapped)}${row.text}`]
-  }).join('\n')
+  const syncedLyrics = translatedRows.flatMap(row => {
+    return remap(row.timeMs).map(timeMs => ({ timeMs, text: row.text }))
+  }).sort((left, right) => left.timeMs - right.timeMs)
+    .map(row => `${lrcTimestamp(row.timeMs)}${row.text}`).join('\n')
   const alignedTo = base.source.startsWith('Spotify') ? 'Spotify' : '主歌词'
   return { ...track, syncedLyrics, source: `${track.source} · 对齐${alignedTo}时轴` }
 }

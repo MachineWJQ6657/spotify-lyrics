@@ -481,6 +481,22 @@ describe('lyrics provider merging', () => {
     expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]第一句上半\n[00:07.00]第一句结尾\n[00:14.00]下一句')
   })
 
+  it('maps a merged provider sentence onto proven split base phrases without a majority-sized anchor', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]first phrase second phrase\n[00:12.00]next sentence\n[00:20.00]last sentence', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:03.00]first phrase\n[00:07.00]second phrase\n[00:14.00]next sentence\n[00:22.00]last sentence', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source, syncedLyrics: '[00:01.00]第一句完整翻译\n[00:12.00]下一句' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]第一句完整翻译\n[00:07.00]第一句完整翻译\n[00:14.00]下一句')
+    const splitTranslation = { ...translated, syncedLyrics: '[00:01.00]上半译文\n[00:05.00]下半译文\n[00:12.00]下一句' }
+    expect(alignSupplementalTimeline(splitTranslation, owner, base).syncedLyrics).toBe('[00:03.00]上半译文\n[00:07.00]下半译文\n[00:14.00]下一句')
+  })
+
+  it('does not guess which repeated split chorus owns a translation without surrounding anchors', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]first phrase second phrase', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:03.00]first phrase\n[00:07.00]second phrase\n[00:14.00]first phrase\n[00:18.00]second phrase', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source, syncedLyrics: '[00:01.00]不能猜是哪一遍' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('')
+  })
+
   it('prefers NetEase when multiple synchronized Chinese translations exist', () => {
     const primary = {
       syncedLyrics: '[00:01.00]夏の匂い', plainLyrics: null, source: 'LRCLIB', confidence: 95,

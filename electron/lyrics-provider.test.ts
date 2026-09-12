@@ -510,6 +510,26 @@ describe('lyrics provider merging', () => {
     expect(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toContain('网易云翻译')
   })
 
+  it('keeps translations anchored to short sung words instead of merging them into the previous sentence', () => {
+    const primary: LyricsResult = { source: 'Spotify · Musixmatch', confidence: 100, plainLyrics: null,
+      syncedLyrics: '[00:01.00]君に会いたい\n[00:06.00]ああ\n[00:09.00]ね\n[00:12.00]空を見上げる\n[00:20.00]明日へ歩こう' }
+    const translated: LyricsResult = { ...primary, source: '网易云音乐', confidence: 95,
+      additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation', source: '网易云音乐 · 翻译',
+        syncedLyrics: '[00:01.00]想见你\n[00:06.00]啊啊\n[00:09.00]呐\n[00:12.00]仰望天空\n[00:20.00]走向明天' }] }
+    const result = mergeProviderSet([primary, translated], 25_000)
+    expect(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toBe(translated.additionalTracks![0].syncedLyrics)
+    const denseOriginal = primary.syncedLyrics!.replace('[00:09.00]', '[00:06.50]')
+    const denseTranslation = translated.additionalTracks![0].syncedLyrics.replace('[00:09.00]', '[00:06.50]')
+    const dense = mergeProviderSet([{ ...primary, syncedLyrics: denseOriginal, additionalTracks: [{ ...translated.additionalTracks![0], syncedLyrics: denseTranslation }] }], 25_000)
+    expect(dense?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toBe(denseTranslation)
+    const rapidOriginal = primary.syncedLyrics!.replace('[00:09.00]', '[00:06.10]')
+    const rapidTranslation = translated.additionalTracks![0].syncedLyrics.replace('[00:09.00]', '[00:06.10]')
+    const owner = { ...translated, syncedLyrics: rapidOriginal }
+    const base = { ...primary, syncedLyrics: rapidOriginal.replace('[00:06.00]', '[00:08.00]').replace('[00:06.10]', '[00:08.50]') }
+    expect(alignSupplementalTimeline({ ...translated.additionalTracks![0], syncedLyrics: rapidTranslation }, owner, base).syncedLyrics)
+      .toBe(rapidTranslation.replace('[00:06.00]', '[00:08.00]').replace('[00:06.10]', '[00:08.50]'))
+  })
+
   it('chooses the most complete human romanization instead of the first sparse track', () => {
     const original = '[00:01.00]日本語の歌詞一\n[00:06.00]日本語の歌詞二\n[00:11.00]日本語の歌詞三\n[00:16.00]日本語の歌詞四'
     const sparse: LyricsResult = {

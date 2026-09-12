@@ -626,9 +626,10 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex: targetIndices[0], sourceMs: ownerRows[ownerIndex].timeMs,
       targetMs: baseRows[targetIndices[0]].timeMs, targetIndices })
   }
-  const ownerAt = (sourceMs: number) => {
+    const ownerAt = (sourceMs: number) => {
     let ownerIndex = -1
     for (let index = 0; index < ownerRows.length; index += 1) {
+      if (ownerRows[index].timeMs === sourceMs) return index
       if (ownerRows[index].timeMs <= sourceMs + 200) ownerIndex = index
       else break
     }
@@ -734,7 +735,9 @@ function supplementalOwnerCompatible(owner: LyricsResult, base: LyricsResult) {
 }
 
 function supplementalBuckets(track: SupplementalLyrics, base: LyricsResult) {
-  const baseRows = timelineRows(base.syncedLyrics)
+  // Similarity scoring excludes tiny phrases, but display ownership must keep
+  // every sung row or their translations collapse into an earlier sentence.
+  const baseRows = parseTimedRows(base.syncedLyrics)
   const buckets = new Map<number, string>()
   for (const row of parseTimedRows(track.syncedLyrics)) {
     // Assign by the source-line interval, not only by the nearest timestamp.
@@ -744,6 +747,9 @@ function supplementalBuckets(track: SupplementalLyrics, base: LyricsResult) {
     let index = -1
     const lookupMs = row.timeMs + 1200
     for (let candidate = 0; candidate < baseRows.length; candidate += 1) {
+      // Exact provider/renderer anchors outrank the early-translation tolerance.
+      // Otherwise a rapid refrain is shifted into a later row on every merge.
+      if (baseRows[candidate].timeMs === row.timeMs) { index = candidate; break }
       if (baseRows[candidate].timeMs <= lookupMs) index = candidate
       else break
     }

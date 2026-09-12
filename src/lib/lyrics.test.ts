@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { activeLineIndex, alignSecondaryTrack, detectLyricsLanguage, languageFromFilename, makeTrack, nearestLine, parseLrc, serializeLrc, visibleTracks } from './lyrics'
 
 describe('LRC parsing', () => {
+  it('keeps exact translation anchors when sung phrases are less than the lead tolerance apart', () => {
+    const original = parseLrc('[00:01.00]あ\n[00:01.50]ね\n[00:02.00]そう')
+    const translated = parseLrc('[00:01.00]啊\n[00:01.50]呐\n[00:02.00]是啊')
+    expect(alignSecondaryTrack(original, translated).map(line => line?.text)).toEqual(['啊', '呐', '是啊'])
+  })
   it('parses centiseconds, milliseconds, repeated timestamps, and offset', () => {
     const lines = parseLrc('[offset:100]\n[00:01.50][00:02.500] hello\n[00:05.00]world')
     expect(lines.map(line => line.startMs)).toEqual([1600, 2600, 5100])

@@ -74,7 +74,9 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
   const buckets: LyricLine[][] = Array.from({ length: baseLines.length }, () => [])
   if (!baseLines.length) return []
   for (const line of secondaryLines) {
-    let index = activeLineIndex(baseLines, line.startMs + leadToleranceMs)
+    const exactIndex = activeLineIndex(baseLines, line.startMs)
+    let index = exactIndex >= 0 && baseLines[exactIndex].startMs === line.startMs
+      ? exactIndex : activeLineIndex(baseLines, line.startMs + leadToleranceMs)
     if (index < 0 && Math.abs(line.startMs - baseLines[0].startMs) <= 2200) index = 0
     if (index < 0) continue
     const base = baseLines[index]

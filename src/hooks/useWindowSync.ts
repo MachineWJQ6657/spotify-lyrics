@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { AppSettings, LyricsDocument } from '../types'
 import { useAppStore } from '../store/useAppStore'
-import { receiveWindowDocument } from '../lib/window-document'
+import { receiveWindowDocument, snapshotOwnsTrack } from '../lib/window-document'
 
 type SyncMessage =
   | { source: string; type: 'settings'; settings: AppSettings }
@@ -9,7 +9,7 @@ type SyncMessage =
   | { source: string; type: 'library-remove'; trackId: string }
   | { source: string; type: 'lyrics-view'; trackId: string | null; document: LyricsDocument | null }
   | { source: string; type: 'hello'; wantsLibrary: boolean }
-  | { source: string; target: string; type: 'snapshot'; settings: AppSettings; document?: LyricsDocument | null }
+  | { source: string; target: string; type: 'snapshot'; trackId: string | null; settings: AppSettings; document?: LyricsDocument | null }
 
 const instanceId = crypto.randomUUID()
 const isPrimaryWindow = window.location.hash !== '#/overlay' && window.location.hash !== '#/overlay-controls'
@@ -20,11 +20,13 @@ export function useWindowSync(syncLibrary = true) {
     const channel = new BroadcastChannel('syllable-window-state-v1')
     let applyingRemote = false
     let receivedSnapshot = isPrimaryWindow
+    let acknowledgedTrackId: string | null | undefined
     const requestSnapshot = () => channel.postMessage({ source: instanceId, type: 'hello', wantsLibrary: syncLibrary } satisfies SyncMessage)
     let helloTimer: number | undefined
     const missingCurrentLyrics = () => {
       const state = useAppStore.getState()
-      return syncLibrary && Boolean(state.playback?.track?.id) && state.lyrics?.trackId !== state.playback?.track?.id
+      const trackId = state.playback?.track?.id ?? null
+      return syncLibrary && acknowledgedTrackId !== trackId && state.lyrics?.trackId !== trackId
     }
     const stopSnapshotRetry = () => {
       if (helloTimer === undefined) return
@@ -50,6 +52,7 @@ export function useWindowSync(syncLibrary = true) {
           source: instanceId,
           target: message.source,
           type: 'snapshot',
+          trackId: state.playback?.track?.id ?? null,
           settings: state.settings,
           document: message.wantsLibrary ? state.lyrics : undefined
         } satisfies SyncMessage)
@@ -57,15 +60,16 @@ export function useWindowSync(syncLibrary = true) {
       }
       if (message.type === 'snapshot') {
         if (message.target !== instanceId) return
-        const currentTrackId = useAppStore.getState().playback?.track?.id
-        const documentMatches = !syncLibrary || !currentTrackId || message.document?.trackId === currentTrackId
+        const currentTrackId = useAppStore.getState().playback?.track?.id ?? null
+        const documentMatches = !syncLibrary || snapshotOwnsTrack(currentTrackId, message.trackId, message.document)
         receivedSnapshot = documentMatches
+        if (documentMatches) acknowledgedTrackId = currentTrackId
         applyingRemote = true
         useAppStore.setState(state => ({
           settings: message.settings,
-          ...(syncLibrary && message.document && documentMatches ? {
-            library: isPrimaryWindow ? { ...state.library, [message.document.trackId]: message.document } : {},
-            lyrics: message.document
+          ...(syncLibrary && documentMatches ? {
+            library: isPrimaryWindow ? (message.document ? { ...state.library, [message.document.trackId]: message.document } : state.library) : {},
+            lyrics: message.document ?? null
           } : {})
         }))
         applyingRemote = false
@@ -80,12 +84,18 @@ export function useWindowSync(syncLibrary = true) {
         const currentTrackId = useAppStore.getState().playback?.track?.id ?? null
         if (message.trackId === currentTrackId && (!message.document || message.document.trackId === currentTrackId)) {
           useAppStore.setState({ lyrics: message.document })
-          receivedSnapshot = Boolean(message.document)
-          if (receivedSnapshot) stopSnapshotRetry()
+          receivedSnapshot = true
+          acknowledgedTrackId = currentTrackId
+          stopSnapshotRetry()
         }
       }
       else if (message.type === 'library-upsert') {
         const currentTrackId = useAppStore.getState().playback?.track?.id
+        if (currentTrackId === message.document.trackId) {
+          receivedSnapshot = true
+          acknowledgedTrackId = currentTrackId
+          stopSnapshotRetry()
+        }
         useAppStore.setState(state => {
           if (!isPrimaryWindow && message.document.trackId !== currentTrackId && Object.keys(state.library).length === 0) return state
           return receiveWindowDocument(isPrimaryWindow, state.library, state.lyrics, message.document, currentTrackId)
@@ -100,6 +110,7 @@ export function useWindowSync(syncLibrary = true) {
       if (applyingRemote) return
       if (state.settings !== previous.settings) channel.postMessage({ source: instanceId, type: 'settings', settings: state.settings } satisfies SyncMessage)
       if (!isPrimaryWindow && syncLibrary && state.playback?.track?.id !== previous.playback?.track?.id) {
+        acknowledgedTrackId = undefined
         receivedSnapshot = state.lyrics?.trackId === state.playback?.track?.id
         if (!receivedSnapshot) {
           requestSnapshot()

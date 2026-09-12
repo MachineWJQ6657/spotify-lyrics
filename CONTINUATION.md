@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.18 (candidate, not fully accepted)
 
+- Latest source-only cross-window fix: snapshots now carry playback trackId. Matching explicit null documents clear stale views and acknowledge the empty state, stopping the800ms snapshot retry loop; mismatched/undefined documents cannot claim another song. lyrics-view null and matching upsert also stop retries; playback identity changes reset acknowledgement. Added identity/empty/stale/no-track regression.178 offline passed,33 online skipped; production build passed(session7091 exit0). Existing running0.4.18 lacks this and previous auxiliary-memory fix. Need hook-level timer/IPC integration plus rebuilt secondary-screen acceptance before claiming real-window behavior fully verified. No active tool handles.
+
 - Latest SOURCE ONLY memory fix: auxiliary window snapshots/upserts no longer retain a duplicate whole-song library, only current lyrics; unrelated upserts are no-ops once auxiliary library is empty. Main library/user-edited documents unchanged. Added window-document helper regression (500 unrelated updates plus current replacement/primary preservation). Full offline177 passed,33 online skipped; production build passed before final no-op fast-path, final TypeScript and2 targeted tests passed. No active handles. Existing0.4.18 package does not contain memory fix.
 - Actual paused0.4.18 sample:15.018s, four exact-path processes, CPU delta0.15625s, private258.418MB, all responding. This is baseline BEFORE memory fix and short paused sample, not claimed long-play memory improvement. No Spotify commands issued. Prior runtime and internal QA continue as below.
 

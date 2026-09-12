@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { receiveWindowDocument } from './window-document'
+import { receiveWindowDocument, snapshotOwnsTrack } from './window-document'
 import type { LyricsDocument } from '../types'
 
 const document = (trackId: string): LyricsDocument => ({ trackId, tracks: [], updatedAt: 1 })
 describe('auxiliary document retention', () => {
+  it('accepts an explicit empty view only for the matching playback identity', () => {
+    expect(snapshotOwnsTrack('new', 'new', null)).toBe(true)
+    expect(snapshotOwnsTrack('new', 'old', null)).toBe(false)
+    expect(snapshotOwnsTrack('new', 'new', document('old'))).toBe(false)
+    expect(snapshotOwnsTrack(null, 'old', document('old'))).toBe(false)
+    expect(snapshotOwnsTrack(null, null, null)).toBe(true)
+    expect(snapshotOwnsTrack('new', 'new', undefined)).toBe(false)
+  })
   it('keeps only current lyrics across hundreds of incoming library updates', () => {
     const current = document('playing')
     let state = { library: { old: document('old') }, lyrics: current } as { library: Record<string, LyricsDocument>; lyrics: LyricsDocument | null }

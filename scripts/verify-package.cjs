@@ -26,6 +26,9 @@ const checks = {
   providerRevision33: renderer.includes('LYRICS_PROVIDER_REVISION = 33'),
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
   exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),
+  displayedVersion: renderer.includes(`const version = "${expectedVersion}";`),
+  clippedOverlayShape: main.includes('function overlayShape('),
+  explicitOverlayAcceptance: main.includes('qa acceptance:'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

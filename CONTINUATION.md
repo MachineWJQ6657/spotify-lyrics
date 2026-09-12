@@ -1,6 +1,10 @@
-# Syllable continuation checkpoint — 2026-09-12 / 0.4.21 candidate
+# Syllable continuation checkpoint — 2026-09-12 / 0.4.22 candidate
 
-## Latest source: 0.4.21 (candidate, not fully accepted)
+## Latest source: 0.4.22 (candidate, not fully accepted)
+
+- 0.4.22 COMPLETE package:238/238 tests (205offline+33online)55003 exit0; dist21059 exit0. All recent source fixes now bundled (version label/layout/hit refresh/clipping/storage retry/current-only library broadcasts/QA assertions). Fresh extraction release/verified-0422-20260912-182400 passes extended verify-package including displayed version. Asar SHA25606a22002c0cee303f2631cb528e58ea8c3649b23d89d2907b2eb4f6ca4ce5a4b.
+- ZIP181093572 bytes SHA25664A8539F0B786901F2738298D0150F16F400B24A22FDCE7D63229214387B315C; Setup134956698 bytes SHA25631B3C3D936221DBEE20F182A110C56F6CA813F89AA0D895D676736CD778065FA. Local only, no GitHub Release uploaded.
+- Packaged secondary QA31737 exit0: overlay-controls explicit acceptance passed=true/missing=[]/failed=[]; fixed-surface hit-region764->180->764 passed; scroll3030->2850 target2850.3 passed. qa-0422-{overlay-controls,overlay-hit-regions,lyrics-scroll}.log/png. These are internal DOM/IPC, not real clickthrough or audible sync. Stopped only old exact verified0421 QA instances; all three0422 tests exited, no persistent candidate launched. No active handles or Spotify commands. Next real secondary UI and audible sync acceptance plus runtime resource evaluation; objective incomplete.
 
 - SOURCE broadcast optimization: primary library deltas now examine/send only the current track; bulk imports no longer structured-clone every unrelated document to auxiliary queues. Primary library unchanged, auxiliary->primary editing path unchanged. Reproduced500 upsert messages, fixed to0 for500 unrelated imports and1 forcurrent save. Existing null/transient broadcasts preserved; new current removal+clear regression passes. Full204 offline pass before last deletion test; final hook7 pass; build73333 exit0/diff-check clean. Need whole suite and real cross-window acceptance in next candidate; memory savings not runtime-measured. No active handles/UI/Spotify commands; unbundled after0.4.21.
 

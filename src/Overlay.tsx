@@ -21,6 +21,7 @@ export function Overlay() {
   const line = base?.lines[index]
   const alignedSecondaries = useMemo(() => base ? tracks.filter(track => track.id !== base.id).map(track => ({ track, lines: alignSecondaryTrack(base.lines, track.lines) })) : [], [base, tracks])
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
+  const hitRegionText = JSON.stringify([line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
   useEffect(() => {
     const cancel = () => finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
@@ -83,11 +84,15 @@ export function Overlay() {
     const observer = new ResizeObserver(schedulePublish)
     const surface = document.querySelector('.overlay-surface')
     if (surface) observer.observe(surface)
+    // The fixed-width surface can keep the same size while an inline lyric
+    // becomes shorter or a translation/romanization arrives asynchronously.
+    // Observe the actual hit targets too, including late font metric changes.
+    document.querySelectorAll('.overlay-primary, .overlay-secondary').forEach(element => observer.observe(element))
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
       observer.disconnect()
     }
-  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.lineHeight, settings.alignment, line?.startMs, secondaries.length])
+  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.fontWeight, settings.lineHeight, settings.alignment, line?.startMs, hitRegionText])
   const overlayStyle = {
     '--overlay-blur': `${settings.blur}px`, '--overlay-size': `${Math.max(34, settings.fontSize)}px`,
     '--overlay-bg-opacity': settings.backgroundOpacity / 100, '--overlay-text-opacity': settings.textOpacity / 100,

@@ -495,6 +495,39 @@ function createWindows() {
         `)
         await new Promise(resolve => setTimeout(resolve, 500))
       }
+      if (qaView === 'overlay-hit-regions') {
+        if (!overlayWindow) process.exitCode = 1
+        else {
+          const before = overlayHitRegions.map(region => ({ ...region }))
+          const mutation = await overlayWindow.webContents.executeJavaScript(`(() => {
+            const primary = document.querySelector('.overlay-primary');
+            const surface = document.querySelector('.overlay-surface');
+            if (!primary || !surface) return null;
+            const oldStyle = primary.getAttribute('style');
+            const surfaceWidth = surface.getBoundingClientRect().width;
+            const surfaceHeight = surface.getBoundingClientRect().height;
+            primary.style.height = primary.getBoundingClientRect().height + 'px';
+            primary.style.overflow = 'hidden';
+            primary.style.width = '180px';
+            return { oldStyle, surfaceWidth, surfaceHeight };
+          })()`)
+          await new Promise(resolve => setTimeout(resolve, 350))
+          const surfaceWidth = await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-surface')?.getBoundingClientRect().width`)
+          const surfaceHeight = await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-surface')?.getBoundingClientRect().height`)
+          const after = overlayHitRegions.map(region => ({ ...region }))
+          const passed = Boolean(mutation && before[0] && after[0]
+            && Math.abs(surfaceWidth - mutation.surfaceWidth) < 1
+            && Math.abs(surfaceHeight - mutation.surfaceHeight) < 1
+            && Math.abs(after[0].width - 180) < 2 && before[0].width > after[0].width + 20)
+          qaLog(`overlay hit-region resize: ${JSON.stringify({ passed, before, after, surfaceWidth, surfaceHeight })}`)
+          if (!passed) process.exitCode = 1
+          if (mutation) await overlayWindow.webContents.executeJavaScript(`(() => {
+            const primary = document.querySelector('.overlay-primary');
+            const oldStyle = ${JSON.stringify(mutation.oldStyle)};
+            if (primary) { if (oldStyle == null) primary.removeAttribute('style'); else primary.setAttribute('style', oldStyle); }
+          })()`)
+        }
+      }
       if (qaView === 'overlay-controls' && overlayWindow && overlayControlsWindow) {
         showOverlay()
         syncOverlayControlsBounds()

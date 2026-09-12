@@ -9,6 +9,7 @@ import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { TransportGate, type TransportBackend } from './transport-gate'
+import { createQaChecks } from './qa-checks'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
 // process removes most of the per-window Chromium overhead while preserving GPU
@@ -429,6 +430,9 @@ function createWindows() {
     }, 20_000)
     setTimeout(async () => {
       if (!mainWindow) return
+      const checks = createQaChecks(qaView === 'overlay-controls'
+        ? ['hover', 'leave', 'open', 'close', 'reopen']
+        : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate'] : [])
       if (qaView === 'editor') {
         await mainWindow.webContents.executeJavaScript(`document.querySelector('[title="搜索、编辑与校时"]')?.click()`)
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -497,21 +501,26 @@ function createWindows() {
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`overlay hover control: visible=${overlayControlsWindow.isVisible()}`)
+        checks.record('hover', overlayControlsWindow.isVisible())
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }))`)
         await new Promise(resolve => setTimeout(resolve, 700))
         qaLog(`overlay leave control: hidden=${!overlayControlsWindow.isVisible()}`)
+        checks.record('leave', !overlayControlsWindow.isVisible())
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
         await new Promise(resolve => setTimeout(resolve, 180))
         const opened = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]'); button?.click(); return Boolean(button) })()`)
         await new Promise(resolve => setTimeout(resolve, 220))
         qaLog(`overlay open-client control: found=${opened}, visible=${mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, bounds=${JSON.stringify(mainWindow.getBounds())}`)
+        checks.record('open', Boolean(opened) && mainWindow.isVisible() && !mainWindow.isMinimized())
         overlayControlsWindow.showInactive()
         const closed = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="关闭桌面歌词"]'); button?.click(); return Boolean(button) })()`)
         await new Promise(resolve => setTimeout(resolve, 250))
         qaLog(`overlay close control: found=${closed}, hidden=${!overlayWindow.isVisible()}`)
+        checks.record('close', Boolean(closed) && !overlayWindow.isVisible())
         showOverlay()
         await new Promise(resolve => setTimeout(resolve, 250))
         qaLog(`overlay reopen after close: visible=${overlayWindow.isVisible()}`)
+        checks.record('reopen', overlayWindow.isVisible())
       }
       if (qaView === 'overlay-drag-open-guard' && overlayWindow && overlayControlsWindow) {
         showOverlay()
@@ -522,16 +531,19 @@ function createWindows() {
         const immediate = await overlayControlsWindow.webContents.executeJavaScript(`(async () => {
           window.syllable.overlay.beginMove();
           window.syllable.overlay.endMove();
-          document.querySelector('button[aria-label="打开 Syllable 客户端"]')?.click();
+          const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]');
+          button?.click();
           await new Promise(resolve => setTimeout(resolve, 180));
-          return true;
+          return Boolean(button);
         })()`)
         qaLog(`drag open guard immediate: invoked=${immediate}; minimized=${mainWindow.isMinimized()}; visible=${mainWindow.isVisible()}`)
+        checks.record('guarded', Boolean(immediate) && mainWindow.isMinimized())
         await new Promise(resolve => setTimeout(resolve, 700))
         overlayControlsWindow.showInactive()
         await overlayControlsWindow.webContents.executeJavaScript(`document.querySelector('button[aria-label="打开 Syllable 客户端"]')?.click()`)
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`drag open guard deliberate: minimized=${mainWindow.isMinimized()}; visible=${mainWindow.isVisible()}`)
+        checks.record('deliberate', mainWindow.isVisible() && !mainWindow.isMinimized())
       }
       if (qaView === 'overlay-drag-performance' && overlayWindow && overlayControlsWindow) {
         showOverlay()
@@ -607,6 +619,11 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard') {
+        const result = checks.result()
+        qaLog(`qa acceptance: ${JSON.stringify(result)}`)
+        if (!result.passed) process.exitCode = 1
+      }
       clearTimeout(qaWatchdog)
       quitting = true
       app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)

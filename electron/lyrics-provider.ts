@@ -814,12 +814,16 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   })
   const topHasProvenHole = topTier.some(item => isProvenIncomplete(item, wide))
   const topHasDetailedEquivalent = topTier.some(item => wide.some(reference => reference !== item
-    && durationCompatible(item, reference) && timelineTextSimilarity(item, reference) >= .72
+    && durationCompatible(item, reference)
+    && parseTimedRows(item.syncedLyrics).map(row => row.normalizedText).join('')
+      === parseTimedRows(reference.syncedLyrics).map(row => row.normalizedText).join('')
     && timelineRows(reference.syncedLyrics).length >= timelineRows(item.syncedLyrics).length * 1.25))
   const topIsTimelineOutlier = wide.length >= 3 && topTier.some(item => isTimelineConsensusOutlier(item, wide))
   // Identity is a hard gate while the strongest exact result is healthy. A
   // wider pool is considered only when independent timeline evidence proves a
   // hole/outlier, or simple coverage metrics show clear truncation.
+  // Finer timing can reopen the pool only with identical ordered content;
+  // approximate similarity must not replace a stronger original with omissions.
   const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide : topTier
   const undominated = plausible.filter(item => !isProvenIncomplete(item, plausible))
   const viable = undominated.length ? undominated : plausible

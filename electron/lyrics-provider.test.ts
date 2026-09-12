@@ -510,6 +510,14 @@ describe('lyrics provider merging', () => {
     expect(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toContain('网易云翻译')
   })
 
+  it('does not let lower-identity line fragmentation displace a complete stronger original', () => {
+    const strong: LyricsResult = { source: 'LRCLIB · 搜索匹配 95%', confidence: 95, plainLyrics: null, matchedDurationMs: 40000,
+      syncedLyrics: '[00:01.00]first phrase ending one\n[00:11.00]second phrase ending two\n[00:21.00]third phrase ending three\n[00:31.00]fourth phrase ending four' }
+    const fragmented: LyricsResult = { ...strong, source: '网易云音乐 · 搜索匹配 78%', confidence: 78,
+      syncedLyrics: '[00:01.00]first phrase\n[00:06.00]ending one\n[00:11.00]second phrase\n[00:16.00]ending two\n[00:21.00]third phrase\n[00:26.00]ending three\n[00:31.00]fourth phrase\n[00:36.00]ending' }
+    expect(mergeProviderSet([strong, fragmented], 40000)?.source).toBe(strong.source)
+  })
+
   it('keeps translations anchored to short sung words instead of merging them into the previous sentence', () => {
     const primary: LyricsResult = { source: 'Spotify · Musixmatch', confidence: 100, plainLyrics: null,
       syncedLyrics: '[00:01.00]君に会いたい\n[00:06.00]ああ\n[00:09.00]ね\n[00:12.00]空を見上げる\n[00:20.00]明日へ歩こう' }

@@ -119,13 +119,20 @@ export function useWindowSync(syncLibrary = true) {
       }
       let publishedCurrentDocument = false
       if (syncLibrary && state.library !== previous.library) {
-        for (const [trackId, document] of Object.entries(state.library)) {
+        // The primary owns the library; auxiliary windows only render the
+        // current song. Do not clone every imported document into their queues.
+        const currentId = state.playback?.track?.id
+        const updates = isPrimaryWindow
+          ? currentId && state.library[currentId] ? [[currentId, state.library[currentId]] as const] : []
+          : Object.entries(state.library)
+        for (const [trackId, document] of updates) {
           if (previous.library[trackId] !== document) {
             channel.postMessage({ source: instanceId, type: 'library-upsert', document } satisfies SyncMessage)
             if (document === state.lyrics && trackId === state.playback?.track?.id) publishedCurrentDocument = true
           }
         }
-        for (const trackId of Object.keys(previous.library)) {
+        const removals = isPrimaryWindow ? currentId && previous.library[currentId] ? [currentId] : [] : Object.keys(previous.library)
+        for (const trackId of removals) {
           if (!(trackId in state.library)) channel.postMessage({ source: instanceId, type: 'library-remove', trackId } satisfies SyncMessage)
         }
       }

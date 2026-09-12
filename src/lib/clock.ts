@@ -6,8 +6,21 @@ import type { PlaybackSnapshot, SpotifyTransitionProfile } from '../types'
  */
 export class TransportClock {
   private anchor: PlaybackSnapshot | null = null
+  private rawAnchor: PlaybackSnapshot | null = null
   update(snapshot: PlaybackSnapshot | null) {
     if (snapshot && this.anchor && snapshot.observedAtMs < this.anchor.observedAtMs && snapshot.track?.id === this.anchor.track?.id) return
+    const raw = snapshot
+    if (snapshot && this.anchor && this.rawAnchor
+      && snapshot.track?.id === this.rawAnchor.track?.id
+      && snapshot.observedAtMs === this.rawAnchor.observedAtMs
+      && snapshot.positionMs === this.rawAnchor.positionMs
+      && snapshot.isPlaying === this.rawAnchor.isPlaying) {
+      // Metadata/snapshot broadcasts are not new transport observations. Keep
+      // the once-corrected position while accepting updated duration/profile.
+      this.anchor = { ...snapshot, positionMs: this.anchor.positionMs }
+      this.rawAnchor = raw
+      return
+    }
     if (snapshot && this.anchor && snapshot.track?.id === this.anchor.track?.id && snapshot.isPlaying && this.anchor.isPlaying) {
       const projected = this.position(snapshot.observedAtMs)
       const drift = snapshot.positionMs - projected
@@ -17,6 +30,7 @@ export class TransportClock {
       if (Math.abs(drift) < 1200) snapshot = { ...snapshot, positionMs: projected + drift * .55 }
     }
     this.anchor = snapshot
+    this.rawAnchor = raw
   }
   position(now = Date.now()) {
     if (!this.anchor) return 0

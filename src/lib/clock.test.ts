@@ -46,6 +46,35 @@ describe('TransportClock', () => {
     expect(clock.position(2_000)).toBe(45_000)
   })
 
+  it('does not apply smoothing again when the same sample is rebroadcast with metadata', () => {
+    const clock = new TransportClock()
+    const track = { id: 'x', name: 'x', artist: 'a', album: 'b', coverUrl: '', durationMs: 100_000 }
+    clock.update({ track, positionMs: 10_000, observedAtMs: 1_000, isPlaying: true })
+    const sample = { track, positionMs: 10_800, observedAtMs: 2_000, isPlaying: true }
+    clock.update(sample)
+    const expected = clock.position(3_000)
+    for (let index = 0; index < 10; index += 1) clock.update({ ...sample, transitionResolved: true, track: { ...track } })
+    expect(clock.position(3_000)).toBe(expected)
+    clock.update({ ...sample, track: { ...track, durationMs: 11_000 } })
+    expect(clock.position(3_000)).toBe(11_000)
+  })
+
+  it('still accepts pause, seek and a reset at the same observation timestamp', () => {
+    const clock = new TransportClock()
+    const track = { id: 'x', name: 'x', artist: 'a', album: 'b', coverUrl: '', durationMs: 100_000 }
+    const sample = { track, positionMs: 10_800, observedAtMs: 2_000, isPlaying: true }
+    clock.update({ ...sample, positionMs: 10_000, observedAtMs: 1_000 })
+    clock.update(sample)
+    clock.update({ ...sample, isPlaying: false })
+    expect(clock.position(3_000)).toBe(10_800)
+    clock.update({ ...sample, positionMs: 50_000 })
+    expect(clock.position(3_000)).toBe(51_000)
+    clock.update(null)
+    expect(clock.position(3_000)).toBe(0)
+    clock.update(sample)
+    expect(clock.position(3_000)).toBe(11_800)
+  })
+
   it('delays lyrics for a positive calibration offset', () => {
     expect(calibratedPosition(10_000, 500)).toBe(9_500)
     expect(calibratedPosition(10_000, -500)).toBe(10_500)

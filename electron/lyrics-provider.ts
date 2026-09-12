@@ -557,10 +557,6 @@ function isTimelineConsensusOutlier(result: LyricsResult, candidates: LyricsResu
     .some(right => (offsetDistance(left, right) ?? Infinity) <= 1200))
 }
 
-function lrcTimeMs(timestamp: string) {
-  return timestampMs(timestamp)
-}
-
 function lrcTimestamp(milliseconds: number) {
   const safe = Math.max(0, Math.round(milliseconds / 10) * 10)
   const minutes = Math.floor(safe / 60_000)
@@ -577,30 +573,58 @@ function lrcTimestamp(milliseconds: number) {
  */
 export function alignSupplementalTimeline(track: SupplementalLyrics, owner: LyricsResult, base: LyricsResult): SupplementalLyrics {
   if (owner === base || !owner.syncedLyrics || !base.syncedLyrics) return track
-  const ownerRows = timelineRows(owner.syncedLyrics)
-  const baseRows = timelineRows(base.syncedLyrics)
+  // Keep short original rows too: they can own real translations even though
+  // they are intentionally excluded from whole-song similarity scoring.
+  const rows = (lrc: string) => parseTimedRows(lrc).map(row => ({ timeMs: row.timeMs, text: row.normalizedText, rawText: row.text }))
+  const ownerRows = rows(owner.syncedLyrics)
+  const baseRows = rows(base.syncedLyrics)
   // Repeated choruses require a globally monotonic alignment. The previous
   // greedy matcher fell back to an earlier target when a unique verse appeared
   // after an extra repeated line, producing a backwards translation timeline.
   const anchors = lcsTimelineAnchors(ownerRows, baseRows).map(anchor => ({
+    ...anchor,
     sourceMs: ownerRows[anchor.subjectIndex].timeMs,
     targetMs: baseRows[anchor.referenceIndex].timeMs
   }))
-  if (anchors.length < 3) return track
-  const deltas = anchors.map(anchor => anchor.targetMs - anchor.sourceMs).sort((left, right) => left - right)
-  const medianDelta = deltas[Math.floor(deltas.length / 2)] ?? 0
-  const remap = (sourceMs: number) => {
-    const nearest = anchors.reduce((best, anchor) => Math.abs(anchor.sourceMs - sourceMs) < Math.abs(best.sourceMs - sourceMs) ? anchor : best)
-    // Translation timestamps normally equal their owner's original row. Use
-    // that line-level anchor when close, retaining a tiny provider sub-offset.
-    return Math.abs(nearest.sourceMs - sourceMs) <= 2500
-      ? nearest.targetMs + sourceMs - nearest.sourceMs
-      : sourceMs + medianDelta
+  const byOwner = new Map(anchors.map(anchor => [anchor.subjectIndex, anchor]))
+  // A base row may combine several provider rows. Recover those translations
+  // only when the complete ordered original text proves the grouping, not
+  // merely because the timestamps happen to be nearby.
+  for (const anchor of anchors) {
+    for (let start = Math.max(0, anchor.subjectIndex - 3); start <= anchor.subjectIndex; start += 1) {
+      for (let end = anchor.subjectIndex; end < Math.min(ownerRows.length, start + 4); end += 1) {
+        if (start === end) continue
+        const group = ownerRows.slice(start, end + 1)
+        if (group.map(row => row.text).join('') !== baseRows[anchor.referenceIndex].text) continue
+        if (group.some((_, offset) => {
+          const existing = byOwner.get(start + offset)
+          return existing && existing.referenceIndex !== anchor.referenceIndex
+        })) continue
+        for (let index = start; index <= end; index += 1) {
+          byOwner.set(index, { ...anchor, subjectIndex: index, sourceMs: ownerRows[start].timeMs })
+        }
+      }
+    }
   }
-  const syncedLyrics = track.syncedLyrics.split(/\r?\n/).map(line => line.replace(LRC_TIMESTAMP, timestamp => {
-    const sourceMs = lrcTimeMs(timestamp)
-    return Number.isFinite(sourceMs) ? lrcTimestamp(remap(sourceMs)) : timestamp
-  })).join('\n')
+  const remap = (sourceMs: number) => {
+    let ownerIndex = -1
+    for (let index = 0; index < ownerRows.length; index += 1) {
+      if (ownerRows[index].timeMs <= sourceMs + 200) ownerIndex = index
+      else break
+    }
+    const anchor = byOwner.get(ownerIndex)
+    if (!anchor) return null
+    // A translated phrase belongs to its original provider row, not the
+    // nearest shared anchor. Never extrapolate a divergent verse from a
+    // whole-song median offset or snap an extra chorus to the beginning.
+    const mapped = anchor.targetMs + sourceMs - anchor.sourceMs
+    const targetEnd = baseRows[anchor.referenceIndex + 1]?.timeMs
+    return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? mapped : null
+  }
+  const syncedLyrics = parseTimedRows(track.syncedLyrics).flatMap(row => {
+    const mapped = remap(row.timeMs)
+    return mapped == null ? [] : [`${lrcTimestamp(mapped)}${row.text}`]
+  }).join('\n')
   const alignedTo = base.source.startsWith('Spotify') ? 'Spotify' : '主歌词'
   return { ...track, syncedLyrics, source: `${track.source} · 对齐${alignedTo}时轴` }
 }

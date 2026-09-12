@@ -457,6 +457,28 @@ describe('lyrics provider merging', () => {
     expect(aligned.syncedLyrics).toContain('[00:05.00]副歌')
     expect(aligned.syncedLyrics).toContain('[00:09.00]第二段')
     expect(aligned.syncedLyrics).toContain('[00:13.00]末尾副歌')
+    expect(aligned.syncedLyrics).not.toContain('多出的副歌')
+  })
+
+  it('rejects translations of divergent original rows even between matching anchors', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]shared opening\n[00:08.00]different bridge\n[00:16.00]shared ending\n[00:22.00]last chorus', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:03.00]shared opening\n[00:10.00]another bridge\n[00:18.00]shared ending\n[00:24.00]last chorus', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source, syncedLyrics: '[00:01.00]开头\n[00:08.00]不属于主歌词的段落\n[00:16.00]结尾\n[00:22.00]副歌' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]开头\n[00:18.00]结尾\n[00:24.00]副歌')
+  })
+
+  it('preserves delayed translation phrases within a matched owner row', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]first long sentence\n[00:12.00]second sentence\n[00:20.00]last sentence', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:03.00]first long sentence\n[00:14.00]second sentence\n[00:22.00]last sentence', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source, syncedLyrics: '[00:01.00]第一句上半\n[00:07.00]第一句下半\n[00:12.00]第二句' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]第一句上半\n[00:09.00]第一句下半\n[00:14.00]第二句')
+  })
+
+  it('preserves split owner phrases when their combined original exactly matches a base row', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]first longer phrase\n[00:05.00]ending\n[00:12.00]next sentence\n[00:20.00]last sentence', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:03.00]first longer phrase ending\n[00:14.00]next sentence\n[00:22.00]last sentence', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source, syncedLyrics: '[00:01.00]第一句上半\n[00:05.00]第一句结尾\n[00:12.00]下一句' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]第一句上半\n[00:07.00]第一句结尾\n[00:14.00]下一句')
   })
 
   it('prefers NetEase when multiple synchronized Chinese translations exist', () => {

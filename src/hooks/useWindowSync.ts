@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import type { AppSettings, LyricsDocument } from '../types'
 import { useAppStore } from '../store/useAppStore'
+import { receiveWindowDocument } from '../lib/window-document'
 
 type SyncMessage =
   | { source: string; type: 'settings'; settings: AppSettings }
@@ -63,7 +64,7 @@ export function useWindowSync(syncLibrary = true) {
         useAppStore.setState(state => ({
           settings: message.settings,
           ...(syncLibrary && message.document && documentMatches ? {
-            library: { ...state.library, [message.document.trackId]: message.document },
+            library: isPrimaryWindow ? { ...state.library, [message.document.trackId]: message.document } : {},
             lyrics: message.document
           } : {})
         }))
@@ -85,10 +86,10 @@ export function useWindowSync(syncLibrary = true) {
       }
       else if (message.type === 'library-upsert') {
         const currentTrackId = useAppStore.getState().playback?.track?.id
-        useAppStore.setState(state => ({
-          library: { ...state.library, [message.document.trackId]: message.document },
-          lyrics: currentTrackId === message.document.trackId ? message.document : state.lyrics
-        }))
+        useAppStore.setState(state => {
+          if (!isPrimaryWindow && message.document.trackId !== currentTrackId && Object.keys(state.library).length === 0) return state
+          return receiveWindowDocument(isPrimaryWindow, state.library, state.lyrics, message.document, currentTrackId)
+        })
       } else useAppStore.setState(state => {
         const library = { ...state.library }; delete library[message.trackId]
         return { library, lyrics: state.lyrics?.trackId === message.trackId ? null : state.lyrics }

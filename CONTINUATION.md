@@ -1,6 +1,11 @@
-# Syllable continuation checkpoint — 2026-09-12 / 0.4.18 candidate
+# Syllable continuation checkpoint — 2026-09-12 / 0.4.19 candidate
 
-## Latest source: 0.4.18 (candidate, not fully accepted)
+## Latest source: 0.4.19 (candidate, not fully accepted)
+
+- Full216/216 suite passed (183 deterministic +33 online); session58617 exit0. Build/ZIP/NSIS session89437 exit0. Latest memory and window-snapshot/broadcast fixes now packaged. Fresh extraction release/verified-0419-20260912-005000 passes scripts/verify-package.cjs; app.asar SHA256 e22b30a09b53864420a20955ab929187273202e8c4d6e3cdaa83b01a4e227447.
+- ZIP181092097 bytes SHA256 19A8DA4D46522176171BF7BAD95E79F3EB48912A422D5AB606F4FEF27E2C4E88; Setup134955430 bytes SHA256 38DD1A1C6B147626EB5DAEDFEF43093F9E4C68C9205D97EC0CDF024785F4508E. README removed obsolete duration-ratio mapping and0.4.15 install recommendation, labels prior evidence historical.
+- Packaged internal secondary QA session7379 terminal0: overlay-controls hover visible, leave hidden, open-client visible, close/reopen passed; lyrics-scroll3284->3104 for target3104.3 passed=true. Logs qa-0419-overlay-controls.log and qa-0419-lyrics-scroll.log. These are synthetic DOM/IPC, not physical pointer acceptance. No Spotify playback commands.
+- Stopped only exact-path0.4.18 QA instance; launched0.4.19 from verified-0419-20260912-005000/Syllable.exe with isolated .qa-0419-profile, secondary-test, force-overlay and qa-0419-live.log. Revalidate processes and actual window before interaction. Next real secondary-pointer tests and actual cross-window null/large-library acceptance, performance and audible sync. No active build/test handles.
 
 - Latest source-only sync fix reproduced with failing integration test first: subscription's else-if suppressed lyrics-view whenever library changed simultaneously. Now broadcasts distinct current/empty/transient view after library deltas, while skipping duplicate payload if exact current document was already sent by upsert. Integration covers null clear, normal one-copy save and transient view distinct from persistent library. Full183 offline passed,33 online skipped; build passed(session67703 exit0). Need0.4.19 or uniquely named candidate bundling all memory/snapshot/broadcast fixes, then true Electron window tests. Running0.4.18 remains older source. No active handles.
 

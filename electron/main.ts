@@ -10,6 +10,7 @@ import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { createQaChecks } from './qa-checks'
+import { overlayShape } from './overlay-shape'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
 // process removes most of the per-window Chromium overhead while preserving GPU
@@ -306,23 +307,7 @@ function applyOverlayShape() {
   if (!overlayWindow || overlayWindow.isDestroyed() || process.platform !== 'win32') return
   if (disableOverlayShapeForQa) { overlayWindow.setShape([]); return }
   const bounds = overlayWindow.getBounds()
-  const edge = 8
-  const activeRegions = overlayClickThrough ? [] : overlayHitRegions
-  const padded = activeRegions.map(region => {
-    const x = Math.max(0, Math.floor(region.x - 10))
-    const y = Math.max(0, Math.floor(region.y - 8))
-    const right = Math.min(bounds.width, Math.ceil(region.x + region.width + 10))
-    const bottom = Math.min(bounds.height, Math.ceil(region.y + region.height + 8))
-    return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) }
-  })
-  const rects = [
-    ...padded,
-    { x: 0, y: 0, width: bounds.width, height: Math.min(edge, bounds.height) },
-    { x: 0, y: Math.max(0, bounds.height - edge), width: bounds.width, height: Math.min(edge, bounds.height) },
-    { x: 0, y: 0, width: Math.min(edge, bounds.width), height: bounds.height },
-    { x: Math.max(0, bounds.width - edge), y: 0, width: Math.min(edge, bounds.width), height: bounds.height }
-  ]
-  overlayWindow.setShape(rects)
+  overlayWindow.setShape(overlayShape(bounds.width, bounds.height, overlayHitRegions, overlayClickThrough))
 }
 
 function startOverlayMouseTracking() {

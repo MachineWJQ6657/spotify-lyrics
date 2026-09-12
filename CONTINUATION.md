@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.21 (candidate, not fully accepted)
 
+- SOURCE shape clipping: extracted overlayShape helper, drops nonfinite/nonpositive/fully-offscreen text rectangles instead of manufacturing1px out-of-bounds areas; intersects padded partial regions, preserves bounded native resize edges and clickthrough behavior. Four geometry regressions;202 offline pass,33 online skipped; build/diff-check pass. Secondary built-source overlay-hit-regions13274 exit0, qa-0421-shape.log passed=true764->180->764 width at fixed820x220. This is observer/IPC shape smoke plus unit geometry, NOT native physical hit test or transparency acceptance. No active handles/Spotify commands. Still unbundled after0.4.21, keep candidate distinct on next build.
+
 - SOURCE overlay hit-region refresh: now observes primary/secondary elements as well as fixed surface; effect keys include actual texts/track IDs and fontWeight, preventing stale region publication after async translation/text changes or late font metrics while container size stays fixed.198 offline and build pass.
 - Added internal overlay-hit-regions QA: narrows primary to180px while preserving its height and outer surface820x220, checks main-process region update, restores inline style. Final67622 exit0, qa-0421-hit-final.log passed=true: primary764x127 ->180x127 then restored764x127, same origin28,35.5; external surface unchanged. This proves built-source observer/IPC update, NOT native physical clickthrough. Initial49796 test changed height too; final fixed-size test is stronger. Both exited; no active handles. SOURCE changes not in shipped0.4.21; older candidate from prior turn not modified. No Spotify commands.
 

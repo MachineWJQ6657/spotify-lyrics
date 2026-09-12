@@ -117,14 +117,19 @@ export function useWindowSync(syncLibrary = true) {
           scheduleSnapshotRetry()
         }
       }
+      let publishedCurrentDocument = false
       if (syncLibrary && state.library !== previous.library) {
         for (const [trackId, document] of Object.entries(state.library)) {
-          if (previous.library[trackId] !== document) channel.postMessage({ source: instanceId, type: 'library-upsert', document } satisfies SyncMessage)
+          if (previous.library[trackId] !== document) {
+            channel.postMessage({ source: instanceId, type: 'library-upsert', document } satisfies SyncMessage)
+            if (document === state.lyrics && trackId === state.playback?.track?.id) publishedCurrentDocument = true
+          }
         }
         for (const trackId of Object.keys(previous.library)) {
           if (!(trackId in state.library)) channel.postMessage({ source: instanceId, type: 'library-remove', trackId } satisfies SyncMessage)
         }
-      } else if (syncLibrary && state.lyrics !== previous.lyrics) {
+      }
+      if (syncLibrary && state.lyrics !== previous.lyrics && !publishedCurrentDocument) {
         channel.postMessage({
           source: instanceId,
           type: 'lyrics-view',

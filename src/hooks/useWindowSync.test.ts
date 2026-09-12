@@ -56,6 +56,37 @@ async function start() {
 }
 
 describe('cross-window message and timer integration', () => {
+  it('publishes an explicit cleared view even when the library changes in the same update', async () => {
+    window.location.hash = '#/'
+    const { useWindowSync } = await import('./useWindowSync')
+    useWindowSync()
+    const channel = TestChannel.current
+    const previous = harness.state
+    harness.state = { ...previous, lyrics: null, library: { unrelated: doc('unrelated') } }
+    for (const listener of harness.listeners) listener(harness.state, previous)
+    expect(channel.postMessage.mock.calls.map(call => call[0].type)).toEqual(['library-upsert', 'lyrics-view'])
+    expect(channel.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({ trackId: 'new', document: null })
+  })
+
+  it('sends one copy for a current upsert but retains a distinct transient view', async () => {
+    window.location.hash = '#/'
+    const { useWindowSync } = await import('./useWindowSync')
+    useWindowSync()
+    const channel = TestChannel.current
+    const saved = doc('new')
+    let previous = harness.state
+    harness.state = { ...previous, lyrics: saved, library: { new: saved } }
+    for (const listener of harness.listeners) listener(harness.state, previous)
+    expect(channel.postMessage.mock.calls.map(call => call[0].type)).toEqual(['library-upsert'])
+    channel.postMessage.mockClear()
+    previous = harness.state
+    const transient = { ...doc('new'), updatedAt: 2 }
+    harness.state = { ...previous, lyrics: transient, library: { ...previous.library, other: doc('other') } }
+    for (const listener of harness.listeners) listener(harness.state, previous)
+    expect(channel.postMessage.mock.calls.map(call => call[0].type)).toEqual(['library-upsert', 'lyrics-view'])
+    expect(channel.postMessage.mock.calls.at(-1)?.[0].document).toBe(transient)
+  })
+
   it('acknowledges empty snapshots, clears old lyrics and stops retrying', async () => {
     const { channel, target } = await start()
     channel.deliver({ type: 'snapshot', target, trackId: 'new', settings: {}, document: null })

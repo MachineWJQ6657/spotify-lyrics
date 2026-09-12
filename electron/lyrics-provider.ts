@@ -937,7 +937,7 @@ export function stripTimedTrackMetadata(value: string | null | undefined, track:
     const timeMs = timestampMs(timestamps[0]!)
     if (!Number.isFinite(timeMs) || timeMs > 15_000) return true
     const text = raw.replace(LRC_TIMESTAMP, '').trim()
-    if (labelledMetadata.test(text)) return false
+    if (labelledMetadata.test(text) || CREDIT_LINE.test(text) || /^(?:词|詞|曲)\s*[:：]/.test(text)) return false
     const normalizedText = normalize(text)
     const containsTitle = titleVariants.some(title => normalizedText.includes(title))
     const containsArtist = artistVariants.some(artist => normalizedText.includes(artist))
@@ -1331,7 +1331,8 @@ async function fetchKugou(track: NonNullable<PlaybackSnapshot['track']>, signal?
         .map(row => recordingEdition(row.text)).find(edition => edition !== 'unspecified')
       if (headerEdition && headerEdition !== recordingEdition(`${track.name} ${track.album}`)) return null
       return {
-        syncedLyrics, plainLyrics: null, source: `酷狗音乐 · 搜索匹配 ${match.score}%`, confidence: match.score,
+        syncedLyrics: stripTimedTrackMetadata(syncedLyrics, { name: match.song.SongName, artist: match.song.SingerName }),
+        plainLyrics: null, source: `酷狗音乐 · 搜索匹配 ${match.score}%`, confidence: match.score,
         matchedDurationMs: lyricCandidate.duration || (match.song.Duration ?? 0) * 1000
       } satisfies LyricsResult
   }))

@@ -8,6 +8,15 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('removes provider-native headers and early short-form credits, retaining real lyric phrases', () => {
+    const cleaned = stripTimedTrackMetadata('[00:00.10]Same Blue - Official髭男dism\n[00:01.00]词：Composer\n[00:02.00]曲：Composer\n[00:10.00]曲がり角で待っている\n[00:20.00]Same Blue',
+      { name: 'Same Blue', artist: 'Official髭男dism' })
+    expect(cleaned).not.toContain('Official髭男dism')
+    expect(cleaned).not.toContain('Composer')
+    expect(cleaned).toContain('曲がり角で待っている')
+    expect(cleaned).toContain('[00:20.00]Same Blue')
+  })
+
   it('rejects edition mismatches even when title, artist and duration match', () => {
     const query = { track: 'Same Blue', artist: 'Artist', album: 'Same Blue', durationMs: 237836 }
     for (const edition of ['Live at Stadium 2025', 'Instrumental', 'Acoustic', 'Remix', '现场版']) {

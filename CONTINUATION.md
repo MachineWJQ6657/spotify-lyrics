@@ -1,6 +1,11 @@
-# Syllable continuation checkpoint — 2026-09-11 / 0.4.16 candidate
+# Syllable continuation checkpoint — 2026-09-12 / 0.4.17 candidate
 
-## Latest source: 0.4.16 (candidate, not fully accepted)
+## Latest source: 0.4.17 (candidate, not fully accepted)
+
+- 0.4.17 packaging finished exit0 (session33011). ZIP181091341 bytes SHA256 2F3FB12AB58276A7979C799C25C8CC03D357BB96AE47B671F865F40B60565D32; Setup134954726 bytes SHA256 AEC3718D208C52D72BBEE86671D71592DC378439E3FB83154C6F7962B17E8FA0. Asar version and latest provider code verified.
+- Running candidate: release/verified-0417-20260912-002600/Syllable.exe, isolated .qa-0417-profile, secondary-test, force-overlay, qa-0417-live.log. Main screenshot/accessibility verified0.4.17 using sky window583863204 and exact candidate path. Secondary area(-1707,-44,1707,1020), scale1.5. Spotify remains paused at99100ms on tayori - 春を待つ. Provider97%, fetched three tracks in3155ms. No playback commands sent. Main rendering observed; overlay actual controls/alpha/drag NOT yet accepted.
+- New visible QA bug: tail credits 母带工程师 / 混音工程师 become original lyrics and corrupt romanization with Han retained. Extend precise CREDIT_LINE role labels and tests next. Also connection badge wraps at narrow main width. QA log scale1.0648 is merely duration ratio, not applied scale1; rename misleading field. Latest package still has these defects.
+- sky.launch_app unexpectedly opened the installed old executable despite candidate path. Those newly launched old processes were identified by exact path and stopped. Exact-path Start-Process with the same isolated profile then exposed candidate correctly. Do not use sky.launch_app for this candidate path again. No active build/test handles remain.
 
 - 2026-09-12 00:21: Same Blue retrieval now passes both the existing >30 row/Chinese coverage test and exact ordered-content equality between localized and original-script artist queries, WITHOUT weakening assertions. Added title-only LRCLIB retrieval only for mixed Han/Latin artists; identity promotion requires identical >=8-character Latin skeleton, shared Han, exact title+album and duration within1.5s. No song-specific alias table. Deduplicated redundant LRCLIB search/get queries. First complete run192/192 passed.
 - Then added an exact-get edition guard: cleaned Live/Acoustic queries cannot accept a contradictory studio payload simply because /get succeeded. Its new integration test passed; production build passed. Final full rerun session92384 finished exit0:193/193 tests passed (161 offline +32 real-provider cases). No active handles. Next package under0.4.17 or another unique version and secondary-screen acceptance, then audible synchronization validation. Existing0.4.16 package is still stale.

@@ -1,0 +1,22 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+qa-*.png
+.qa-user-data-*/
+.DS_Store
+
+# Local recordings, test profiles, extracted executables and recovery archives
+/.qa*/
+/qa-*/
+/.tools/
+/checkpoints/
+/user-test-*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.dmp

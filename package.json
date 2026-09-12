@@ -1,0 +1,70 @@
+{
+  "name": "syllable",
+  "version": "0.4.16",
+  "private": true,
+  "description": "A multilingual floating lyrics companion for Spotify",
+  "author": "Syllable Contributors",
+  "main": "./out/main/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit && electron-vite build",
+    "dist": "npm run build && electron-builder --win",
+    "preview": "electron-vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "koffi": "^2.16.3",
+    "kuroshiro": "^1.2.0",
+    "kuroshiro-analyzer-kuromoji": "^1.1.0",
+    "libspotifyctl": "^0.3.4",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "wanakana": "^5.3.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^5.0.0"
+  },
+  "build": {
+    "appId": "studio.syllable.desktop",
+    "productName": "Syllable",
+    "artifactName": "Syllable-${version}-Portable.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/libspotifyctl/**/*",
+      "node_modules/koffi/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis", "zip"]
+    },
+    "nsis": {
+      "artifactName": "Syllable-${version}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

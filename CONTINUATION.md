@@ -1,0 +1,274 @@
+# Syllable continuation checkpoint — 2026-09-11 / 0.4.16 candidate
+
+## Latest source: 0.4.16 (candidate, not fully accepted)
+
+- 2026-09-12 repository import: local folder initialized as Git, origin https://github.com/MachineWJQ6657/spotify-lyrics.git; original remote README commit preserved as parent. Only source/tests/build icons/docs tracked; local QA profiles, screenshots, logs, release outputs and checkpoints excluded. Git's configured localhost proxy was unavailable; use per-command `git -c http.proxy= -c https.proxy=` for network operations, without changing global proxy configuration.
+- New Same Blue evidence: localized artist query sometimes chose Kugou Live at Stadium 2025 (243000 ms) while original-script artist fetched LRCLIB studio (237837 ms). Added edition mismatch rejection in search scoring and early downloaded Kugou track headers. After fix, localized query returned studio Kugou237871, not live243000. Added offline edition tests (158 offline now pass).
+- The new online comparison test `compares Same Blue localized and original artist recordings by ordered text` currently FAILS deliberately: Kugou includes untranslated header/credits and omits three repeated clauses that LRCLIB includes. Existing Same Blue >30-row check is still pending. Next improve localized artist retrieval without hardcoded per-song aliases and investigate repeated clauses; do not mark full online suite green. Both targeted online commands finished; no active online handles.
+
+- Latest source-only update 2026-09-12 00:11: Provider revision 29. Bansanka difference was NOT short standalone rows: four full rows omitted tandem repetitions (no rows under three characters in either provider). Added conservative repairRepeatedWords: two independent expanded rows, same-duration recordings within 2 s, >=.97 text similarity, stable anchors within 700 ms, >=80 confidence against100, only exact tandem expansions; conflicting variants and Spotify originals remain untouched. Preserve base timestamps, metadata, clearing rows. Offline tests cover these protections. Online Bansanka now validates >=574 normalized characters and all four repeated clauses, not 55 fragmented rows; exact 42-row timing retained.
+- Removed unsafe whole-song duration-ratio scaling from src/lib/clock.ts. Endpoints alone cannot distinguish fades/edits from tempo. No speed recipe now means native 1:1 media position; explicit speed automation and calibration remain. New regression covers intro/middle/outro with a fade-only profile. This fixes a mathematical source of accumulating error, NOT proof of audible synchronization across songs. Previously inferred actual tempo changes without explicit metadata may still require another reliable reference.
+- Validation: 156 offline passed, 31 online skipped. Real-provider run 30/31 passed; Same Blue remains the lone failure (26 long NetEase rows vs >30 assertion). DO NOT lower that expectation without normalized-text comparison with a second full source. Prior 26-row sample itself covers 92.96% of duration but completeness unproven. Latest source is not packaged/launched; existing 0.4.16 ZIP/installer lack transport, repeated-word and clock fixes. Diagnostics now cap the character LCS table at 1,000,000 cells.
+- No active test handles: full online session 37461 finished exit1. Next: compare Same Blue against a second full recording-matched source; validate audible clock on secondary display; package with a unique new version after acceptance. Do not claim universal sync or all lyrics fixed.
+
+- New diagnostic evidence (2026-09-12 00:04): Bansanka LRCLIB exact has 558 normalized characters in 42 rows; NetEase has 574 in 58 rows. Character LCS shows LRCLIB is a strict subsequence: left-only empty; NetEase-only 16 characters `ないない会い会いないないないない`. Similarity 0.98584, yet both isProvenIncomplete directions return false. timelineRows currently filters normalized length <3, a likely blind spot for these short repeats. Do not just lower minimumLines. Next investigate their row timestamps and add a constrained regression for short repeated content before altering selection.
+- Added opt-in provider-content-comparison diagnostics (SYLLABLE_PROVIDER_DIAGNOSTICS=1; vitest --silent=false is required to see passing logs). Diagnostics include character LCS differences; this code is source-only and should be bounded/moved to a QA helper before shipping if large provider payloads are possible. Same Blue failing sample had only one available provider, so no cross-provider comparison yet. Latest targeted run both failures reproduced; no test handle remains active.
+
+- Latest 2026-09-12 source-only change AFTER the candidate package: TransportGate now starts its 250 ms confirmation when a new identity is first observed, resets on empty/outgoing/other identity, and main-process callbacks verify the transaction id before confirming. Added interruption regressions. Offline 151 pass, 31 online skipped; production build passed. Existing 0.4.16 release artifacts DO NOT contain this last change and must be rebuilt into a new uniquely identified candidate before launch.
+
+- 2026-09-12 update: packaging handle 12847 finished exit 0; portable ZIP and installer exist. Online rerun 81399 finished exit 1: 29/31 pass. Same Blue selected NetEase 78%, exact duration 237836, 26 long original rows and 26 Chinese/romaji rows, last 221094 ms (92.96% tail); no transient flag. Bansanka returned 42 rows against minimum 55. This may be grouping rather than missing content: compare full normalized text and ordered sections before changing thresholds. Preserve failing expectations until evidence supports a stronger content-based oracle. No handles remain active from those two commands.
+
+- Provider revision 28. Prior 0.4.15 sections below are historical package evidence, not proof for this candidate.
+- Fixed local Spotify auto-generated lyric IDs being mistaken for user imports merely because both start with local-. Automatic stale timelines now refresh, while explicitly edited tracks remain protected.
+- Persist edit ownership across refreshes; cached romanization repair runs only on Japanese originals and respects user-owned romanization. Fallback enrichment no longer mutates a published array.
+- Provider cache keys now include album; supplemental alignment uses monotonic LCS anchors; non-Chinese supplemental candidates prefer coverage over provider order. Sparse romanization cannot claim several original rows as covered.
+- Pure-kanji metadata can use original lyric language to choose the Japanese grid. CSS smoothing is set to auto; a visible improvement on Windows is NOT established by this property change alone.
+- Validation: TypeScript/build passed; offline 150 passed, 31 online skipped. Full online run: 180 passed, 1 failed (Same Blue returned 26 rows versus required >30). Isolated retry passed. Do not weaken the threshold or call this resolved without examining failing source data.
+- Added source/transient/duration/text/coverage diagnostics to the Same Blue assertion for the next failure. Online rerun handle 81399 and packaging handle 12847 were active when this section was saved; poll those exact handles, inspect output/artifacts if absent.
+- Internal drift of ±1–2 ms only establishes consistency of the sampled transport clock, NOT audible word/line accuracy. Audio/reference timing verification remains outstanding. The packaged 0.4.16 gate still measures time since command start; the latest source correction above is not yet packaged.
+- Next: finish online failure investigation, inspect candidate package, perform secondary-display acceptance, save a new checkpoint. Do not claim that 0.4.16 has been launched or visually accepted without observing it.
+
+If this Codex run is interrupted, continue from this file. Do not discard existing release/checkpoint artifacts or user data.
+
+## Current 0.4.15 state
+
+- Current executable: `release/verified-0415-final-20260911-113456/Syllable.exe`; launch only this or a newer verified extraction. Keep `release/verified-0413-final-20260911-004445/Syllable.exe` as the stable rollback.
+- Current live launch: `--syllable-secondary-test --syllable-force-overlay --syllable-qa-log=D:\Projects\spotify-lyrics\qa-0415-final-live.log`. All visual/interaction QA stays on the secondary display. Never pause, seek, skip, close, or otherwise manipulate Spotify.
+- Source/EXE version is 0.4.15 and Provider/cache revision is 27.
+- Offline suite: 141 passed, 29 online cases skipped by default. Full real-provider suite: 170/170 passed. TypeScript, production build, ZIP, NSIS installer, and clean extraction passed.
+- ZIP SHA-256: `27D1753855DD8F673ACB0B1B33991D3F3355A5AD9DCF4AF8EAA86EEE53257B43`; installer SHA-256: `0F970120D853D9F23F555A98EA71B0612CAFD74A85DF8E4E64FA4A5C94F6F6CF`.
+- Source-only checkpoint: `checkpoints/Syllable-0.4.15-source-20260911-114152.zip` (65 entries, no missing/extra/empty files), SHA-256 `4AF55D0E4FDA42F6D5D58E9A90AEA226B35EF6A930356DB901DCAC61E464072F`.
+- Six clean-package secondary-display cases passed: main UI, overlay controls, drag/performance, drag-open guard, font metrics, and lyrics scroll/follow. Use `qa-0415-final-*` logs/screenshots. Scroll explicitly reports `passed=true`; overlay corners are fully transparent.
+- Current playing-state 20.3-second sample: four processes, 1.172 CPU-seconds, 377.7 MB private commit after a 66 MB startup drop, 73.9 MB working-set drop, zero LevelDB changes, every process responsive, and no fatal/unresponsive/error log match.
+- Live `ヨルシカ — エイミー` evidence: lyrics request began from a 212906 ms Spotify media item, returned 38 LRCLIB rows after 3408 ms, aligned NetEase Chinese and romanization to the primary timeline, and maintained ±1 ms clock drift.
+
+## Most important fixes in 0.4.15
+
+1. Async lyric ownership and partial-result safety
+   - Renderer requests are keyed by track id, effective duration bucket, Provider context, and retry token. Every stage, including cached romanization enrichment, checks ownership before publishing.
+   - Cached/provider originals render before Kuromoji finishes. Transient results broadcast to the overlay as memory-only `lyrics-view` state and never replace stable library data or user edits.
+   - A token-owned map permits exactly one 12-second transient retry; stale cleanup cannot delete or rearm a newer retry. Manual/automatic retry bypasses the stable Provider cache only for the advancing retry generation.
+   - After four seconds without a positive SMTC duration, the current identity can issue a durationless fallback. The clock treats unknown duration as unbounded instead of clamping progress to zero.
+
+2. One transport transaction for every control surface
+   - Main window, overlay controls, tray, next, previous, play/pause, and seek share a main-process `TransportGate`. A skip remains pending until a different non-empty identity is stable for 250 ms or the six-second watchdog releases it.
+   - Previous atomically selects restart-at-zero when current position is above three seconds; its short lock prevents same-tick duplicates. Ambiguous native timeouts retain the transaction rather than trying another backend.
+   - During a local skip, empty SMTC snapshots retain the last non-empty identity. Worker and UI optimistic state roll back only for their own failed transaction.
+
+3. Expanded regression and package evidence
+   - Nine deterministic transport-gate tests cover duplicate directions/backends/windows, settlement, timeout, failure ownership, and previous semantics. Local-worker tests cover empty-snapshot retention and failure rollback.
+   - The real-provider corpus now includes Spotify-localized `Same Blue — Official鬍子男dism` at 237836 ms and asserts Japanese phrase/row/tail completeness plus NetEase Chinese coverage.
+   - Final source build: main 134.70 kB, local Spotify chunk 38.04 kB, preload 3.39 kB, renderer usePlayback 68.94 kB, App 101.64 kB.
+
+## 0.4.14 historical state
+
+- Current executable: `release/verified-0414-final3-20260911-105611/Syllable.exe`; launch only this or a newer verified extraction. Keep 0.4.13 as the stable rollback.
+- Current live launch: `--syllable-secondary-test --syllable-force-overlay --syllable-qa-log=D:\Projects\spotify-lyrics\qa-0414-final3-live.log`. Perform all visual/interaction QA only on the secondary display and never manipulate or stop Spotify.
+- Source/EXE version is 0.4.14 and Provider/cache revision is 27.
+- Offline suite: 122 passed, 28 online cases skipped by default. Full real-provider suite: 150/150 passed. TypeScript, production build, ZIP, NSIS installer, and clean extraction passed.
+- ZIP SHA-256: `C7BEB9DB2F0D8E313752D7090CA0E37E09AEA9E9B523405A9DA03E27A2ECC123`; installer SHA-256: `167A1D1279217D8C19E727EF4F74C48F41026CA22277EF50768A463CE9AA873F`.
+- Source-only checkpoint: `checkpoints/Syllable-0.4.14-source-20260911-110147.zip` (63 entries, no missing/empty files), SHA-256 `22DA76A1F37C1970B1869CC56B45740A8E75FFC90DA99EDD41036319CCEF5919`.
+- Six final-package secondary-display cases passed: main UI, overlay controls, drag/performance, drag-open guard, font metrics, and lyrics scroll/follow. Use `qa-0414-final3-*` logs/screenshots.
+- Final paused-state 15.2-second sample: four processes, 0.156 CPU-seconds, 381.8 MB private commit after an 81.7 MB startup drop, 78.6 MB working-set drop, zero LevelDB changes, every process responsive, and no fatal log match.
+
+## Most important fixes in 0.4.14
+
+1. Provider completeness under failure
+   - All community/official requests share a 5.5-second generation budget that aborts both the active fetch and retry waits.
+   - A generation with any community-provider failure may be displayed immediately but is not remembered as stable. The renderer retries once after 12 seconds only if track/context/document are unchanged.
+   - Mixed outcomes inside one provider are no longer misclassified: an empty successful query cannot hide a sibling 429/503/timeout and permanently cache a partial language set.
+
+2. Generalized timeline selection and queue boundaries
+   - An LRCLIB exact-metadata timeline can be rejected when it is shifted by at least 2.5 seconds from two complete timelines that agree within 1.2 seconds, proven with at least four ordered text anchors spanning 30 seconds. Spotify official timing remains authoritative; one opponent or sparse repeated anchors are insufficient.
+   - A next-track duration quarantined under the outgoing title can be adopted by a zero-duration replacement title only within 2.2 seconds, with both reported positions at or below 2.5 seconds and a valid duration of at least 15 seconds.
+   - Natural final run `ランタノイド → Thirsty, Anxiety`: identity at `05:19:49.603`, request at `49.926` (323 ms), lyrics ready at `51.800` (1.874 seconds), one request, drift ±1 ms.
+
+3. Lyrics follow and corpus
+   - Before the first timestamp, `activeLineIndex=-1` now maps explicitly to scroll target zero. Explicit “return to current lyric” is synchronous and no longer relies on an rAF that Chromium may suspend in a background window.
+   - Deterministic tests cover pre-roll, exact first timestamp, centering, top clamp, and missing-row semantics. Final packaged QA restored 684 to 504 for a 504.3 target and hid the button; the originally observed 180-at-pre-roll failure now resolves to target zero in the shared tested helper.
+   - Real corpus includes `タイムグラム`, `君という神話`, `ランタノイド`, and `Thirsty, Anxiety`. `ランタノイド` protects normalized text and >.85 tail coverage rather than assuming 45 split rows are more complete than 36 grouped phrases.
+
+## 0.4.13 historical state
+
+- Current executable: `release/verified-0413-final-20260911-004445/Syllable.exe`; launch only this or a newer verified extraction. The latest 0.4.12 extraction is a stable rollback point but still waits for private transition metadata before requesting lyrics.
+- Current live launch: `--syllable-secondary-test --syllable-force-overlay --syllable-qa-log=D:\Projects\spotify-lyrics\qa-0413-final-live.log`. Continue all visual/interaction QA only on the secondary display, and do not stop Spotify.
+- Source/EXE version is 0.4.13 and Provider/cache revision is 26.
+- Offline suite: 111 passed, 24 online skipped by default. Full suite with real providers: 135/135 passed. TypeScript, production build, ZIP, and NSIS installer passed.
+- ZIP SHA-256: `737E5DF884BCFA7D866F4DA417CA198C2535735FCD0C3EC77649A4E0E4EA47E7`; installer SHA-256: `2F622C79C914DEF380E091CC87C2FBCEA0E00E6A0FD6B4D153261B791C467C55`.
+- Source-only checkpoint: `checkpoints/Syllable-0.4.13-source-20260911-005005.zip` (61 entries), SHA-256 `D066E6FF323EF759B859B5DE95356E6101E159ED32D96EBECF3190E26EE3B584`.
+- Packaged QA passed for main UI, controls, drag, font metrics, and lyric scroll/follow. Use the `qa-0413-final-*` logs/screenshots.
+- Latest stable 12.02-second sample: four processes, 0.751 CPU-seconds (6.25% of one core), 380.9 MB private commit with −15.1 MB delta and −18.9 MB working-set delta, zero LevelDB changes, all processes responding, and no fatal log matches.
+
+## Most important fix in 0.4.13
+
+- Provider lookup no longer waits for private Spotify transition discovery once a positive SMTC duration exists. It enters the existing 320 ms coalescing window immediately.
+- Safety is retained: track identity or the two-second duration bucket is an effect dependency, so later metadata cancels the stale renderer result; `sourceDurationMs` also changes the provider/cache key when a Mix recipe resolves.
+- Real natural-boundary evidence (`The City Where Whales Fall` → `Paradisus-Paradoxum`): new identity at `04:44:12.627`, request at `12.953` (326 ms), private transition timeout at `14.596`, one request total, lyrics ready at `15.692` (3.065 seconds into the song).
+- Offline 111/111 and full online 135/135 passed. The final package also passed all five secondary-monitor QA scenarios.
+
+## 0.4.12 historical state
+
+- Verified rollback executable: `release/verified-0412-final-20260911-003131/Syllable.exe`.
+- ZIP SHA-256: `E9E589E0B28E154DF608B2AAD7433D83BA2316520E3C06268A343D281F696E99`; installer SHA-256: `E1DBC7717D5E064E9802EE0FB3A282CE8215B99AB4C758DE6DEDF8C5A075BC9E`.
+- Source-only checkpoint: `checkpoints/Syllable-0.4.12-source-20260911-003750.zip` (61 entries), SHA-256 `6F5A074A8CADCB094E1648A424E1492BB2BE159245137468B557EA66DC700D6D`.
+
+## Most important fixes in 0.4.12
+
+1. Cross-language provider discovery
+   - Normal title/artist queries run first. NetEase searches a wider 50-result artist page only when the first result is absent, below 88%, or differs from Spotify duration by more than 1.2 seconds.
+   - A local kana fold makes katakana metadata comparable with Spotify's Latin artist string without loading the full romanization package in the main process.
+   - For a title with no shared characters, exact millisecond duration becomes a conservative release fingerprint and loses identity score quickly over a 2.5-second window.
+   - Live observed failure `HIBANA — Fading Sparks and Summer Sky` now resolves to NetEase's `消えゆく火花と夏の空 / ヒバナ`, exactly 223604 ms, with 27 meaningful Japanese rows plus synchronized Chinese and romanization.
+   - A title+album pair can no longer manufacture artist identity without independent artist evidence. `RADWIMPS — Suzume` rejects the 240000 ms Russian cover, checks the artist page, and selects the 238560 ms soundtrack entry rather than the 236390 ms single.
+   - When identity, text, and completeness are otherwise equal, duration is only a final tie-breaker. A healthy top identity also remains protected from a candidate six points lower whose only advantage is more fragmented lyric rows.
+
+2. CJK line layout
+   - Main and overlay primary lyrics use Chromium balanced wrapping. It prevents tiny CJK orphan lines while leaving font size, equal glyph advances, timestamps, and transport mapping unchanged.
+
+3. Verification
+   - Five final-package secondary-display QA scenarios passed. The deterministic controls run moved the actual cursor to unused secondary-display space before checking the 600 ms hide delay; lyric browse/follow moved 2170 → 2350 → 2170.
+   - Final package preserves 820×220 through drag and `[64,64,64,64]` equal CJK advances for weights 500/600/700/800.
+
+## 0.4.11 historical state
+
+- Do not restart from the old 0.4.10 artifact. The current verified executable is `release/verified-0411-final-20260910-234232/Syllable.exe`.
+- It is launched with `--syllable-secondary-test --syllable-force-overlay --syllable-qa-log=D:\Projects\spotify-lyrics\qa-0411-final-live.log`; preserve the user's requirement to test UI/interaction only on the secondary display and do not stop Spotify.
+- Source version is 0.4.11 and lyrics Provider/cache revision is 25.
+- Offline result: 107 passed and 22 online cases skipped by default. Full online result: 22/22 passed. Production build and Windows packaging passed.
+- Final ZIP: `release/Syllable-0.4.11-Portable.zip`, SHA-256 `C9A92C91DAED3464703DE6CB701845547A0E7E1A34B78A417BA383CECC0D3449`.
+- Final installer: `release/Syllable-0.4.11-Setup.exe`, SHA-256 `9D9051C8848236998FD06C665A2DB0BC3ED6D64A28A8B497EE18C26D1D382D8E`.
+- Source-only continuation checkpoint: `checkpoints/Syllable-0.4.11-source-20260911-000111.zip` (61 entries), SHA-256 `D434E8B78F486FE6F3F6F0E86A8CF77D1F07B655404776ED89E1D0F9620F21A8`. It excludes dependencies, release binaries, build output, screenshots, logs, and temporary profiles.
+- Five packaged secondary-monitor QA cases passed: main UI, overlay controls, overlay drag/performance, font metrics, and lyrics scroll/follow.
+- Latest final-package 18-second playing sample: four processes, 0.781 CPU-seconds (about 4.34% of one core), 369.5 MB private commit, +0.2 MB working set, and zero LevelDB file changes. Earlier development build after the 160 ms main refresh change used 0.422 CPU-seconds in 18 seconds.
+
+## Most important fixes in 0.4.11
+
+1. Startup and track-boundary ownership
+   - The first already-playing SMTC position is held for at most 3.2 seconds; an authoritative raw-clock correction releases it after 180 ms.
+   - A large duration change under the same title is quarantined until repeated confirmation or a verified Mix endpoint. Near-zero next-track position no longer resets the outgoing track.
+   - Natural boundary evidence: `カラカラ` switched after about 694 ms, `ブルーバード` after 441 ms, and `ASCA — CHAIN` after 654 ms. Each new media item issued one provider request with its own duration.
+
+2. Complete and plausible lyrics
+   - Stable cross-provider anchors now treat two short repeated outro rows spanning at least eight seconds and six characters as real missing content. `カラカラ` ends with all three `やれるわ` rows and tail coverage above 0.95.
+   - `durationPlausibleForPlayback` rejects a result when its absolute duration delta exceeds 12 seconds and its ratio falls outside 0.82–1.18. The gate runs before provider-local selection and again before cross-provider merge.
+   - This blocks the observed 376693 ms wrong `HIBANA — Untrue` edit from being scaled onto the 207744 ms Spotify item.
+   - Empty/transient provider results are not remembered as successes, and the UI exposes manual retry.
+
+3. Performance and interaction
+   - Main-client transport repaint moved from 100 ms to 160 ms while the always-visible overlay retains 80 ms.
+   - Overlay controls are driven by enter/leave/drag events rather than a permanent global cursor poll.
+   - Auxiliary renderers do not hydrate the full persisted lyrics library; cover payloads and repeated hit-region IPC are deduplicated.
+   - Final QA kept overlay size at 820×220 after moving from `(-1263,716)` to `(-1173,680)`. Controls hover/show/hide/open/close/reopen, font metrics, and lyrics scroll/follow all passed.
+
+## 0.4.10 historical state
+
+- Source, tests, production build, Windows ZIP/installer, clean extraction, secondary-monitor QA, real Spotify lyric comparison, and performance sampling are complete.
+- Current executable: `release/verified-0410-final-20260910-195900/Syllable.exe`.
+- Current launch mode: `--syllable-secondary-test --syllable-force-overlay --syllable-qa-log=D:\Projects\spotify-lyrics\qa-0410-final-live.log`.
+- Spotify was restored to `ヨルシカ — 言って。`, paused at about 71.270 s after QA. Do not stop Spotify.
+- Offline result: 89 passed, 16 online tests skipped by default. Online result with `SYLLABLE_ONLINE_QA=1`: 16/16 passed.
+- Final ZIP SHA-256: `56770224A9566D26E49891C68DC95F9A3D6786307F334E9ABAE94E6DE29FEE4F`.
+- Final installer SHA-256: `851243A54453DF8D2DEF70419AD6C2332EE2BD46168CE7416789AAA21AEC0B90`.
+- Final source checkpoint: `checkpoints/Syllable-0.4.10-source-20260910-200619.zip` (67 entries), SHA-256 `05FD091DA41C68650FAA06F1C16B406EB0417EC3BA9CF6AF82B856948BDE41F4`.
+- Lyrics provider/cache revision is 21.
+
+## Most important fixes in 0.4.10
+
+1. Current-song content/source correction
+   - `ヨルシカ — 言って。` now selects the 48-row `LRCLIB · 精确匹配` timeline instead of the 53-row Kugou search result that gained score only by splitting identical phrases more finely.
+   - Exact metadata is a trust signal, never an unconditional override: stable cross-provider anchors still reject an exact candidate with a proven missing prefix, bounded middle block, or suffix.
+   - Early timed `artist - title`/labelled metadata is stripped without deleting a real title refrain.
+   - Spotify's visible official lyrics (38 grouped rows) and the selected LRCLIB timeline (48 split rows) normalize to the same 458 characters exactly.
+   - During a bounded live playback check, all 12 sampled provider-active rows were contained by Spotify's white official-highlight row. Spotify was restored to paused at 71.270 seconds afterward.
+   - NetEase Chinese remains a separate translated timeline; all unique delayed phrases falling in one main-line interval are retained in order instead of overwriting each other.
+
+2. Playback-only persistence and auxiliary IPC
+   - Zustand persistence now compares the persisted `settings` and `library` references before JSON serialization. Playback/connection/editor ticks no longer serialize and write the entire lyrics library.
+   - Genuine settings and library changes still persist immediately; an isolated unit regression verifies both branches.
+   - Initial playback sent to the controls renderer now strips embedded cover Base64 just like the lyric overlay.
+   - Chromium performed one normal startup LevelDB compaction, then a second 25-second stable sample produced zero file size/timestamp changes.
+
+The following 0.4.9 mechanisms remain active and were revalidated:
+
+3. Track-boundary ownership barrier
+   - `src/hooks/usePlayback.ts` rejects zero duration and all unresolved local Spotify metadata, then waits for a 320 ms quiet period.
+   - `electron/spotify-transition.ts` will not validate a Mix recipe with `duration_override` against a title-only zero-duration SMTC snapshot.
+   - A real regression formerly requested `Vaundy — Tokimeki` with the previous song's 242182 ms. The final live log requests it only after stabilization with 233081 ms.
+
+4. Correct-version selection and cache invalidation
+   - Album-aware scoring keeps track/artist identity dominant and no longer rewards a wrong compilation just because it is closer to a custom Mix endpoint.
+   - The live Tokimeki metadata is album `Tokimeki`, SMTC 233081 ms. Final provider selection is NetEase 97%, matched duration 212000 ms, 65 lines.
+   - Revision 21 forces documents cached before the latest scoring/completeness rules to refetch.
+
+5. Generalized lyric-clock fallback
+   - Spotify position remains the only transport and is never overwritten or sought from a lyric duration.
+   - Valid Spotify speed automation is integrated piecewise; cue points remain diagnostic and fade endpoints never become source duration.
+   - When the private state file is stale/unavailable, `lyricSourcePosition` applies a conservative 0.82–1.18 duration ratio only to high-confidence attached lyrics and only when the difference is at least 2%.
+   - Tokimeki maps 233081 ms transport to 212000 ms lyrics (0.9096×). Final screenshot shows `时长校准 · 0.910×` while the player remains 1:40 / 3:53.
+
+6. Bilingual and completeness repair
+   - Interleaved Japanese/Chinese LRC is split using dedicated translation timestamps or repeated 180–8500 ms adjacent script pairs.
+   - Kana-title tracks prefer a plausible Japanese original rather than a dense Han-only translation.
+   - Decorative `♪` rows do not fake completeness; stable cross-provider anchors detect missing prefix, bounded middle blocks, and suffix.
+   - NetEase Chinese remains preferred when near the best coverage. A translation sentence can carry across two nearby split source rows but never across a long instrumental gap.
+   - `ヨルシカ — 言って。` at 71.270 s shows `あぁいつか人生最後の日`; Japanese, romanization, and Chinese remain separate.
+
+7. Interaction/font/performance
+   - Overlay controls are an independent native Tool Window. Transparent blank pixels pass through; the four PNG corners have alpha 0.
+   - The empty-session gap after next/previous does not release the skip lock. A single real next emits one command and advances one item.
+   - Post-drag open-client clicks are suppressed; a deliberate click after 700 ms succeeds.
+   - Yu Gothic Regular/Medium/Bold replaces forced MS Gothic. At 150% DPI, weights 500/600/700/800 all measure `[64,64,64,64]` for four CJK glyphs.
+   - Final paused 10-second initial sample: four Electron processes, zero measured CPU increment and 273.5 MB private commit. A following 30-second sample used 0.203 CPU-seconds while private commit fell 2.96 MB and working set fell 2.70 MB; there is no continuing growth. The renderer is shared across all three windows; Kuromoji uses a one-shot worker.
+
+## Final evidence
+
+- Current-song source/content: `qa-0410-final-live.log`; selected LRCLIB exact, 48 rows, NetEase romanization/Chinese, matched duration 242000 ms.
+- Extended live-provider corpus: 16/16, adding `風のアンセム`, `夏が来るたび`, `ステレオタイプライター`, `Prologue`, `Bubble`, `靴の花火`, `盗作`, and `太陽`. `Bubble` verifies the no-synced-LRCLIB NetEase fallback.
+- Packaged controls: `qa-0410-overlay-controls.log` / `.png` (open, close, reopen all succeed).
+- Packaged drag: `qa-0410-overlay-drag-performance.log` / `.png` (90×−36 logical-pixel move, size remains 820×220, then restores).
+- Packaged fonts/main UI: `qa-0410-font-metrics.log` / `.png` (all four CJK glyph advances equal at all four weights).
+- Real boundary/source log: `qa-049-final3-live.log` (233081 ms request, 212000 ms result).
+- Duration mapping UI: `qa-049-final-timeline-main.png` and `qa-049-final-timeline-overlay.png`.
+- Duration mapping logs: `qa-049-final-timeline-main.log`, `qa-049-final-timeline-overlay.log`.
+- Font: `qa-049-final4-font-metrics.log` / `.png`.
+- Controls: `qa-049-final4-overlay-controls.log` / `.png`.
+- Drag/open guard: `qa-049-final4-overlay-drag-open-guard.log` / `.png`.
+- Earlier same-version drag performance and scroll checks: `qa-049-final-overlay-drag-performance.log`, `qa-049-final-lyrics-scroll.log`.
+- No 0.4.10 QA or live log contains `unresponsive`, `renderer gone`, `worker failure`, `fatal`, `uncaught`, or `error`.
+
+## Files changed in the 0.4.10 pass
+
+- `electron/lyrics-provider.ts` and tests: exact-identity quality signal, timed track-metadata removal, interval-based multi-phrase translation buckets, and current-song online regression.
+- `src/store/useAppStore.ts` and tests: reference-deduplicated persisted storage; auxiliary renderers use a direct no-op in-memory adapter.
+- `src/hooks/usePlayback.ts`: cache revision 21.
+- `electron/main.ts`: strip cover payload from initial controls snapshot.
+- `src/components/InfoView.tsx`, `src/components/LibraryView.tsx`: script-aware CJK metadata styling and accurate provider wording.
+- `package.json`, `package-lock.json`, `src/components/Titlebar.tsx`: 0.4.10 version.
+
+## Files changed in the 0.4.9 sync pass
+
+- `electron/lyrics-provider.ts` and tests: identity scoring, interleaved translations, script preference, prefix/suffix/middle completeness, meaningful-row statistics.
+- `src/lib/lyrics.ts` and tests: secondary sentence carry across split source phrases.
+- `src/hooks/usePlayback.ts` and tests: revision 20, zero/unresolved duration gate, stable request delay.
+- `electron/spotify-transition.ts` and tests: positive native-duration validation for Mix recipes.
+- `src/lib/clock.ts` and tests: safe provider-duration lyric mapping without transport mutation.
+- `src/App.tsx`, `src/Overlay.tsx`, `src/components/InfoView.tsx`: use and expose the selected timeline mapping.
+- `electron/local-spotify.ts`, `src/OverlayControls.tsx`, `electron/main.ts`: nonempty replacement skip lock and stronger QA logs.
+- `src/styles.css`: Yu Gothic unicode-ranged real-weight faces and equal CJK advances.
+- `scripts/restore-spotify-qa.cjs`, `scripts/inspect-spotify-transition.mjs`: bounded live QA helpers.
+
+## Safety and future work
+
+- Preserve `checkpoints/Syllable-0.4.10-source-20260910-200619.zip`; it is the current source-only continuation checkpoint and excludes `node_modules`, `release`, `out`, screenshots/logs and temporary profiles.
+- Preserve `checkpoints/Syllable-pre-sync-fix-20260910-0135.zip` and all 0.4.8 checkpoints.
+- Previous source-only checkpoint: `checkpoints/Syllable-0.4.9-source-20260910-193400.zip` (58 entries, 229097 bytes), SHA-256 `79DF4469968566EBEB9F3CCBE97297372D15EEF1BB07FBA9229B304344BD7C3D`; it excludes `node_modules`, `release`, `out`, screenshots/logs and temporary profiles.
+- Continue visual testing only on the secondary display unless the user changes that instruction.
+- The Spotify restore file can remain on the previous song for several seconds; never apply a mismatched private profile. The bounded duration ratio is the safe fallback.
+- Machine translation into arbitrary languages remains future work. Existing online translations and imported LRC/TXT are supported now.
+- Third-party providers can fail temporarily. Do not cache network failure as permanent no-lyrics; retain search/import/manual timing fallbacks.
+
+## Previous checkpoints
+
+- `checkpoints/Syllable-0.4.8-source-20260910-180352.zip` — SHA-256 `2125E5734618B365AA1A4CE52465EA3EF7CC85D52F14BC0ACE51453B9D6B3082`.
+- `checkpoints/Syllable-0.4.8-source-20260910-181220.zip` — SHA-256 `74E238D1F3909960AE7E8A23A1970A7A6B6F6A32F438144BB69DDB0304C45377`.
+- `checkpoints/Syllable-0.4.8-source-20260910-181831.zip` — SHA-256 `3D802DD72C6135A6AD27C60C68D62ED463E8998CD36FFF1CD4592F661C6308B6`.

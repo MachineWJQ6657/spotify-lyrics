@@ -31,6 +31,6 @@ export class PlaybackDiagnostics {
   }
   clear() { this.samples = [] }
   report() { return { schemaVersion: 1, generatedAtMs: Date.now(),
-    note: 'Transport observations only. Clock drift is not measured audio/lyric synchronization error. No audio is recorded.',
+    note: 'Clock drift is not measured audio/lyric synchronization error. Lyric context, when present, estimates position from the latest sample, not a captured screen. No audio is recorded.',
     samples: this.samples.map(sample => ({ ...sample })) } }
 }

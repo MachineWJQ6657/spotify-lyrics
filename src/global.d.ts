@@ -4,7 +4,7 @@ interface SyllableApi {
   auth: { status(): Promise<{ connected: boolean; localConnected?: boolean }>; login(clientId: string): Promise<{ connected: boolean }>; logout(): Promise<{ connected: boolean }> }
   playback: {
     current(): Promise<PlaybackSnapshot | null>
-    exportDiagnostics(): Promise<boolean>
+    exportDiagnostics(context: import('./lib/sync-diagnostics').LyricDiagnosticContext): Promise<boolean>
     command(command: 'play' | 'pause' | 'next' | 'previous'): Promise<{
       accepted: boolean
       action: 'play' | 'pause' | 'next' | 'previous' | 'seek-to-zero' | null

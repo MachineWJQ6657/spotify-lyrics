@@ -6,9 +6,17 @@ import {
   resolveSpotifyTransitionProfile
 } from '../electron/spotify-transition.ts'
 
-const expectedTitle = process.argv[2] ?? ''
-const durationMs = Number(process.argv[3] ?? 0)
 const summaryOnly = process.argv.includes('--summary')
+const positional = process.argv.slice(2).filter(value => value !== '--summary')
+const expectedTitle = positional[0] ?? ''
+const durationMs = Number(positional[1] ?? 0)
+const profileSummary = profile => profile ? {
+  outputDurationMs: profile.outputDurationMs,
+  sourceDurationMs: profile.sourceDurationMs,
+  cuePointMs: profile.cuePointMs,
+  overlapMs: profile.overlapMs,
+  speedAutomation: profile.speedAutomation
+} : null
 const keys = [
   'title', 'album_title', 'duration_override', 'has-custom-transitions',
   'custom_reporting_attribution', 'automix.transition_uri',
@@ -39,7 +47,8 @@ for (const file of files) {
     hasTrackUri: Boolean(parsed.trackUri),
     hasMixProfile: Boolean(parsed.profile),
     outputDurationMs: parsed.profile?.outputDurationMs,
-    speedPointCount: parsed.profile?.speedAutomation.length ?? 0
+    speedPointCount: parsed.profile?.speedAutomation.length ?? 0,
+    profile: profileSummary(parsed.profile)
   } : {
     file,
     bytes: buffer.length,
@@ -49,5 +58,8 @@ for (const file of files) {
 }
 
 if (expectedTitle) {
-  console.log(JSON.stringify({ expectedTitle, durationMs, resolved: await resolveSpotifyTransitionProfile(expectedTitle, durationMs) }, null, 2))
+  const resolved = await resolveSpotifyTransitionProfile(expectedTitle, durationMs)
+  console.log(JSON.stringify({ expectedTitle, durationMs, resolved: summaryOnly
+    ? { matched: resolved.matched, profile: profileSummary(resolved.profile) }
+    : resolved }, null, 2))
 }

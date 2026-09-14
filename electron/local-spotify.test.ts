@@ -52,6 +52,15 @@ describe('local Spotify track identity', () => {
 })
 
 describe('local Spotify startup clock gate', () => {
+  it('quarantines the observed Shura stale startup sample before the authoritative update', () => {
+    const state = { artist: 'ヨルシカ', title: '修羅', album: '', positionMs: 27506, statusName: 'PLAYING' }
+    const initial = advanceStartupClockGate(null, state, 32)
+    expect(initial?.readyAtMs).toBeGreaterThan(936)
+    const corrected = advanceStartupClockGate(initial, { ...state, positionMs: 32010 }, 936)
+    expect(corrected).toMatchObject({ correctionDetected: true, anchorPositionMs: 32010, readyAtMs: 1116 })
+    const stable = advanceStartupClockGate(corrected, { ...state, positionMs: 36511 }, 5437)
+    expect(stable?.readyAtMs).toBe(1116)
+  })
   const playing = { artist: 'Aimer', title: 'Eclipse', album: 'Open α Door', positionMs: 80_000, statusName: 'PLAYING' }
 
   it('holds an already-playing first sample for a bounded stabilization window', () => {

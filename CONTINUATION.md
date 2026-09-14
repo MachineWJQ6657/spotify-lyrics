@@ -2,6 +2,8 @@
 
 ## Latest source: 0.4.22 (candidate, not fully accepted)
 
+- 2026-09-14 SOURCE Web control/seek: removed unbounded recursive401 retry; shared playerMutation permits exactly one refresh/resend on definitive401, propagates network failures without replay. Bounded regression old code attempted a third mutation, now rejects second401. Successful refreshed-token retry and ambiguous-network single-send tests pass.210 offline pass before final success-case addition; targeted6 pass/build/diff-check pass. No real Spotify commands (mock fetch only). Not packaged; transport request wall-clock timeout and native audible synchronization remain open. No active handles.
+
 - 2026-09-14 SOURCE Web API clock correction: getPlayback used the initial request start after401/token refresh/retry. Mocked slow refresh reproduced observedAt6600 instead of12100 (5.5s projection error). Retry now resets startedAt AFTER refresh and before successful request; normal midpoint preserved.206 offline pass before second normal-case test, final targeted2 pass; build exit0/diff-check clean. No network/API commands (fetch mocked), no UI interaction. Not in0.4.22 package; native transition/audio sync still unverified. No active handles; continue from current files rather than old runtime state.
 
 - 0.4.22 COMPLETE package:238/238 tests (205offline+33online)55003 exit0; dist21059 exit0. All recent source fixes now bundled (version label/layout/hit refresh/clipping/storage retry/current-only library broadcasts/QA assertions). Fresh extraction release/verified-0422-20260912-182400 passes extended verify-package including displayed version. Asar SHA25606a22002c0cee303f2631cb528e58ea8c3649b23d89d2907b2eb4f6ca4ce5a4b.

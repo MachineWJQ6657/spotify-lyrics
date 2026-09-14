@@ -10,6 +10,54 @@ import { SpotifyService } from './spotify'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Spotify playback observation timing', () => {
+  it.each(['next', 'seek'] as const)('bounds repeated authorization failures for %s', async command => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    let controls = 0
+    let refreshes = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('accounts.spotify.com')) {
+        refreshes += 1
+        return new Response(JSON.stringify({ access_token: 'retry-token', expires_in: 3600 }))
+      }
+      controls += 1
+      // Terminate even the old recursive implementation so regression is bounded.
+      return controls < 3 ? new Response('', { status: 401 }) : new Response(null, { status: 204 })
+    }))
+    const service = new SpotifyService()
+    await service.restore()
+    await expect(command === 'next' ? service.control('next') : service.seek(1000)).rejects.toThrow('401')
+    expect(controls).toBe(2)
+    expect(refreshes).toBe(1)
+  })
+
+  it('does not replay a skip after an ambiguous network failure', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const request = vi.fn(async () => { throw new Error('network disconnected') })
+    vi.stubGlobal('fetch', request)
+    const service = new SpotifyService()
+    await service.restore()
+    await expect(service.control('next')).rejects.toThrow('network disconnected')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a definitively rejected command once with the refreshed token', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'retry-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', request)
+    const service = new SpotifyService()
+    await service.restore()
+    await service.control('next')
+    expect(request).toHaveBeenCalledTimes(3)
+    expect(request.mock.calls[2]).toEqual(['https://api.spotify.com/v1/me/player/next', {
+      method: 'POST', headers: { authorization: 'Bearer retry-token' }
+    }])
+  })
   it('keeps the normal request midpoint without issuing extra requests', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1000)

@@ -143,31 +143,37 @@ export class SpotifyService {
     return this.session.accessToken
   }
 
-  async control(command: 'play' | 'pause' | 'next' | 'previous'): Promise<void> {
+  private async playerMutation(path: string, method: 'PUT' | 'POST') {
     if (!this.session) throw new Error('Spotify 尚未连接')
     if (Date.now() > this.session.expiresAt - 60_000) await this.refresh()
+    const send = () => fetch(`https://api.spotify.com/v1/me/player/${path}`, {
+      method, headers: { authorization: `Bearer ${this.session!.accessToken}` }
+    })
+    let response = await send()
+    // Only a definitive authorization rejection permits replay. Network errors
+    // may occur after a skip executed, so they propagate without another send.
+    if (response.status === 401) {
+      await this.refresh()
+      response = await send()
+    }
+    return response
+  }
+
+  async control(command: 'play' | 'pause' | 'next' | 'previous'): Promise<void> {
     const map = {
       play: { method: 'PUT', path: 'play' }, pause: { method: 'PUT', path: 'pause' },
       next: { method: 'POST', path: 'next' }, previous: { method: 'POST', path: 'previous' }
     } as const
     const target = map[command]
-    const response = await fetch(`https://api.spotify.com/v1/me/player/${target.path}`, {
-      method: target.method, headers: { authorization: `Bearer ${this.session.accessToken}` }
-    })
-    if (response.status === 401) { await this.refresh(); return this.control(command) }
+    const response = await this.playerMutation(target.path, target.method)
     if (response.status === 403) throw new Error('当前 Spotify 帐号或设备不允许远程控制')
     if (response.status === 404) throw new Error('没有可控制的 Spotify 活动设备')
     if (!response.ok) throw new Error(`Spotify 控制失败 (${response.status})`)
   }
 
   async seek(positionMs: number): Promise<void> {
-    if (!this.session) throw new Error('Spotify 尚未连接')
-    if (Date.now() > this.session.expiresAt - 60_000) await this.refresh()
     const position = Math.max(0, Math.round(positionMs))
-    const response = await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${position}`, {
-      method: 'PUT', headers: { authorization: `Bearer ${this.session.accessToken}` }
-    })
-    if (response.status === 401) { await this.refresh(); return this.seek(position) }
+    const response = await this.playerMutation(`seek?position_ms=${position}`, 'PUT')
     if (response.status === 403) throw new Error('当前 Spotify 帐号或设备不允许跳转')
     if (response.status === 404) throw new Error('没有可控制的 Spotify 活动设备')
     if (!response.ok) throw new Error(`Spotify 跳转失败 (${response.status})`)

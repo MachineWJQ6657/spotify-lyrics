@@ -65,7 +65,7 @@ describe('local Spotify startup clock gate', () => {
 
   it('holds an already-playing first sample for a bounded stabilization window', () => {
     expect(advanceStartupClockGate(null, playing, 1_000)).toMatchObject({
-      readyAtMs: 4_200,
+      readyAtMs: 6_000,
       startedAtMs: 1_000,
       correctionDetected: false
     })
@@ -74,7 +74,7 @@ describe('local Spotify startup clock gate', () => {
   it('does not mistake normally advancing position events for a correction', () => {
     const first = advanceStartupClockGate(null, playing, 1_000)
     const next = advanceStartupClockGate(first, { ...playing, positionMs: 80_900 }, 1_900)
-    expect(next).toMatchObject({ readyAtMs: 4_200, correctionDetected: false })
+    expect(next).toMatchObject({ readyAtMs: 6_000, correctionDetected: false })
   })
 
   it('releases shortly after Spotify republishes a corrected raw anchor', () => {
@@ -90,7 +90,14 @@ describe('local Spotify startup clock gate', () => {
   it('restarts stabilization when the detected track changes', () => {
     const first = advanceStartupClockGate(null, playing, 1_000)
     const replacement = advanceStartupClockGate(first, { ...playing, title: 'Ref:rain', positionMs: 2_000 }, 2_000)
-    expect(replacement).toMatchObject({ readyAtMs: 5_200, startedAtMs: 2_000, correctionDetected: false })
+    expect(replacement).toMatchObject({ readyAtMs: 7_000, startedAtMs: 2_000, correctionDetected: false })
+  })
+  it('waits through a 4.5-second native cadence but releases a late correction promptly', () => {
+    const first = advanceStartupClockGate(null, playing, 1000)
+    const projected = advanceStartupClockGate(first, { ...playing, positionMs: 83000 }, 4000)
+    expect(projected!.readyAtMs).toBeGreaterThan(5500)
+    const corrected = advanceStartupClockGate(projected, { ...playing, positionMs: 88000 }, 5500)
+    expect(corrected).toMatchObject({ readyAtMs: 5680, correctionDetected: true })
   })
 })
 

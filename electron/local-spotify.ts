@@ -109,7 +109,9 @@ export function advanceStartupClockGate(previous: StartupClockGate | null, state
       anchorPositionMs: positionMs,
       anchorAtMs: now,
       statusName: state.statusName,
-      readyAtMs: now + (playing ? 3200 : 120),
+      // Live SMTC observations can be ~4.5 s apart. A 3.2 s fallback
+      // exposed an uncorrected startup anchor before the next observation.
+      readyAtMs: now + (playing ? 5000 : 120),
       startedAtMs: now,
       correctionDetected: false
     }

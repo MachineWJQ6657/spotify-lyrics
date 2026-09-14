@@ -12,11 +12,22 @@ describe('recording edition identity', () => {
     const syncedLyrics = Array.from({ length: 26 }, (_, index) => `[${String(Math.floor(index * 10 / 60)).padStart(2, '0')}:${String(index * 10 % 60).padStart(2, '0')}.00]verse number ${index}`).join('\n')
     const accurate: LyricsResult = { syncedLyrics, plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 256000 }
     const contradictory = { ...accurate, matchedDurationMs: 230000 }
+    const onlyAvailable = mergeProviderSet([contradictory], 220410)
+    expect(onlyAvailable?.syncedLyrics).toBe(syncedLyrics)
+    expect(onlyAvailable?.matchedDurationMs).toBe(230000)
+    const unknownDuration = mergeProviderSet([contradictory, { ...accurate, matchedDurationMs: undefined }], 220410)
+    expect(unknownDuration?.syncedLyrics).toBe(syncedLyrics)
     for (const results of [[contradictory, accurate], [accurate, contradictory]]) {
       const selected = mergeProviderSet(results, 220410)
       expect(selected?.matchedDurationMs).toBe(256000)
       expect(selected?.syncedLyrics).toBe(syncedLyrics)
     }
+  })
+  it('does not use a different-content duration candidate to displace the original', () => {
+    const lines = Array.from({ length: 26 }, (_, index) => `[${String(Math.floor(index * 10 / 60)).padStart(2, '0')}:${String(index * 10 % 60).padStart(2, '0')}.00]original phrase ${index}`).join('\n')
+    const original: LyricsResult = { syncedLyrics: lines, plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 230000 }
+    const different = { ...original, syncedLyrics: lines.replaceAll('original phrase', 'unrelated sentence'), matchedDurationMs: 256000 }
+    expect(mergeProviderSet([original, different], 220410)?.syncedLyrics).toBe(lines)
   })
   it('requires independent release evidence for mixed-script artist localization', () => {
     const query = { track: 'Blue Day', artist: 'Example鬍子男Band', album: 'Blue Day', durationMs: 237836 }

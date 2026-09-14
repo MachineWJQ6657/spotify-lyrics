@@ -105,16 +105,27 @@ export class SpotifyService {
 
   async getPlayback(): Promise<PlaybackSnapshot | null> {
     if (!this.session) return null
-    if (Date.now() > this.session.expiresAt - 60_000) await this.refresh()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new Error('Spotify 播放状态请求超时，稍后重试')), 8000)
+    try { return await this.readPlayback(controller.signal) }
+    finally { clearTimeout(timer) }
+  }
+
+  private async readPlayback(signal: AbortSignal): Promise<PlaybackSnapshot | null> {
+    if (!this.session) return null
+    if (Date.now() > this.session.expiresAt - 60_000) await this.refresh(signal)
+    signal.throwIfAborted()
     let startedAt = Date.now()
-    let response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session.accessToken}` } })
+    let response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session.accessToken}` }, signal })
     if (response.status === 401) {
-      await this.refresh()
+      await this.refresh(signal)
+      signal.throwIfAborted()
       // The observation belongs to the successful retry, not the rejected
       // request or the potentially slow token refresh between requests.
       startedAt = Date.now()
-      response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session!.accessToken}` } })
+      response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session!.accessToken}` }, signal })
     }
+    signal.throwIfAborted()
     if (response.status === 204) return { track: null, positionMs: 0, observedAtMs: Date.now(), isPlaying: false, sampleId: ++this.sampleId, playbackSource: 'web' }
     if (response.status === 429) {
       const retryAfterMs = Math.max(2500, Number(response.headers.get('retry-after') ?? 5) * 1000)
@@ -123,6 +134,7 @@ export class SpotifyService {
     if (!response.ok) throw new Error(`Spotify 播放状态获取失败 (${response.status})`)
     const receivedAt = Date.now()
     const data = await response.json() as any
+    signal.throwIfAborted()
     const item = data.item
     return {
       track: item ? {

@@ -10,6 +10,40 @@ import { SpotifyService } from './spotify'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Spotify playback observation timing', () => {
+  it('cancels a stalled playback read and allows the next poll to recover', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const request = vi.fn((_url: string, options: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', request)
+    const service = new SpotifyService()
+    await service.restore()
+    const failed = expect(service.getPlayback()).rejects.toThrow('播放状态请求超时')
+    await vi.advanceTimersByTimeAsync(8000)
+    await failed
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    request.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    expect(await service.getPlayback()).toMatchObject({ track: null, isPlaying: false })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('rejects a body that finishes after the playback deadline', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => {
+      await new Promise(resolve => setTimeout(resolve, 9000))
+      return { item: null, progress_ms: 1000, is_playing: true }
+    } })))
+    const service = new SpotifyService()
+    await service.restore()
+    const failed = expect(service.getPlayback()).rejects.toThrow('播放状态请求超时')
+    await vi.advanceTimersByTimeAsync(9000)
+    await failed
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('aborts a stalled control request without replaying it', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1000)

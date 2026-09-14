@@ -56,6 +56,13 @@ export function mergeUserEditedTracks(providerTracks: LyricTrack[], baseline?: L
   return [...providerTracks.filter(track => !conflicts.has(`${track.kind}\0${track.language}`)), ...preserved]
 }
 
+/** Partial provider responses must use the same calibration as final results. */
+export function preserveLyricsCalibration(document: LyricsDocument, baseline?: LyricsDocument | null): LyricsDocument {
+  return baseline?.trackId === document.trackId && baseline.offsetMs != null
+    ? { ...document, offsetMs: baseline.offsetMs }
+    : document
+}
+
 /** Carries edit ownership only for tracks that survived the provider merge. */
 export function preservedUserEditedTrackIds(tracks: LyricTrack[], baseline?: LyricsDocument | null) {
   if (!baseline?.userEditedTrackIds?.length) return undefined
@@ -339,14 +346,15 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           releaseInheritedRetry()
           return null
         }
+        const calibrated = preserveLyricsCalibration(document, requestBaseline)
         if (!transient) {
-          setLyrics({ ...document, ...(requestBaseline?.offsetMs != null ? { offsetMs: requestBaseline.offsetMs } : {}) })
+          setLyrics(calibrated)
           releaseInheritedRetry()
           return useAppStore.getState().lyrics
         }
         // Never persist a transient empty/partial generation over a usable
         // library entry. Empty failures retain the previous visible lyrics.
-        const visibleDocument = document.tracks.length || !requestBaseline?.tracks.length ? document : requestBaseline
+        const visibleDocument = document.tracks.length || !requestBaseline?.tracks.length ? calibrated : requestBaseline
         setTransientLyrics(visibleDocument)
         transientGeneration = useAppStore.getState().lyrics
         scheduleTransientRetry()

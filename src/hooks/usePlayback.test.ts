@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { completeRomanization } from './usePlayback'
+import { completeRomanization, preserveLyricsCalibration } from './usePlayback'
 import type { LyricTrack } from '../types'
 import { effectiveProviderDurationBucket, lyricsProviderContext, matchedSupplementalLineCount, mergeUserEditedTracks, preservedUserEditedTrackIds, providerDurationBucket, providerRequestMatches, romanizationNeedsRepair, shouldBypassProviderCache } from './usePlayback'
 
@@ -55,6 +55,13 @@ describe('romanization completeness', () => {
 })
 
 describe('provider refresh preserves user tracks', () => {
+  it('keeps calibration on partial responses, including an explicit zero offset', () => {
+    const partial = { trackId: 'song', tracks: [original], providerRevision: undefined }
+    expect(preserveLyricsCalibration(partial, { trackId: 'song', tracks: [], offsetMs: 2300 }).offsetMs).toBe(2300)
+    expect(preserveLyricsCalibration({ ...partial, offsetMs: 1000 }, { trackId: 'song', tracks: [], offsetMs: 0 }).offsetMs).toBe(0)
+    expect(preserveLyricsCalibration(partial, { trackId: 'previous-song', tracks: [], offsetMs: 2300 })).toBe(partial)
+    expect(partial).not.toHaveProperty('offsetMs')
+  })
   it('refreshes auto-generated local Spotify tracks but preserves explicit edits', () => {
     const trackId = 'local-1234567890abcdefabcd'
     const stale = { ...original, id: `${trackId}-original` }

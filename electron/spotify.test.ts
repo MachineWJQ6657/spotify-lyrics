@@ -10,6 +10,46 @@ import { SpotifyService } from './spotify'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Spotify playback observation timing', () => {
+  it('aborts a stalled control request without replaying it', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const request = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', request)
+    const service = new SpotifyService()
+    await service.restore()
+    let failure: unknown
+    void service.control('next').catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(failure).toBeInstanceOf(Error)
+    expect(String(failure)).toContain('超时')
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('never sends a late skip when token refresh completes after the deadline', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    let sends = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('accounts.spotify.com')) {
+        // Simulate a delayed completion even after cancellation was requested.
+        await new Promise(resolve => setTimeout(resolve, 6000))
+        return new Response(JSON.stringify({ access_token: 'late-token', expires_in: 3600 }))
+      }
+      sends += 1
+      return new Response('', { status: 401 })
+    }))
+    const service = new SpotifyService()
+    await service.restore()
+    let failure: unknown
+    void service.control('next').catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(6500)
+    expect(String(failure)).toContain('超时')
+    expect(sends).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it.each(['next', 'seek'] as const)('bounds repeated authorization failures for %s', async command => {
     vi.useFakeTimers()
     vi.setSystemTime(1000)
@@ -54,9 +94,9 @@ describe('Spotify playback observation timing', () => {
     await service.restore()
     await service.control('next')
     expect(request).toHaveBeenCalledTimes(3)
-    expect(request.mock.calls[2]).toEqual(['https://api.spotify.com/v1/me/player/next', {
+    expect(request.mock.calls[2]).toEqual(['https://api.spotify.com/v1/me/player/next', expect.objectContaining({
       method: 'POST', headers: { authorization: 'Bearer retry-token' }
-    }])
+    })])
   })
   it('keeps the normal request midpoint without issuing extra requests', async () => {
     vi.useFakeTimers()

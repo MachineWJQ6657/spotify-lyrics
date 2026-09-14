@@ -91,11 +91,11 @@ export class SpotifyService {
 
   async logout() { this.session = null; await this.store.set(null) }
 
-  private async refresh() {
+  private async refresh(signal?: AbortSignal) {
     if (!this.session) throw new Error('Spotify 尚未连接')
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: this.session.clientId, grant_type: 'refresh_token', refresh_token: this.session.refreshToken })
+      body: new URLSearchParams({ client_id: this.session.clientId, grant_type: 'refresh_token', refresh_token: this.session.refreshToken }), signal
     })
     if (!response.ok) throw new Error('Spotify 登录已过期，请重新连接')
     const token = await response.json() as { access_token: string; refresh_token?: string; expires_in: number }
@@ -145,18 +145,28 @@ export class SpotifyService {
 
   private async playerMutation(path: string, method: 'PUT' | 'POST') {
     if (!this.session) throw new Error('Spotify 尚未连接')
-    if (Date.now() > this.session.expiresAt - 60_000) await this.refresh()
-    const send = () => fetch(`https://api.spotify.com/v1/me/player/${path}`, {
-      method, headers: { authorization: `Bearer ${this.session!.accessToken}` }
-    })
-    let response = await send()
-    // Only a definitive authorization rejection permits replay. Network errors
-    // may occur after a skip executed, so they propagate without another send.
-    if (response.status === 401) {
-      await this.refresh()
-      response = await send()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new Error('Spotify 控制请求超时，请先确认播放状态')), 5000)
+    const send = () => {
+      // A slow refresh must not dispatch an old skip after its deadline.
+      controller.signal.throwIfAborted()
+      return fetch(`https://api.spotify.com/v1/me/player/${path}`, {
+        method, headers: { authorization: `Bearer ${this.session!.accessToken}` }, signal: controller.signal
+      })
     }
-    return response
+    try {
+      if (Date.now() > this.session.expiresAt - 60_000) await this.refresh(controller.signal)
+      let response = await send()
+      // Only definitive rejection permits replay; ambiguous failure never does.
+      if (response.status === 401) {
+        await this.refresh(controller.signal)
+        response = await send()
+      }
+      controller.signal.throwIfAborted()
+      return response
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   async control(command: 'play' | 'pause' | 'next' | 'previous'): Promise<void> {

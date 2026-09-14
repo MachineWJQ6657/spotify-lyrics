@@ -31,6 +31,16 @@ function readSpotifyMetadataEntries(buffer: Buffer, key: string): SpotifyMetadat
     const index = buffer.indexOf(needle, from)
     if (index < 0) break
     from = index + needle.length
+    // Match the complete protobuf map key, not a suffix such as "title"
+    // inside "album_title", which would create a false track boundary.
+    let exactKey = false
+    for (let width = 1; width <= 5 && index - width - 1 >= 0; width++) {
+      const start = index - width
+      if (buffer[start - 1] !== 0x0a) continue
+      const keyLength = readVarint(buffer, start)
+      if (keyLength?.next === index && keyLength.value === needle.length) { exactKey = true; break }
+    }
+    if (!exactKey) continue
     // A real map key is immediately followed by protobuf field 2 (wire type 2).
     if (buffer[from] !== 0x12) continue
     const length = readVarint(buffer, from + 1)
@@ -71,11 +81,19 @@ function byteOffsets(buffer: Buffer, value: string) {
  * safe to use; an absent local field is a normal, conservative fallback.
  */
 function activeMetadataReader(buffer: Buffer, title: string, trackUri: string) {
-  const titleOffsets = readSpotifyMetadataEntries(buffer, 'title')
-    .filter(entry => entry.value.trim() === title)
-    .map(entry => entry.offset)
-  const anchors = [...titleOffsets, ...byteOffsets(buffer, trackUri)]
+  const titles = readSpotifyMetadataEntries(buffer, 'title')
+  const titleOffset = titles.find(entry => entry.value.trim() === title)?.offset
+  // Identity can repeat later in the queue with a different Mix recipe.
+  // Anchor only the active occurrence, not every matching title/URI in file.
+  const uriOffset = titleOffset == null ? undefined : byteOffsets(buffer, trackUri)
+    .filter(offset => offset <= titleOffset && titleOffset - offset <= ACTIVE_TRACK_METADATA_RADIUS).at(-1)
+  const anchors = [titleOffset, uriOffset].filter((offset): offset is number => offset != null)
+  const nextTitle = titles.find(entry => titleOffset != null && entry.offset > titleOffset)?.offset ?? buffer.length
+  const nextTrack = titleOffset == null ? buffer.length
+    : byteOffsets(buffer, 'spotify:track:').find(offset => offset > titleOffset) ?? buffer.length
+  const end = Math.min(nextTitle, nextTrack)
   const nearby = (key: string) => readSpotifyMetadataEntries(buffer, key)
+    .filter(entry => entry.offset < end)
     .map(entry => ({ ...entry, distance: anchors.reduce((best, anchor) => Math.min(best, Math.abs(entry.offset - anchor)), Infinity) }))
     .filter(entry => entry.distance <= ACTIVE_TRACK_METADATA_RADIUS)
     .sort((left, right) => left.distance - right.distance || left.offset - right.offset)

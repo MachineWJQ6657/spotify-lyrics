@@ -18,9 +18,26 @@ function entry(key: string, value: string) {
 }
 
 describe('Spotify mixed-playlist transition parser', () => {
+  it.each([0, 20_000])('does not borrow a later occurrence of the same song with a %i-byte queue gap', gap => {
+    const uri = 'spotify:track:1mcXApk7PDpUTdJDKdqc4e'
+    const data = Buffer.concat([
+      entry('uri', uri), entry('title', '同じ曲'),
+      Buffer.alloc(gap),
+      entry('uri', uri), entry('title', '同じ曲'),
+      entry('custom_reporting_attribution', 'MixedPlaylist'),
+      entry('audio.speed_automation', '[{"from_position":0,"speed":0.9}]')
+    ])
+    expect(parseSpotifyPlaybackState(data)).toMatchObject({ title: '同じ曲', trackUri: uri, profile: null })
+  })
+
   it('reads protobuf metadata map entries without the private outer schema', () => {
     const data = Buffer.concat([entry('title', 'パレード'), entry('title', 'duplicate')])
     expect(readSpotifyMetadataValues(data, 'title')).toEqual(['パレード', 'duplicate'])
+  })
+
+  it('matches complete map keys rather than suffixes of album or queue keys', () => {
+    const data = Buffer.concat([entry('album_title', 'Album'), entry('title', 'Song'), entry('queue_title', 'Queue')])
+    expect(readSpotifyMetadataValues(data, 'title')).toEqual(['Song'])
   })
 
   it('extracts cue points, fades and speed automation', () => {

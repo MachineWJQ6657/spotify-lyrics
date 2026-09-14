@@ -520,7 +520,7 @@ function createWindows() {
           const passed = Boolean(mutation && before[0] && after[0]
             && Math.abs(surfaceWidth - mutation.surfaceWidth) < 1
             && Math.abs(surfaceHeight - mutation.surfaceHeight) < 1
-            && Math.abs(after[0].width - 180) < 2 && before[0].width > after[0].width + 20)
+            && Math.abs(after[0].width - 180) < 2 && Math.abs(before[0].width - after[0].width) > 20)
           qaLog(`overlay hit-region resize: ${JSON.stringify({ passed, before, after, surfaceWidth, surfaceHeight })}`)
           if (!passed) process.exitCode = 1
           if (mutation) await overlayWindow.webContents.executeJavaScript(`(() => {

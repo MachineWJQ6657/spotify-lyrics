@@ -13,6 +13,7 @@ const packaged = JSON.parse(asar.extractFile(archive, 'package.json'))
 const mainEntry = entries.find(entry => entry.replace(/\\/g, '/') === '/out/main/main.js')
 if (!mainEntry) throw new Error('Packaged main entry is missing')
 const main = read(mainEntry)
+const native = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]local-spotify-.*\.js$/.test(entry)).map(read).join('\n')
 const renderer = entries.filter(entry => /[\\/]renderer[\\/].*\.js$/.test(entry)).map(read).join('\n')
 const checks = {
   executable: fs.existsSync(path.join(directory, 'Syllable.exe')),
@@ -32,6 +33,9 @@ const checks = {
   serializedPlaybackRequests: main.includes('class PlaybackRequestGate') && main.includes('backend request still in flight'),
   orderedPlaybackRefreshes: main.includes('class PlaybackRefreshGate') && main.includes('playbackRefreshes.invalidate()'),
   cancellableWebMutations: main.includes('controller.signal.throwIfAborted()') && main.includes('Spotify 控制请求超时'),
+  retainedTransitionClock: native.includes('!matched && wasResolved'),
+  activeQueueOccurrence: native.includes('const end = Math.min(nextTitle, nextTrack)') && native.includes('keyLength.value === needle.length'),
+  isolatedRenderSurfaces: renderer.includes('function ClockedLyricsStage') && renderer.includes('function ClockedPlayerBar') && main.includes('render isolation:'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

@@ -412,6 +412,18 @@ describe('lyrics provider merging', () => {
     expect(mergeProviderSet([primary, wrong], 45_000)?.additionalTracks).toEqual([])
   })
 
+  it('keeps translations with identical sung text and clocks despite different trailing durations', () => {
+    const original = '[00:01.00]朝の光が窓を照らしている\n[00:15.00]遠い海まであなたと歩こう\n[00:30.00]風に揺れている花を見つめて\n[00:45.00]夜の空にも明日を探している'
+    const base: LyricsResult = { syncedLyrics: original, plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 50_000 }
+    const owner: LyricsResult = { syncedLyrics: original, plainLyrics: null, source: '网易云音乐', confidence: 97, matchedDurationMs: 80_000,
+      additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation', source: '网易云音乐 · 翻译', syncedLyrics: '[00:01.00]晨光照窗\n[00:15.00]一起走向海边\n[00:30.00]凝望风中的花\n[00:45.00]夜空寻找明天' }] }
+    const result = mergeProviderSet([base, owner], 50_000)
+    expect(result?.source).toBe(base.source)
+    expect(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toContain('晨光照窗')
+    const shifted = { ...owner, syncedLyrics: original.replace('[00:01.00]', '[00:09.00]').replace('[00:15.00]', '[00:23.00]').replace('[00:30.00]', '[00:38.00]').replace('[00:45.00]', '[00:53.00]') }
+    expect(mergeProviderSet([base, shifted], 50_000)?.additionalTracks).toEqual([])
+  })
+
   it('does not promote a dense Han-only translation over a plausible kana original', () => {
     const japanese: LyricsResult = {
       syncedLyrics: '[00:01.00]君に会いたい\n[00:10.00]空を見上げる\n[00:20.00]声を聞かせて\n[00:30.00]明日へ歩こう',

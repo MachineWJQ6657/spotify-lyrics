@@ -728,6 +728,23 @@ function supplementalOwnerCompatible(owner: LyricsResult, base: LyricsResult) {
   if (durationCompatible(owner, base) && timelineTextSimilarity(owner, base) >= .68) return true
   const ownerRows = timelineRows(owner.syncedLyrics)
   const baseRows = timelineRows(base.syncedLyrics)
+  // Endpoints can differ because of trailing silence or release metadata.
+  // Exact ordered sung content plus distributed near-equal clock anchors is
+  // stronger evidence for translation ownership than duration alone. This
+  // exception never promotes the owner's original timeline or rescales time.
+  const ownerText = parseTimedRows(owner.syncedLyrics).map(row => row.normalizedText).join('')
+  const baseText = parseTimedRows(base.syncedLyrics).map(row => row.normalizedText).join('')
+  if (ownerText.length >= 40 && ownerText === baseText) {
+    // Partial-line LCS matches may begin several seconds inside a combined
+    // sentence; only whole equal rows can prove clock compatibility here.
+    const anchors = lcsTimelineAnchors(ownerRows, baseRows)
+      .filter(anchor => ownerRows[anchor.subjectIndex].text === baseRows[anchor.referenceIndex].text)
+    const first = anchors[0]
+    const last = anchors.at(-1)
+    if (anchors.length >= 4 && first && last
+      && baseRows[last.referenceIndex].timeMs - baseRows[first.referenceIndex].timeMs >= 30_000
+      && anchors.every(anchor => Math.abs(ownerRows[anchor.subjectIndex].timeMs - baseRows[anchor.referenceIndex].timeMs) <= 2000)) return true
+  }
   if (!ownerRows.length || !baseRows.length || Math.min(ownerRows.length, baseRows.length) > 3) return false
   const anchors = lcsTimelineAnchors(ownerRows, baseRows)
   const needed = Math.min(ownerRows.length, baseRows.length)

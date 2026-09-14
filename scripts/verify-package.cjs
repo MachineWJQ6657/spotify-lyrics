@@ -23,12 +23,15 @@ const checks = {
   timelineLabel: renderer.includes('SPOTIFY TIMELINE'),
   noUnsupportedAccuracyClaim: !renderer.includes('FRAME-ACCURATE CLOCK'),
   translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
-  providerRevision33: renderer.includes('LYRICS_PROVIDER_REVISION = 33'),
+  providerRevision34: renderer.includes('LYRICS_PROVIDER_REVISION = 34'),
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
   exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),
   displayedVersion: renderer.includes(`const version = "${expectedVersion}";`),
   clippedOverlayShape: main.includes('function overlayShape('),
   explicitOverlayAcceptance: main.includes('qa acceptance:'),
+  serializedPlaybackRequests: main.includes('class PlaybackRequestGate') && main.includes('backend request still in flight'),
+  orderedPlaybackRefreshes: main.includes('class PlaybackRefreshGate') && main.includes('playbackRefreshes.invalidate()'),
+  cancellableWebMutations: main.includes('controller.signal.throwIfAborted()') && main.includes('Spotify 控制请求超时'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

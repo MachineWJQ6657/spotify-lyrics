@@ -642,6 +642,10 @@ export class LocalSpotifyService {
       if (this.transitionReadPending === identity) this.transitionReadPending = ''
     }
     if (!this.state || localTrackIdentity(this.state) !== identity) return
+    // A temporarily absent/lagging restore file is not evidence that a known
+    // mix disappeared. Preserve the established clock and recording identity;
+    // a positive same-track match with profile:null may still clear automation.
+    if (!matched && wasResolved) return
     // Do not declare an ordinary track until Spotify has had a bounded chance
     // to flush its new context. Rendering nothing briefly is preferable to
     // fetching a wrong-duration LRC and visibly replacing it five seconds later.

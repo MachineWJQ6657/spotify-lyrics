@@ -273,6 +273,18 @@ export function timedLyricsStats(value: string | null | undefined, durationMs = 
   return { lineCount: unique.length, firstMs, lastMs, tailCoverage, maxGapMs, excessiveGapMs, continuity }
 }
 
+function equivalentTimelineDurationOrder(a: LyricsResult, b: LyricsResult) {
+  // Identical timed content can be published with contradictory durations.
+  // Prefer internally consistent metadata, not the duration nearest transport.
+  if (!a.syncedLyrics || a.syncedLyrics !== b.syncedLyrics) return 0
+  const lastMs = timedLyricsStats(a.syncedLyrics).lastMs
+  const contradicts = (item: LyricsResult) => Boolean(item.matchedDurationMs && lastMs > item.matchedDurationMs + 12_000)
+  const consistent = (item: LyricsResult) => Boolean(item.matchedDurationMs && lastMs <= item.matchedDurationMs)
+  if (contradicts(a) && consistent(b)) return 1
+  if (contradicts(b) && consistent(a)) return -1
+  return 0
+}
+
 function lyricQuality(result: LyricsResult, durationMs = 0) {
   const stats = timedLyricsStats(result.syncedLyrics, durationMs)
   const tailPenalty = durationMs > 0 && stats.lastMs < durationMs * .58 ? 55 : 0
@@ -843,7 +855,8 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // approximate similarity must not replace a stronger original with omissions.
   const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide : topTier
   const undominated = plausible.filter(item => !isProvenIncomplete(item, plausible))
-  const viable = undominated.length ? undominated : plausible
+  const complete = undominated.length ? undominated : plausible
+  const viable = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0))
   // A provider-side translation can masquerade as the original and win the
   // numeric score simply by splitting each sung line into two shorter rows.
   // LRCLIB /get has matched the requested title + artist directly, so retain a

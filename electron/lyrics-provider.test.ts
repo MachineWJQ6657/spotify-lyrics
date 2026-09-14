@@ -8,6 +8,16 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('does not prefer contradictory duration metadata for an identical full timeline', () => {
+    const syncedLyrics = Array.from({ length: 26 }, (_, index) => `[${String(Math.floor(index * 10 / 60)).padStart(2, '0')}:${String(index * 10 % 60).padStart(2, '0')}.00]verse number ${index}`).join('\n')
+    const accurate: LyricsResult = { syncedLyrics, plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 256000 }
+    const contradictory = { ...accurate, matchedDurationMs: 230000 }
+    for (const results of [[contradictory, accurate], [accurate, contradictory]]) {
+      const selected = mergeProviderSet(results, 220410)
+      expect(selected?.matchedDurationMs).toBe(256000)
+      expect(selected?.syncedLyrics).toBe(syncedLyrics)
+    }
+  })
   it('requires independent release evidence for mixed-script artist localization', () => {
     const query = { track: 'Blue Day', artist: 'Example鬍子男Band', album: 'Blue Day', durationMs: 237836 }
     const score = (artist: string, duration = 237837, album = 'Blue Day') => weightedScore('Blue Day', artist, duration, query, true, album)

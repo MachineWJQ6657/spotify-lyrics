@@ -2,18 +2,15 @@ import { useCallback, useEffect, useState, type DragEvent } from 'react'
 import { Cloud, Languages, PencilLine, Radio, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
-import { LyricsStage } from './components/LyricsStage'
+import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
 import { SettingsPanel } from './components/SettingsPanel'
-import { PlayerBar } from './components/PlayerBar'
-import { LyricsEditor } from './components/LyricsEditor'
 import { LibraryView } from './components/LibraryView'
 import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
 import { usePlaybackConnection } from './hooks/usePlayback'
-import { usePosition } from './hooks/usePosition'
 import { useWindowSync } from './hooks/useWindowSync'
 import { languageFromFilename, makeTrack } from './lib/lyrics'
-import { calibratedPosition, lyricDurationScale, lyricSourcePosition } from './lib/clock'
+import { lyricDurationScale } from './lib/clock'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
 
@@ -21,15 +18,9 @@ export function App() {
   usePlaybackConnection()
   useWindowSync()
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics } = useAppStore()
-  // The desktop overlay keeps its dedicated 80 ms clock. Repainting the full
-  // 1120×720 client at 10 Hz mostly spent GPU time advancing a four-pixel
-  // progress bar; 160 ms remains visually smooth while leaving the precise,
-  // always-visible lyric surface untouched.
-  const position = usePosition(playback, 160)
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
   const timelineScale = lyricDurationScale(playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition)
-  const lyricPosition = calibratedPosition(lyricSourcePosition(position, playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition), lyricOffset)
   const [view, setView] = useState<AppView>('now')
   const [dropMessage, setDropMessage] = useState('')
   const openEditor = useCallback(() => setEditorOpen(true), [setEditorOpen])
@@ -102,14 +93,14 @@ export function App() {
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />
           <div className="card-watermark"><Sparkles size={14} /> SPOTIFY TIMELINE</div>
-        <LyricsStage document={activeLyrics} positionMs={lyricPosition} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics} />
+        <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics} />
         </div>
         </>}
       </main>
       <SettingsPanel />
     </div>
-    <PlayerBar playback={playback} position={position} demoMode={demoMode} />
-    {editorOpen && <LyricsEditor positionMs={lyricPosition} />}
+    <ClockedPlayerBar playback={playback} demoMode={demoMode} />
+    {editorOpen && <ClockedLyricsEditor playback={playback} document={activeLyrics} offsetMs={lyricOffset} />}
     {dropMessage && <div className="drop-toast">{dropMessage}</div>}
   </div>
 }

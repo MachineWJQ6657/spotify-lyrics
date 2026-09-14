@@ -197,9 +197,11 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   retryCurrentLyrics: () => set(state => {
     const trackId = state.playback?.track?.id
     if (!trackId) return { lyricsRetryToken: state.lyricsRetryToken + 1, lyrics: null }
-    const library = { ...state.library }
-    delete library[trackId]
-    return { library, lyrics: null, lyricsRetryToken: state.lyricsRetryToken + 1 }
+    const baseline = state.lyrics?.trackId === trackId ? state.lyrics : state.library[trackId]
+    // Refresh provider data without destroying edits, imports or calibration.
+    const pending = baseline ? { ...baseline, providerRevision: undefined } : null
+    const library = pending ? { ...state.library, [trackId]: pending } : state.library
+    return { library, lyrics: pending, lyricsRetryToken: state.lyricsRetryToken + 1 }
   }),
   retryTransientLyrics: () => set(state => ({ lyricsRetryToken: state.lyricsRetryToken + 1 })),
   setEditorOpen: editorOpen => set(state => state.editorOpen === editorOpen ? state : { editorOpen }),

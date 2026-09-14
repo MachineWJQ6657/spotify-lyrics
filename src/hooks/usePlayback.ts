@@ -268,6 +268,10 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         }
       }
       const requestIsCurrent = () => !cancelled && providerRequestMatches(requestIdentity, currentRequestIdentity())
+      const previousRequestRetryToken = lastRequestRetryTokenByTrack.get(latestTrack.id)
+      const bypassProviderCache = shouldBypassProviderCache(previousRequestRetryToken, lyricsRetryToken)
+      lastRequestRetryTokenByTrack.set(latestTrack.id, lyricsRetryToken)
+      if (lastRequestRetryTokenByTrack.size > 80) lastRequestRetryTokenByTrack.delete(lastRequestRetryTokenByTrack.keys().next().value!)
       const cached = latest.library[latestTrack.id]
       if (cached?.tracks.length && cached.providerRevision === LYRICS_PROVIDER_REVISION && cached.providerContext === providerContext) {
         // Render the known-good original immediately. Romanizer startup can
@@ -298,10 +302,6 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
       setTransientLyrics(existingView)
       const requestBaseline = useAppStore.getState().lyrics
       let transientGeneration: LyricsDocument | null = null
-      const previousRequestRetryToken = lastRequestRetryTokenByTrack.get(latestTrack.id)
-      const bypassProviderCache = shouldBypassProviderCache(previousRequestRetryToken, lyricsRetryToken)
-      lastRequestRetryTokenByTrack.set(latestTrack.id, lyricsRetryToken)
-      if (lastRequestRetryTokenByTrack.size > 80) lastRequestRetryTokenByTrack.delete(lastRequestRetryTokenByTrack.keys().next().value!)
       const releaseInheritedRetry = () => {
         if (!inheritedTransientRetry) return
         if (transientRetryTokens.get(inheritedTransientRetry.key) === inheritedTransientRetry.token) {

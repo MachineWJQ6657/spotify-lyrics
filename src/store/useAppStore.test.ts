@@ -3,6 +3,24 @@ import { createReferenceDeduplicatingStorage, useAppStore } from './useAppStore'
 import type { LyricsDocument } from '../types'
 
 describe('application-state persistence', () => {
+  it('invalidates a manual refresh without deleting imported lyrics or per-song calibration', () => {
+    const before = useAppStore.getState()
+    const document: LyricsDocument = { trackId: 'refresh-test', providerRevision: 34, offsetMs: 2300,
+      userEditedTrackIds: ['local-translation'], tracks: [{ id: 'local-translation', language: 'zh-Hans',
+        kind: 'translation', label: '中文', source: 'User', lines: [{ startMs: 1000, text: '保留翻译' }] }] }
+    try {
+      useAppStore.setState({ lyrics: document, library: { ...before.library, [document.trackId]: document },
+        playback: { track: { id: document.trackId, name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 },
+          positionMs: 0, observedAtMs: 0, isPlaying: false } })
+      useAppStore.getState().retryCurrentLyrics()
+      const after = useAppStore.getState()
+      expect(after.lyrics).toEqual({ ...document, providerRevision: undefined })
+      expect(after.lyrics?.tracks).toBe(document.tracks)
+      expect(after.library[document.trackId]).toBe(after.lyrics)
+      expect(after.lyricsRetryToken).toBe(before.lyricsRetryToken + 1)
+    } finally { useAppStore.setState(before) }
+  })
+
   it('retries the same state after a failed write instead of marking it saved', () => {
     let attempts = 0
     let saved = ''

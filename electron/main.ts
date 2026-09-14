@@ -9,6 +9,7 @@ import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { TransportGate, type TransportBackend } from './transport-gate'
+import { PlaybackRequestGate } from './playback-request-gate'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
 
@@ -40,6 +41,7 @@ let boundsPublishTimer: NodeJS.Timeout | null = null
 let pendingBoundsShapeUpdate = false
 let applyingOverlayBounds = false
 const transportGate = new TransportGate()
+const playbackRequests = new PlaybackRequestGate()
 let overlayClickThrough = false
 let overlayMouseIgnored = false
 let overlayMovable = true
@@ -779,6 +781,15 @@ interface PlaybackCommandResult {
 
 /** Single authority for every Syllable transport surface and backend. */
 async function executePlaybackCommand(command: 'play' | 'pause' | 'next' | 'previous'): Promise<PlaybackCommandResult> {
+  const result = await playbackRequests.run(() => executeSerializedPlaybackCommand(command))
+  if (!result.accepted) {
+    qaLog(`transport ignored: ${command}; backend request still in flight`)
+    return { accepted: false, action: null, pending: true }
+  }
+  return result.value
+}
+
+async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'next' | 'previous'): Promise<PlaybackCommandResult> {
   const backend: TransportBackend = localSpotify?.hasTrack() ? 'local' : 'web'
   const service = backend === 'local' ? localSpotify : spotify
   if (!service) throw new Error('Spotify 本地控制服务尚未启动')
@@ -857,9 +868,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
-    if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
-    if (lastPlayback?.playbackSource === 'local' && localSpotify) await localSpotify.seek(positionMs)
-    else await spotify.seek(positionMs)
+    const result = await playbackRequests.run(async () => {
+      if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
+      if (lastPlayback?.playbackSource === 'local' && localSpotify) await localSpotify.seek(positionMs)
+      else await spotify.seek(positionMs)
+    })
+    if (!result.accepted) throw new Error('Spotify 控制请求尚未完成，请稍后再调整进度')
     setTimeout(async () => { try { lastPlayback = localSpotify?.current() ?? await spotify.getPlayback(); broadcast(lastPlayback) } catch { /* regular poll retries */ } }, 180)
   })
   ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean }) => {

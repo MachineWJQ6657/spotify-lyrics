@@ -422,6 +422,19 @@ function createWindows() {
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate'] : [])
+      if (qaView === 'render-isolation') {
+        const playingAtStart = Boolean(lastPlayback?.isPlaying)
+        await mainWindow.webContents.executeJavaScript('window.__syllableRenderProbe = {}')
+        await new Promise(resolve => setTimeout(resolve, 2400))
+        const counts = await mainWindow.webContents.executeJavaScript('JSON.stringify(window.__syllableRenderProbe)')
+        await mainWindow.webContents.executeJavaScript('delete window.__syllableRenderProbe')
+        const renders = JSON.parse(counts) as Record<string, number>
+        const passed = playingAtStart && Boolean(lastPlayback?.isPlaying)
+          && (renders.lyrics ?? 0) >= 8 && (renders.player ?? 0) >= 8
+          && (renders.shell ?? 0) < Math.min(renders.lyrics, renders.player) / 2
+        qaLog(`render isolation: ${JSON.stringify({ passed, playingAtStart, renders })}`)
+        if (!passed) process.exitCode = 1
+      }
       if (qaView === 'editor') {
         await mainWindow.webContents.executeJavaScript(`document.querySelector('[title="搜索、编辑与校时"]')?.click()`)
         await new Promise(resolve => setTimeout(resolve, 500))

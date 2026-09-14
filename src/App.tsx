@@ -13,8 +13,10 @@ import { languageFromFilename, makeTrack } from './lib/lyrics'
 import { lyricDurationScale } from './lib/clock'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
+import { recordSurfaceRender } from './lib/render-probe'
 
 export function App() {
+  recordSurfaceRender('shell')
   usePlaybackConnection()
   useWindowSync()
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics } = useAppStore()

@@ -40,6 +40,17 @@ describe('Spotify mixed-playlist transition parser', () => {
     expect(readSpotifyMetadataValues(data, 'title')).toEqual(['Song'])
   })
 
+  it('keeps absent transition numbers unknown while preserving explicit zero', () => {
+    const data = Buffer.concat([entry('title', 'Mix'), entry('custom_reporting_attribution', 'MixedPlaylist'),
+      entry('audio.speed_automation', '[{"from_position":0,"speed":0.95}]'), entry('audio.fade_in_start_time', '0')])
+    const profile = parseSpotifyTransitionState(data)
+    expect(profile).not.toBeNull()
+    expect(profile?.fadeInStartMs).toBe(0)
+    expect(profile?.fadeOutStartMs).toBeUndefined()
+    expect(profile?.outputDurationMs).toBeUndefined()
+    expect(profile?.overlapMs).toBeUndefined()
+  })
+
   it('extracts cue points, fades and speed automation', () => {
     const data = Buffer.concat([
       entry('title', '幻燈'), entry('album_title', '幻燈'),

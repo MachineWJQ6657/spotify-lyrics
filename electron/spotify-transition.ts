@@ -104,6 +104,7 @@ function activeMetadataReader(buffer: Buffer, title: string, trackUri: string) {
 }
 
 function finiteNumber(value: string) {
+  if (!value.trim()) return undefined
   const number = Number(value)
   return Number.isFinite(number) ? number : undefined
 }

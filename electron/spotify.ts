@@ -106,9 +106,15 @@ export class SpotifyService {
   async getPlayback(): Promise<PlaybackSnapshot | null> {
     if (!this.session) return null
     if (Date.now() > this.session.expiresAt - 60_000) await this.refresh()
-    const startedAt = Date.now()
+    let startedAt = Date.now()
     let response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session.accessToken}` } })
-    if (response.status === 401) { await this.refresh(); response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session!.accessToken}` } }) }
+    if (response.status === 401) {
+      await this.refresh()
+      // The observation belongs to the successful retry, not the rejected
+      // request or the potentially slow token refresh between requests.
+      startedAt = Date.now()
+      response = await fetch('https://api.spotify.com/v1/me/player', { headers: { authorization: `Bearer ${this.session!.accessToken}` } })
+    }
     if (response.status === 204) return { track: null, positionMs: 0, observedAtMs: Date.now(), isPlaying: false, sampleId: ++this.sampleId, playbackSource: 'web' }
     if (response.status === 429) {
       const retryAfterMs = Math.max(2500, Number(response.headers.get('retry-after') ?? 5) * 1000)

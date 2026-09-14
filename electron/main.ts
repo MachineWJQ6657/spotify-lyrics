@@ -12,6 +12,7 @@ import { TransportGate, type TransportBackend } from './transport-gate'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
 import { PlaybackDiagnostics } from './playback-diagnostics'
+import { DiagnosticExporter } from './diagnostic-export'
 import { sanitizeLyricDiagnosticContext } from '../src/lib/sync-diagnostics'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
@@ -47,6 +48,7 @@ const transportGate = new TransportGate()
 const playbackRequests = new PlaybackRequestGate()
 const playbackRefreshes = new PlaybackRefreshGate()
 const playbackDiagnostics = new PlaybackDiagnostics()
+const diagnosticExporter = new DiagnosticExporter()
 let overlayClickThrough = false
 let overlayMouseIgnored = false
 let overlayMovable = true
@@ -909,10 +911,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('playback:export-diagnostics', async (event, lyricContext: unknown) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return false
     const report = { appVersion: app.getVersion(), ...playbackDiagnostics.report(), lyricContext: sanitizeLyricDiagnosticContext(lyricContext) }
-    const result = await dialog.showSaveDialog(mainWindow, { defaultPath: 'Syllable-sync-diagnostics.json', filters: [{ name: '同步诊断 JSON', extensions: ['json'] }] })
-    if (result.canceled || !result.filePath) return false
-    await writeFile(result.filePath, JSON.stringify(report, null, 2), 'utf8')
-    return true
+    const owner = mainWindow
+    return diagnosticExporter.save(report,
+      () => dialog.showSaveDialog(owner, { defaultPath: 'Syllable-sync-diagnostics.json', filters: [{ name: '同步诊断 JSON', extensions: ['json'] }] }),
+      (filePath, content) => writeFile(filePath, content, 'utf8'))
   })
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
     const result = await playbackRequests.run(async () => {

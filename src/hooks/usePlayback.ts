@@ -72,7 +72,8 @@ const needsRomanizationRepair = (value: string) => {
 export function romanizationNeedsRepair(original: LyricTrack, romanization?: LyricTrack) {
   if (!romanization?.lines.length || !original.lines.length) return true
   const covered = matchedSupplementalLineCount(original, romanization, 1600)
-  return covered / original.lines.length < .96 || romanization.lines.some(line => needsRomanizationRepair(line.text))
+  return covered / original.lines.length < .96 || romanization.lines.some(line => needsRomanizationRepair(line.text)
+    || line.words?.some(word => needsRomanizationRepair(word.text)))
 }
 
 /**
@@ -126,13 +127,13 @@ export function effectiveProviderDurationBucket(durationMs: number | undefined, 
   return providerDurationBucket(durationMs, playbackSource, transitionResolved) ?? (allowDurationless ? 0 : undefined)
 }
 
-async function completeRomanization(original: ReturnType<typeof makeTrack>, tracks: ReturnType<typeof makeTrack>[]) {
+export async function completeRomanization(original: ReturnType<typeof makeTrack>, tracks: ReturnType<typeof makeTrack>[]) {
   const romanization = tracks.find(track => track.kind === 'romanization')
   if (romanization && !romanizationNeedsRepair(original, romanization)) return tracks
   const generated = await window.syllable.lyrics.romanize(original.lines.map(line => line.text))
   if (!romanization) {
     const fallback = makeRomanizedTrack(original)
-    return [...tracks, { ...fallback, source: 'Kuroshiro · Kuromoji', lines: fallback.lines.map((line, index) => ({ ...line, text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text })) }]
+    return [...tracks, { ...fallback, source: 'Kuroshiro · Kuromoji', lines: fallback.lines.map((line, index) => ({ ...line, words: undefined, text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text })) }]
   }
   const repaired = original.lines.map((line, index) => ({
     ...line, words: undefined,

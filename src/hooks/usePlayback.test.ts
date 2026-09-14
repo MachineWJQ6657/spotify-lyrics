@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { completeRomanization } from './usePlayback'
 import type { LyricTrack } from '../types'
 import { effectiveProviderDurationBucket, lyricsProviderContext, matchedSupplementalLineCount, mergeUserEditedTracks, preservedUserEditedTrackIds, providerDurationBucket, providerRequestMatches, romanizationNeedsRepair, shouldBypassProviderCache } from './usePlayback'
 
@@ -8,6 +9,19 @@ const original: LyricTrack = {
 }
 
 describe('romanization completeness', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('does not retain stale kana-only word fragments after generating complete readings', async () => {
+    const timed: LyricTrack = { ...original, lines: [{ startMs: 1000, endMs: 4000, text: '喜んで会いに行くから',
+      words: [{ startMs: 1000, text: '喜んで' }, { startMs: 2000, text: '会いに' }, { startMs: 3000, text: '行くから' }] }] }
+    vi.stubGlobal('window', { syllable: { lyrics: { romanize: async () => ['yorokonde ai ni iku kara'] } } })
+    const result = await completeRomanization(timed, [timed])
+    const romanized = result.find(track => track.kind === 'romanization')!
+    expect(romanized.lines[0]).toMatchObject({ startMs: 1000, endMs: 4000, text: 'yorokonde ai ni iku kara' })
+    expect(romanized.lines[0].words).toBeUndefined()
+    expect(result[0]).toBe(timed)
+    expect(timed.lines[0].words).toHaveLength(3)
+  })
   it('repairs a provider track that omits original lines', () => {
     const partial: LyricTrack = {
       id: 'roma', language: 'romaji', label: 'Romaji', kind: 'romanization', source: 'test',
@@ -22,6 +36,8 @@ describe('romanization completeness', () => {
       lines: original.lines.map(line => ({ startMs: line.startMs, text: 'nihongo desu' }))
     }
     expect(romanizationNeedsRepair(original, complete)).toBe(false)
+    const staleWords: LyricTrack = { ...complete, lines: complete.lines.map(line => ({ ...line, words: [{ startMs: line.startMs, text: '日本語' }] })) }
+    expect(romanizationNeedsRepair(original, staleWords)).toBe(true)
   })
 
   it('does not let one sparse row claim several rapid source lines', () => {

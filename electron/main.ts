@@ -10,6 +10,7 @@ import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { PlaybackRequestGate } from './playback-request-gate'
+import { PlaybackRefreshGate } from './playback-refresh-gate'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
 
@@ -42,6 +43,7 @@ let pendingBoundsShapeUpdate = false
 let applyingOverlayBounds = false
 const transportGate = new TransportGate()
 const playbackRequests = new PlaybackRequestGate()
+const playbackRefreshes = new PlaybackRefreshGate()
 let overlayClickThrough = false
 let overlayMouseIgnored = false
 let overlayMovable = true
@@ -781,7 +783,10 @@ interface PlaybackCommandResult {
 
 /** Single authority for every Syllable transport surface and backend. */
 async function executePlaybackCommand(command: 'play' | 'pause' | 'next' | 'previous'): Promise<PlaybackCommandResult> {
-  const result = await playbackRequests.run(() => executeSerializedPlaybackCommand(command))
+  const result = await playbackRequests.run(() => {
+    playbackRefreshes.invalidate()
+    return executeSerializedPlaybackCommand(command)
+  })
   if (!result.accepted) {
     qaLog(`transport ignored: ${command}; backend request still in flight`)
     return { accepted: false, action: null, pending: true }
@@ -825,7 +830,7 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
       broadcast(lastPlayback)
     }
     qaLog(`transport accepted: ${command}; action=${decision.action}; from=${decision.pending.fromTrackId ?? 'none'}; backend=${backend}`)
-    setTimeout(async () => { try { lastPlayback = localSpotify?.current() ?? await spotify.getPlayback(); broadcast(lastPlayback) } catch { /* regular poll retries */ } }, 180)
+    setTimeout(() => void refreshPlayback().catch(() => undefined), 180)
     return { accepted: true, action: decision.action, pending: decision.action !== 'seek-to-zero' }
   }
   if (transportGate.isPending()) {
@@ -833,8 +838,22 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
     return { accepted: false, action: null, pending: true }
   }
   await service.control(command)
-  setTimeout(async () => { try { lastPlayback = localSpotify?.current() ?? await spotify.getPlayback(); broadcast(lastPlayback) } catch { /* regular poll retries */ } }, 180)
+  setTimeout(() => void refreshPlayback().catch(() => undefined), 180)
   return { accepted: true, action: command, pending: false }
+}
+
+async function refreshPlayback() {
+  const local = localSpotify?.current()
+  if (local) {
+    playbackRefreshes.invalidate()
+    lastPlayback = local
+    broadcast(local)
+    return
+  }
+  await playbackRefreshes.refresh(() => spotify.getPlayback(), snapshot => {
+    lastPlayback = snapshot
+    broadcast(snapshot)
+  })
 }
 
 async function poll() {
@@ -842,10 +861,11 @@ async function poll() {
   try {
     const local = localSpotify?.current()
     if (local) {
+      playbackRefreshes.invalidate()
       if (lastPlayback?.playbackSource !== 'local') { lastPlayback = local; broadcast(local) }
       nextPollMs = 5000
     }
-    else if (spotify.isConnected()) { lastPlayback = await spotify.getPlayback(); broadcast(lastPlayback) }
+    else if (spotify.isConnected()) await refreshPlayback()
   }
   catch (error) {
     if (error instanceof SpotifyRateLimitError) nextPollMs = error.retryAfterMs
@@ -860,9 +880,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   qaLog(`startup secondary-test=${secondaryMonitorQa}; displays=${JSON.stringify(screen.getAllDisplays().map(display => ({ id: display.id, primary: display.id === screen.getPrimaryDisplay().id, workArea: display.workArea, scaleFactor: display.scaleFactor })))}`)
   ipcMain.handle('auth:status', () => ({ connected: spotify.isConnected(), localConnected: localSpotify?.hasTrack() ?? false }))
   ipcMain.handle('auth:login', async (_event, clientId: string) => { await spotify.login(clientId); return { connected: true } })
-  ipcMain.handle('auth:logout', async () => { await spotify.logout(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); return { connected: false } })
+  ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); return { connected: false } })
   ipcMain.handle('playback:current', async event => {
-    const playback = lastPlayback ?? await spotify.getPlayback()
+    if (!lastPlayback) await refreshPlayback()
+    const playback = lastPlayback
     const auxiliary = event.sender === overlayWindow?.webContents || event.sender === overlayControlsWindow?.webContents
     return auxiliary ? withoutEmbeddedCover(playback) : playback
   })
@@ -870,11 +891,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
     const result = await playbackRequests.run(async () => {
       if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
+      playbackRefreshes.invalidate()
       if (lastPlayback?.playbackSource === 'local' && localSpotify) await localSpotify.seek(positionMs)
       else await spotify.seek(positionMs)
     })
     if (!result.accepted) throw new Error('Spotify 控制请求尚未完成，请稍后再调整进度')
-    setTimeout(async () => { try { lastPlayback = localSpotify?.current() ?? await spotify.getPlayback(); broadcast(lastPlayback) } catch { /* regular poll retries */ } }, 180)
+    setTimeout(() => void refreshPlayback().catch(() => undefined), 180)
   })
   ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean }) => {
     const lyricsFetchStartedAt = Date.now()
@@ -1047,6 +1069,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   void import('./local-spotify').then(({ LocalSpotifyService }) => {
     localSpotify = new LocalSpotifyService()
     localSpotify.start(snapshot => {
+      // Repeated empty native polls must not starve the Web-only fallback.
+      if (snapshot || lastPlayback?.playbackSource === 'local') playbackRefreshes.invalidate()
       if (!snapshot) {
         const pendingTransport = transportGate.pending()
         if (lastPlayback?.playbackSource === 'local' && pendingTransport?.backend === 'local') {

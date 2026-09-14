@@ -1,6 +1,8 @@
 # Syllable continuation checkpoint — 2026-09-14 / 0.4.24 candidate
 
-## Latest source: 0.4.24 (candidate, not fully accepted)
+## Latest source: 0.4.25 (candidate, not fully accepted)
+
+- 2026-09-14 0.4.25 package: dist60874 exit0. Bundles pending diagnostics/export, Web read timeout, serial romanizer, full romaji word cleanup, manual refresh preservation and partial-result calibration. Previous combined acceptance289/289 before version-only change; build passed during dist. Extended verify-package checks new features; both win-unpacked and fresh release/verified-0425-20260914-114000 pass. AsarSHA25602346586b768ef170137134f9e0474e7944c39734627514d95f7cd865bf9967a. PortableZIP SHA256 F84F265AFD9F72704E7239A0DBA01A330B35051673BEA8EC20D29AD6DA16B98E; SetupSHA256270AFDBDCA7EBE88F12F5A3DBA5EAFAAF335C657D942C3AC308931BFB436DF1B. Old candidates retained. No launch/runtime acceptance yet, no GitHub Release upload, no Spotify commands/audio capture. No live handles. NEXT run new packaged candidate internal secondary QA then actual UI/export/audio synchronization validation. Goal remains incomplete; docs/ untouched.
 
 - 2026-09-14 combined acceptance session93838 exit0: all289 tests across32files passed in68.96s with ONLINE/NATIVE/DICTIONARY QA enabled. New actual-effect/store regressions verify outgoing romanizer result is ignored even before cleanup, IPC failure retains visible/persisted baseline, and cleanup cancels scheduled12s retry. Build passed. These tests do not prove audio sync or physical overlay behavior. No playback commands/audio capture/UI launches. No live handles remaining; source unbundled after0.4.24. Next package pending diagnostics/Webread/romanization/manualrefresh/calibration changes in a unique candidate, then secondary actual UI/audio acceptance. Goal incomplete; docs/ untouched.
 

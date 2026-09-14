@@ -36,6 +36,10 @@ const checks = {
   retainedTransitionClock: native.includes('!matched && wasResolved'),
   activeQueueOccurrence: native.includes('const end = Math.min(nextTitle, nextTrack)') && native.includes('keyLength.value === needle.length'),
   isolatedRenderSurfaces: renderer.includes('function ClockedLyricsStage') && renderer.includes('function ClockedPlayerBar') && main.includes('render isolation:'),
+  diagnosticExport: main.includes('class DiagnosticExporter') && main.includes('playback:export-diagnostics'),
+  serializedRomanization: main.includes('jobs.size >= 8') && main.includes('queue = task.catch('),
+  refreshCalibration: renderer.includes('function preserveLyricsCalibration(') && renderer.includes('const calibrated = preserveLyricsCalibration('),
+  preservedRefreshBaseline: renderer.includes('providerRevision: void 0') && renderer.includes('const pending = baseline'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

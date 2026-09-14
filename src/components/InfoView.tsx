@@ -1,9 +1,21 @@
-import { Captions, CheckCircle2, CircleHelp, Clock3, ExternalLink, Keyboard, MonitorUp, Settings2, Wifi } from 'lucide-react'
+import { useState } from 'react'
+import { Captions, CheckCircle2, CircleHelp, Clock3, Download, ExternalLink, Keyboard, MonitorUp, Settings2, Wifi } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { lyricDurationScale, lyricSourcePosition } from '../lib/clock'
 import { hasKana, scriptPresentation } from '../lib/script'
 
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
+  const [exporting, setExporting] = useState(false)
+  const [exportStatus, setExportStatus] = useState('')
+  const exportDiagnostics = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const saved = await window.syllable.playback.exportDiagnostics()
+      setExportStatus(saved ? '诊断已保存在你选择的位置，未上传。' : '已取消保存。')
+    } catch (error) { setExportStatus(`保存失败：${error instanceof Error ? error.message : String(error)}`) }
+    finally { setExporting(false) }
+  }
   const { connected, localConnected, demoMode, playback, lyrics, settings, patchSettings, setLyricsOffset } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const offsetMs = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
@@ -35,10 +47,15 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     <div className="content-page-header"><span>HELP & DIAGNOSTICS</span><h1>帮助与诊断</h1><p>按钮没有反应时，先在这里确认播放源和快捷键状态。</p></div>
     <div className="diagnostic-card">
       <div className={`diagnostic-icon ${localConnected || connected ? 'online' : ''}`}><Wifi /></div>
-      <div><strong>{status}</strong><span>{playback?.track ? <>已识别：<span {...trackNamePresentation}>{playback.track.name}</span> · <span {...trackArtistPresentation}>{playback.track.artist}</span>{playback.clockDriftMs != null ? ` · 实时时钟差 ${playback.clockDriftMs > 0 ? '+' : ''}${playback.clockDriftMs} ms` : ''}</> : '请打开 Spotify 桌面端并播放任意歌曲'}</span></div>
+      <div><strong>{status}</strong><span>{playback?.track ? <>已识别：<span {...trackNamePresentation}>{playback.track.name}</span> · <span {...trackArtistPresentation}>{playback.track.artist}</span>{playback.clockDriftMs != null ? ` · 内部采样差 ${playback.clockDriftMs > 0 ? '+' : ''}${playback.clockDriftMs} ms（非人声同步误差）` : ''}</> : '请打开 Spotify 桌面端并播放任意歌曲'}</span></div>
       {(localConnected || connected) && <CheckCircle2 className="diagnostic-check" />}
     </div>
-    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms（仅诊断），重叠 {playback.transition.overlapMs ?? 0} ms，速度曲线时钟修正 {mixCorrectionMs > 0 ? '+' : ''}{mixCorrectionMs} ms。</div>}
+    <div className="info-note">
+      <p>遇到歌词提前、延迟或切歌回跳时，可导出最近 180 次播放采样。记录只暂存在内存，包含歌名、艺人、播放进度与速度曲线换算后的进度；不含录音、歌词正文、账号凭据或封面，不会自动上传。内部采样差小不代表歌词与人声同步准确。</p>
+      <button className="diagnostics-export" onClick={() => void exportDiagnostics()} disabled={exporting}><Download size={14} />{exporting ? '正在保存…' : '导出同步诊断'}</button>
+      {exportStatus && <p role="status">{exportStatus}</p>}
+    </div>
+    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms（仅诊断），重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}，速度曲线时钟修正 {mixCorrectionMs > 0 ? '+' : ''}{mixCorrectionMs} ms。</div>}
     {!playback?.transition && durationScale !== 1 && <div className="info-note">Spotify 的混合播放时长与高置信度发行版歌词不同；仅将歌词时钟按 {durationScale.toFixed(4)}× 映射到 Spotify 实时进度，播放本身不会被修改。</div>}
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + L</strong><span>显示或隐藏桌面悬浮歌词</span></article>

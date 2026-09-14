@@ -11,6 +11,7 @@ import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
+import { PlaybackDiagnostics } from './playback-diagnostics'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
 
@@ -44,6 +45,7 @@ let applyingOverlayBounds = false
 const transportGate = new TransportGate()
 const playbackRequests = new PlaybackRequestGate()
 const playbackRefreshes = new PlaybackRefreshGate()
+const playbackDiagnostics = new PlaybackDiagnostics()
 let overlayClickThrough = false
 let overlayMouseIgnored = false
 let overlayMovable = true
@@ -758,6 +760,7 @@ function broadcast(value: unknown) {
   let overlayPayload = value
   if (value && typeof value === 'object' && 'track' in value) {
     const playback = value as NonNullable<typeof lastPlayback>
+    playbackDiagnostics.record(playback)
     const track = playback.track
     const pendingTransport = transportGate.pending()
     const observedBackend: TransportBackend = playback.playbackSource === 'local' ? 'local' : 'web'
@@ -780,6 +783,7 @@ function broadcast(value: unknown) {
       else lastBroadcastCoverTrackId = track.id
     }
   } else if (value === null) {
+    playbackDiagnostics.record(null)
     lastBroadcastCoverTrackId = ''
     transportGate.observeTrack(null)
   }
@@ -893,7 +897,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   qaLog(`startup secondary-test=${secondaryMonitorQa}; displays=${JSON.stringify(screen.getAllDisplays().map(display => ({ id: display.id, primary: display.id === screen.getPrimaryDisplay().id, workArea: display.workArea, scaleFactor: display.scaleFactor })))}`)
   ipcMain.handle('auth:status', () => ({ connected: spotify.isConnected(), localConnected: localSpotify?.hasTrack() ?? false }))
   ipcMain.handle('auth:login', async (_event, clientId: string) => { await spotify.login(clientId); return { connected: true } })
-  ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); return { connected: false } })
+  ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); playbackDiagnostics.clear(); return { connected: false } })
   ipcMain.handle('playback:current', async event => {
     if (!lastPlayback) await refreshPlayback()
     const playback = lastPlayback
@@ -901,6 +905,14 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return auxiliary ? withoutEmbeddedCover(playback) : playback
   })
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
+  ipcMain.handle('playback:export-diagnostics', async event => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return false
+    const report = { appVersion: app.getVersion(), ...playbackDiagnostics.report() }
+    const result = await dialog.showSaveDialog(mainWindow, { defaultPath: 'Syllable-sync-diagnostics.json', filters: [{ name: '同步诊断 JSON', extensions: ['json'] }] })
+    if (result.canceled || !result.filePath) return false
+    await writeFile(result.filePath, JSON.stringify(report, null, 2), 'utf8')
+    return true
+  })
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
     const result = await playbackRequests.run(async () => {
       if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')

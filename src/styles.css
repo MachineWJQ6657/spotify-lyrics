@@ -448,6 +448,10 @@ input[type=range]::-webkit-slider-thumb { width: 14px; height: 14px; border: 0; 
   font-weight: 700;
 }
 .info-note { color: #b7b7b7; background: #242424; }
+.diagnostic-card span span { display: inline; margin-top: 0; }
+.diagnostics-export { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #505050; border-radius: 18px; background: #181818; color: #f3f3f3; font: inherit; cursor: pointer; }
+.diagnostics-export:hover { border-color: var(--spotify); }
+.diagnostics-export:disabled { opacity: .55; cursor: wait; }
 .help-grid article > svg, .docs-link { color: var(--spotify); }
 .lyrics-editor { border-color: #3a3a3a; background: #121212; }
 .editor-header { background: #181818; }

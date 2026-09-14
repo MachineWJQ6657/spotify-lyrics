@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('syllable', {
   },
   playback: {
     current: () => ipcRenderer.invoke('playback:current'),
+    exportDiagnostics: () => ipcRenderer.invoke('playback:export-diagnostics'),
     command: (command: string) => ipcRenderer.invoke('playback:command', command),
     seek: (positionMs: number) => ipcRenderer.invoke('playback:seek', positionMs),
     onUpdate: (callback: (value: unknown) => void) => {

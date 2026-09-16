@@ -563,7 +563,18 @@ input[type=range]::-webkit-slider-thumb { width: 14px; height: 14px; border: 0; 
 .overlay-shell.effect-outline .overlay-primary { -webkit-text-stroke: 1px rgba(0,0,0,.92); paint-order: stroke fill; text-shadow: 0 1px 3px #000; }
 .overlay-shell.effect-outline .overlay-secondary { -webkit-text-stroke: .45px rgba(0,0,0,.9); paint-order: stroke fill; }
 .overlay-shell.no-background.effect-none .overlay-primary { text-shadow: 0 2px 6px rgba(0,0,0,.92); }
-.lyrics-list, .lyric-group, .karaoke-line span { transition: none; }
+.lyrics-list { transition: none; }
+.lyric-group { transition: opacity 260ms cubic-bezier(.22, .61, .36, 1); }
+.karaoke-line span { transition: color 160ms linear; }
+.overlay-line-content { animation: lyric-line-enter 260ms cubic-bezier(.22, .61, .36, 1); }
+@keyframes lyric-line-enter {
+  from { opacity: .5; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lyric-group, .karaoke-line span { transition: none; }
+  .overlay-line-content { animation: none; }
+}
 
 /* Script-specific Windows font stacks. Avoid synthetic fractional weights and
    tiny UI type, both of which look especially rough at 100–125% display DPI. */

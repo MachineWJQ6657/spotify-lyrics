@@ -104,11 +104,13 @@ export function Overlay() {
   return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
     <div className="overlay-surface">
       <div className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
-        <div lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-primary karaoke-line ${baseClass}`}>{line?.words?.length ? line.words.map((word, wordIndex) => <span className={position >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line?.text?.trim() || '♪'}</div>
-        {secondaries.map(({ track, line: sibling }) => {
-          const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
-          return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling?.text}</div>
-        })}
+        <div className="overlay-line-content" key={`${playback?.track?.id ?? 'none'}-${line?.startMs ?? -1}`}>
+          <div lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-primary karaoke-line ${baseClass}`}>{line?.words?.length ? line.words.map((word, wordIndex) => <span className={position >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line?.text?.trim() || '♪'}</div>
+          {secondaries.map(({ track, line: sibling }) => {
+            const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
+            return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling?.text}</div>
+          })}
+        </div>
       </div>
       <span className="overlay-resize-cue" aria-hidden="true" />
     </div>

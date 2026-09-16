@@ -1,6 +1,8 @@
 # Syllable continuation checkpoint — 2026-09-14 / 0.4.24 candidate
 
-## Latest source: 0.4.25 (candidate, not fully accepted)
+## Latest source: 0.4.26 (candidate, not fully accepted)
+
+- 2026-09-16 0.4.26 current package: offline258 passed/35 opt-in skipped, dist14933 exit0. Bundles post-0.4.25 identical-timeline duration metadata guard and 5s native startup clock fallback. Extended package verifier passes all checks in release/current; asarSHA256 772b696ccfc8f8ee1c15ad8be8d5647acaa86d013cb8b185125a12108c0860fe. PortableZIP SHA256 C0B4F9CC27791AF7AC88BAA7591F9E0D1105C93387973A9DC5FEF91F881E8A79; SetupSHA256 F39A22879DB33D05B2A1A71E2060C2536E86E66E2D4F7DD93693743B298FA10B. Stable core executable is D:/Projects/spotify-lyrics/release/current/Syllable.exe. Created verified desktop shortcut C:/Desktop/Syllable.lnk targeting that exact executable with matching working directory/icon. Replaced and deleted 0.4.25 release artifacts after 0.4.26 verification. This package is not a claim of generalized audible synchronization or physical overlay acceptance; goal remains incomplete.
 
 - 2026-09-14 SOURCE startup fallback now5000ms instead3200, based on observed~4510ms native cadence. Correction still releases after180ms; paused120ms unchanged; normal poststartup1400ms publish cadence unchanged. Synthetic late4.5s correction regression added; expected fallback tests updated. 258offline/35skipped,build passed. Tradeoff up to1.8s extra initial wait when no large correction detected; not guarantee against all stale/late samples. Native Worker stringifieshelper so change included in next build, not current0425package. Next actual built-source startup verification and audio/ramp semantics. No live processes/audio/commands this turn; goal incomplete.
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import { appendFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -16,6 +16,7 @@ import { DiagnosticExporter } from './diagnostic-export'
 import { sanitizeLyricDiagnosticContext } from '../src/lib/sync-diagnostics'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
+import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
 // process removes most of the per-window Chromium overhead while preserving GPU
@@ -25,6 +26,8 @@ if (process.platform === 'win32') app.setAppUserModelId('studio.syllable.desktop
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const spotify = new SpotifyService()
+const acousticClock = new AcousticClock()
+let audioCaptureGrantUntil = 0
 let localSpotify: LocalSpotifyService | null = null
 let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
@@ -408,6 +411,19 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
   void mainWindow.loadURL(rendererUrl())
+  mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
+    // A short, one-use grant from the visible main renderer. Auxiliary windows
+    // cannot start capture. This prototype reads system output, never a mic.
+    if (!mainWindow || request.frame !== mainWindow.webContents.mainFrame || Date.now() > audioCaptureGrantUntil) {
+      callback({}); return
+    }
+    audioCaptureGrantUntil = 0
+    void desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      .then(sources => {
+        const source = sources.find(item => item.display_id === String(secondaryDisplay().id)) ?? sources[0]
+        callback(source ? { video: source, audio: 'loopback' } : {})
+      }).catch(() => callback({}))
+  })
   mainWindow.on('close', event => {
     if (quitting) return
     event.preventDefault()
@@ -426,7 +442,26 @@ function createWindows() {
       if (!mainWindow) return
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
-        : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate'] : [])
+        : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
+        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible'] : [])
+      if (qaView === 'audio-sync') {
+        const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+          [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
+          await new Promise(resolve => setTimeout(resolve, 200));
+          const panel = document.querySelector('.audio-sync-panel');
+          panel?.scrollIntoView({ block: 'end' });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const buttons = panel?.querySelectorAll('button');
+          const rect = panel?.getBoundingClientRect();
+          const viewport = document.querySelector('.content-page')?.getBoundingClientRect();
+          return { panel: Boolean(panel?.textContent.includes('当前阶段不支持无参照校准')),
+            off: Boolean(panel?.querySelector('[role="status"]')?.textContent.includes('未启用')),
+            controls: buttons?.length === 3 && buttons[1].disabled && buttons[2].disabled,
+            visible: Boolean(rect && viewport && rect.top >= viewport.top && rect.bottom <= viewport.bottom + 1) };
+        })()`)
+        for (const name of ['panel', 'off', 'controls', 'visible']) checks.record(name, result?.[name] === true)
+        qaLog(`audio sync UI: ${JSON.stringify(result)}`)
+      }
       if (qaView === 'render-isolation') {
         const playingAtStart = Boolean(lastPlayback?.isPlaying)
         await mainWindow.webContents.executeJavaScript('window.__syllableRenderProbe = {}')
@@ -659,7 +694,7 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard') {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync') {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -759,6 +794,10 @@ function withoutEmbeddedCover(value: typeof lastPlayback) {
 }
 
 function broadcast(value: unknown) {
+  if (value === null || (value && typeof value === 'object' && 'track' in value)) {
+    acousticClock.observePlayback(value as typeof lastPlayback)
+    value = acousticClock.decorate(value as typeof lastPlayback)
+  }
   let mainPayload = value
   let overlayPayload = value
   if (value && typeof value === 'object' && 'track' in value) {
@@ -903,11 +942,30 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); playbackDiagnostics.clear(); return { connected: false } })
   ipcMain.handle('playback:current', async event => {
     if (!lastPlayback) await refreshPlayback()
-    const playback = lastPlayback
+    const playback = acousticClock.decorate(lastPlayback)
     const auxiliary = event.sender === overlayWindow?.webContents || event.sender === overlayControlsWindow?.webContents
     return auxiliary ? withoutEmbeddedCover(playback) : playback
   })
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
+  ipcMain.handle('audio-sync:prepare', event => {
+    if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error('请先播放歌曲')
+    audioCaptureGrantUntil = Date.now() + 10000
+    return true
+  })
+  ipcMain.handle('audio-sync:clear', event => {
+    if (event.sender !== mainWindow?.webContents) return false
+    audioCaptureGrantUntil = 0
+    acousticClock.clear()
+    broadcast(lastPlayback)
+    return true
+  })
+  ipcMain.handle('audio-sync:observation', (event, observation: AcousticObservation) => {
+    if (event.sender !== mainWindow?.webContents) return 'rejected'
+    const result = acousticClock.accept(observation)
+    broadcast(lastPlayback)
+    qaLog(`acoustic sync: ${result}; score=${Number(observation?.score).toFixed(3)}; rate=${observation?.rate}`)
+    return result
+  })
   ipcMain.handle('playback:export-diagnostics', async (event, lyricContext: unknown) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return false
     const report = { appVersion: app.getVersion(), ...playbackDiagnostics.report(), lyricContext: sanitizeLyricDiagnosticContext(lyricContext) }
@@ -917,6 +975,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       (filePath, content) => writeFile(filePath, content, 'utf8'))
   })
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
+    acousticClock.clear()
     const result = await playbackRequests.run(async () => {
       if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
       playbackRefreshes.invalidate()

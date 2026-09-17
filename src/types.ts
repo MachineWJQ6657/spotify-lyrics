@@ -46,7 +46,17 @@ export interface SpotifyTransitionProfile {
   speedAutomation: SpotifyTransitionSpeedPoint[]
 }
 export interface PlaybackSnapshot {
+  acousticAnchor?: AcousticAnchor
   track: TrackInfo | null; positionMs: number; observedAtMs: number; isPlaying: boolean; deviceName?: string; sampleId?: number; playbackSource?: 'web' | 'local' | 'demo'; clockDriftMs?: number; transition?: SpotifyTransitionProfile; transitionResolved?: boolean; error?: string
+}
+
+export interface AcousticAnchor {
+  trackId: string
+  sourcePositionMs: number
+  observedAtMs: number
+  expiresAtMs: number
+  rate: number
+  score: number
 }
 
 export interface LyricsCandidate {

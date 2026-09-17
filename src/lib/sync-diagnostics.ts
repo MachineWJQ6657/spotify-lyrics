@@ -1,5 +1,5 @@
 import type { LyricsDocument, PlaybackSnapshot } from '../types'
-import { calibratedPosition, lyricSourcePosition, TransportClock } from './clock'
+import { calibratedPosition, lyricPlaybackPosition, TransportClock } from './clock'
 import { activeLineIndex } from './lyrics'
 
 export interface LyricDiagnosticContext {
@@ -19,7 +19,7 @@ export function lyricDiagnosticContext(playback: PlaybackSnapshot | null, lyrics
   const clock = new TransportClock()
   clock.update(playback)
   const offsetMs = document?.offsetMs ?? fallbackOffsetMs
-  const position = calibratedPosition(lyricSourcePosition(clock.position(now), playback?.track?.durationMs, document?.sourceDurationMs, playback?.transition), offsetMs)
+  const position = calibratedPosition(lyricPlaybackPosition(clock.position(now), playback, document?.sourceDurationMs, now), offsetMs)
   return { capturedAtMs: now, matchesPlayback, offsetMs, sourceDurationMs: document?.sourceDurationMs ?? null,
     providerRevision: document?.providerRevision ?? null, estimatedLyricPositionMs: position,
     tracks: (document?.tracks ?? []).slice(0, 16).map(track => ({ language: track.language.slice(0, 40), kind: track.kind,

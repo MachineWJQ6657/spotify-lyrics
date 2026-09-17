@@ -96,3 +96,18 @@ export function lyricSourcePosition(positionMs: number, transportDurationMs?: nu
 export function calibratedPosition(positionMs: number, offsetMs: number) {
   return Math.max(0, positionMs - offsetMs)
 }
+
+/** An accepted audio anchor is already in recording coordinates. Never apply
+ * Spotify Mix speed automation to it a second time. Transport controls retain
+ * their original media-session clock; this helper is for lyric surfaces only.
+ */
+export function lyricPlaybackPosition(positionMs: number, playback: PlaybackSnapshot | null, sourceDurationMs?: number, now = Date.now()) {
+  const anchor = playback?.acousticAnchor
+  if (anchor && playback?.isPlaying && anchor.trackId === playback.track?.id
+    && [anchor.sourcePositionMs, anchor.observedAtMs, anchor.expiresAtMs, anchor.rate, anchor.score].every(Number.isFinite)
+    && anchor.rate >= .8 && anchor.rate <= 1.2 && anchor.score >= .8
+    && now >= anchor.observedAtMs && now < anchor.expiresAtMs) {
+    return Math.max(0, anchor.sourcePositionMs + (now - anchor.observedAtMs) * anchor.rate)
+  }
+  return lyricSourcePosition(positionMs, playback?.track?.durationMs, sourceDurationMs, playback?.transition)
+}

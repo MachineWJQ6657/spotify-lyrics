@@ -5,7 +5,7 @@ import { usePosition } from './hooks/usePosition'
 import { useAppStore } from './store/useAppStore'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from './lib/lyrics'
 import { useWindowSync } from './hooks/useWindowSync'
-import { calibratedPosition, lyricSourcePosition } from './lib/clock'
+import { calibratedPosition, lyricPlaybackPosition } from './lib/clock'
 
 export function Overlay() {
   usePlaybackConnection(false, false)
@@ -13,7 +13,7 @@ export function Overlay() {
   const { playback, lyrics, settings, patchSettings } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const offsetMs = activeLyrics?.offsetMs ?? (playback?.playbackSource === 'demo' ? settings.offsetMs : 0)
-  const position = calibratedPosition(lyricSourcePosition(usePosition(playback, 80), playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition), offsetMs)
+  const position = calibratedPosition(lyricPlaybackPosition(usePosition(playback, 80), playback, activeLyrics?.sourceDurationMs), offsetMs)
   const tracks = useMemo(() => visibleTracks(activeLyrics, settings.enabledLanguages, settings.romanization), [activeLyrics, settings.enabledLanguages, settings.romanization])
   const base = tracks.find(track => track.kind === 'original') ?? tracks[0]
   const baseClass = base?.language === 'ja' ? 'japanese-grid' : base?.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'

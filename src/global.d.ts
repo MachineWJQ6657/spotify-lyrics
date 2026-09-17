@@ -1,6 +1,11 @@
 import type { LyricsCandidate, PlaybackSnapshot, TrackInfo } from './types'
 
 interface SyllableApi {
+  audioSync: {
+    prepare(): Promise<boolean>
+    clear(): Promise<boolean>
+    observation(value: import('../electron/audio-sync/acoustic-clock').AcousticObservation): Promise<'locked' | 'confirming' | 'rejected'>
+  }
   auth: { status(): Promise<{ connected: boolean; localConnected?: boolean }>; login(clientId: string): Promise<{ connected: boolean }>; logout(): Promise<{ connected: boolean }> }
   playback: {
     current(): Promise<PlaybackSnapshot | null>

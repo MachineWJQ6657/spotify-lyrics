@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('syllable', {
+  audioSync: {
+    prepare: () => ipcRenderer.invoke('audio-sync:prepare'),
+    clear: () => ipcRenderer.invoke('audio-sync:clear'),
+    observation: (value: unknown) => ipcRenderer.invoke('audio-sync:observation', value)
+  },
   auth: {
     status: () => ipcRenderer.invoke('auth:status'),
     login: (clientId: string) => ipcRenderer.invoke('auth:login', clientId),

@@ -1,6 +1,6 @@
 import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { usePosition } from '../hooks/usePosition'
-import { calibratedPosition, lyricSourcePosition } from '../lib/clock'
+import { calibratedPosition, lyricPlaybackPosition } from '../lib/clock'
 import { LyricsStage } from './LyricsStage'
 import { LyricsEditor } from './LyricsEditor'
 import { PlayerBar } from './PlayerBar'
@@ -10,7 +10,7 @@ interface ClockProps { playback: PlaybackSnapshot | null; document: LyricsDocume
 
 function useLyricPosition({ playback, document, offsetMs }: ClockProps) {
   const position = usePosition(playback, 160)
-  return calibratedPosition(lyricSourcePosition(position, playback?.track?.durationMs, document?.sourceDurationMs, playback?.transition), offsetMs)
+  return calibratedPosition(lyricPlaybackPosition(position, playback, document?.sourceDurationMs), offsetMs)
 }
 
 // Keep high-frequency clock updates below the app shell. Settings, library,

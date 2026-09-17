@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore'
 import { lyricDurationScale, lyricSourcePosition } from '../lib/clock'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
+import { AudioSyncPanel } from './AudioSyncPanel'
 
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
   const [exporting, setExporting] = useState(false)
@@ -24,7 +25,9 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
   const offsetMs = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
   const durationScale = lyricDurationScale(playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition)
   const mixCorrectionMs = playback ? Math.round(lyricSourcePosition(playback.positionMs, playback.track?.durationMs, activeLyrics?.sourceDurationMs, playback.transition) - playback.positionMs) : 0
-  const clockMode = playback?.transition ? 'Spotify Mix 自动时轴' : durationScale !== 1 ? `Spotify 时长校准 ${durationScale.toFixed(3)}×` : 'Spotify 1:1'
+  const audioActive = playback?.isPlaying && playback.acousticAnchor?.trackId === playback.track?.id
+    && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs
+  const clockMode = audioActive ? '声音校准（实验）' : playback?.transition ? 'Spotify Mix 自动时轴' : durationScale !== 1 ? `Spotify 时长校准 ${durationScale.toFixed(3)}×` : 'Spotify 1:1'
   const trackContext = [playback?.track?.name ?? '', playback?.track?.artist ?? '', playback?.track?.album ?? ''].find(hasKana) ?? ''
   const originalLanguage = activeLyrics?.tracks.find(track => track.kind === 'original')?.language
   const trackNamePresentation = scriptPresentation(playback?.track?.name ?? '', trackContext, originalLanguage)
@@ -43,6 +46,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <article><Settings2 /><div><strong>逐行编辑</strong><span>搜索、改词与取当前时间</span></div><button onClick={openEditor}>打开</button></article>
     </div>
     <div className="info-note">更细的语言、字号、偏移、模糊和鼠标穿透选项都可直接在右侧调整。</div>
+    <AudioSyncPanel />
   </div>
 
   const status = localConnected ? '本机 Spotify 媒体会话已连接' : connected && !demoMode ? 'Spotify Web API 已连接' : '尚未检测到 Spotify 播放'
@@ -65,6 +69,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <article><Keyboard /><strong>Ctrl + Alt + M</strong><span>切换悬浮窗鼠标穿透</span></article>
       <article><CircleHelp /><strong>歌词不匹配</strong><span>点击歌曲标题右侧的铅笔，搜索候选并逐行校时。</span></article>
     </div>
+    <AudioSyncPanel />
     <a className="docs-link" href="https://github.com/tranxuanthang/lrcget" target="_blank">了解 LRC 歌词格式 <ExternalLink size={13} /></a>
   </div>
 }

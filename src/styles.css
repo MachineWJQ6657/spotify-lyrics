@@ -236,6 +236,8 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell) { min-width
 .tip-card code { color: var(--spotify); }
 
 .main-content {
+  min-height: 0;
+  overflow: hidden;
   grid-template-rows: 104px 1fr;
   padding: 24px 28px 20px;
   background: linear-gradient(180deg, #213128 0, #121212 190px, #121212 100%);
@@ -812,3 +814,9 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
   background: rgba(30, 215, 96, .1);
 }
 .empty-lyrics button:hover { background: rgba(30, 215, 96, .18); }
+:root .audio-sync-panel h2 { font-size: 20px; margin: 0 0 12px; }
+:root .audio-sync-panel h2 small { font-size: 12px; color: #b3b3b3; margin-left: 8px; font-weight: 400; }
+.audio-sync-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.audio-sync-actions button { padding: 10px 16px; border: 1px solid #535353; border-radius: 24px; background: #242424; color: white; cursor: pointer; }
+.audio-sync-actions button:disabled { opacity: .45; cursor: default; }
+.audio-sync-actions button:not(:disabled):hover { border-color: #1ed760; }

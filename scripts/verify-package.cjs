@@ -41,6 +41,10 @@ const checks = {
   serializedRomanization: main.includes('jobs.size >= 8') && main.includes('queue = task.catch('),
   refreshCalibration: renderer.includes('function preserveLyricsCalibration(') && renderer.includes('const calibrated = preserveLyricsCalibration('),
   preservedRefreshBaseline: renderer.includes('providerRevision: void 0') && renderer.includes('const pending = baseline'),
+  acousticWorker: entries.some(entry => /[\\/]renderer[\\/]assets[\\/]acoustic-worker-.*\.js$/.test(entry)),
+  acousticWorklet: entries.some(entry => /[\\/]renderer[\\/]audio-sync-worklet\.js$/.test(entry)),
+  acousticSafety: main.includes('captureDurationMs') && main.includes('invalidatedAtMs') && main.includes('audio-sync:observation'),
+  experimentalAudioUi: renderer.includes('当前阶段不支持无参照校准') && renderer.includes('AUDIO ALIGNMENT'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

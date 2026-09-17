@@ -14,11 +14,13 @@ import { lyricDurationScale } from './lib/clock'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
 import { recordSurfaceRender } from './lib/render-probe'
+import { acousticController } from './lib/acoustic-controller'
 
 export function App() {
   recordSurfaceRender('shell')
   usePlaybackConnection()
   useWindowSync()
+  useEffect(() => acousticController.connect(), [])
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
@@ -94,7 +96,7 @@ export function App() {
         </div>
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />
-          <div className="card-watermark"><Sparkles size={14} /> SPOTIFY TIMELINE</div>
+          <div className="card-watermark"><Sparkles size={14} /> {playback?.isPlaying && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs ? 'AUDIO ALIGNMENT · EXPERIMENTAL' : 'SPOTIFY TIMELINE'}</div>
         <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics} />
         </div>
         </>}

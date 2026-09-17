@@ -4,6 +4,15 @@ import { fetchLyrics, parseTimedRows, timedLyricsStats } from './lyrics-provider
 const runOnline = process.env.SYLLABLE_ONLINE_QA === '1' ? describe : describe.skip
 
 runOnline('online lyrics provider smoke tests', () => {
+  it('does not accept the mislabeled Yuujou timeline for Yorushika Walk', async () => {
+    const result = await fetchLyrics({
+      id: 'qa-yorushika-aruku', name: '歩く', artist: 'ヨルシカ', album: 'エルマ',
+      coverUrl: '', durationMs: 206_786
+    }, null, true)
+    expect(result?.syncedLyrics).toMatch(/今日.{0,3}死んでいくような|君の旅した街を歩く/)
+    expect(result?.syncedLyrics).not.toContain('湖の底にいるみたいだ')
+  }, 30_000)
+
   it('does not turn tayori outro engineering credits into sung lyrics', async () => {
     const result = await fetchLyrics({ id: 'qa-haru-wo-matsu-credits', name: '春を待つ', artist: 'tayori', album: 'memento', durationMs: 244723, coverUrl: '' }, null, true)
     expect(parseTimedRows(result?.syncedLyrics).length).toBeGreaterThan(35)

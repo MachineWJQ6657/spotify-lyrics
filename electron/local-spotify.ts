@@ -152,6 +152,11 @@ export function localTrackIdentity(value: Pick<LocalState, 'artist' | 'title' | 
   return `${value.artist}\0${value.title}\0${value.album}`
 }
 
+/** A settled native clock belongs to one recording only. */
+export function shouldResetTrackClock(settledTrackIdentity: string, state: Pick<LocalState, 'artist' | 'title' | 'album'> | null) {
+  return Boolean(settledTrackIdentity && state?.title && localTrackIdentity(state) !== settledTrackIdentity)
+}
+
 export function stabilizeLocalState(previous: LocalState | null, next: LocalState | null, allowShorterDuration = false) {
   if (!previous || !next || localTrackIdentity(previous) !== localTrackIdentity(next)) return next
   const previousLivePosition = previous.statusName === 'PLAYING'
@@ -314,6 +319,8 @@ export class LocalSpotifyService {
       const koffiPath = nodeRequire.resolve('koffi').replace(/([\\/])app\.asar\1/, '$1app.asar.unpacked$1')
       const startupClockGateSource = advanceStartupClockGate.toString()
       const retainPendingLocalStateSource = retainPendingLocalState.toString()
+      const shouldResetTrackClockSource = shouldResetTrackClock.toString()
+      const localTrackIdentitySource = localTrackIdentity.toString()
       const workerSource = `
         const { parentPort, workerData } = require('node:worker_threads')
         const { SpotifyClient } = require(workerData.modulePath)
@@ -333,9 +340,12 @@ export class LocalSpotifyService {
         let firstStateReadyAt = Date.now() + 600
         let startupClockGate = null
         let startupClockReady = false
+        let settledTrackKey = ''
 
         const advanceStartupClockGate = (${startupClockGateSource})
         const retainPendingLocalState = (${retainPendingLocalStateSource})
+        const localTrackIdentity = (${localTrackIdentitySource})
+        const shouldResetTrackClock = (${shouldResetTrackClockSource})
 
         const sendMediaCommand = command => sendNotifyMessage(0xFFFF, 0x0319, 0, command << 16)
 
@@ -363,6 +373,7 @@ export class LocalSpotifyService {
           pendingStateDueAt = 0
           lastSentAt = Date.now()
           const trackKey = (lastState.artist || '') + '\\0' + (lastState.title || '') + '\\0' + (lastState.album || '')
+          settledTrackKey = trackKey
           const includeArt = trackKey !== lastPostedArtTrack && Boolean(lastState.albumArt && lastState.albumArt.length)
           if (includeArt) lastPostedArtTrack = trackKey
           // State events are intentionally coalesced for up to 900 ms. Stamping
@@ -393,6 +404,24 @@ export class LocalSpotifyService {
           // worker's comparison key into an empty string. Outside that bounded
           // transaction, an empty snapshot still correctly clears the session.
           lastState = retainPendingLocalState(lastState, state, skipPendingTrack, Date.now(), skipPendingUntil)
+          if (shouldResetTrackClock(settledTrackKey, lastState)) {
+            // A natural queue transition must not reuse the outgoing song's
+            // settled clock. Announce the new identity at a safe zero anchor
+            // while its native clock settles in the background. Normal starts
+            // continue smoothly; stale/high boundary samples cannot skip lines.
+            startupClockReady = false
+            startupClockGate = null
+            firstStateReadyAt = Date.now() + 5000
+            settledTrackKey = ''
+            if (pendingStateTimer) clearTimeout(pendingStateTimer)
+            pendingStateTimer = null
+            pendingStateDueAt = 0
+            lastSentAt = Date.now()
+            const boundaryTrackKey = localTrackIdentity(lastState)
+            const includeArt = boundaryTrackKey !== lastPostedArtTrack && Boolean(lastState.albumArt && lastState.albumArt.length)
+            if (includeArt) lastPostedArtTrack = boundaryTrackKey
+            parentPort.postMessage({ type: 'state', state: serialize({ ...lastState, positionMs: 0 }, includeArt) })
+          }
           if (!startupClockReady) {
             const now = Date.now()
             if (lastState && lastState.title) {

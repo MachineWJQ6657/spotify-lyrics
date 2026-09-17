@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adoptQueuedTrackDuration, advanceStartupClockGate, gateSameTrackDurationChange, localTrackIdentity, projectTransportState, retainPendingLocalState, stabilizeLocalState } from './local-spotify'
+import { adoptQueuedTrackDuration, advanceStartupClockGate, gateSameTrackDurationChange, localTrackIdentity, projectTransportState, retainPendingLocalState, shouldResetTrackClock, stabilizeLocalState } from './local-spotify'
 
 describe('local Spotify track identity', () => {
   it('stays stable when SMTC reports a different duration for the same song', () => {
@@ -11,6 +11,15 @@ describe('local Spotify track identity', () => {
     const first = localTrackIdentity({ artist: 'Artist', title: 'Song', album: 'Studio' })
     const second = localTrackIdentity({ artist: 'Artist', title: 'Song', album: 'Live' })
     expect(first).not.toBe(second)
+  })
+
+  it('re-arms clock stabilization only for a real replacement identity', () => {
+    const walk = { artist: 'ヨルシカ', title: '歩く', album: 'エルマ' }
+    const settled = localTrackIdentity(walk)
+    expect(shouldResetTrackClock(settled, walk)).toBe(false)
+    expect(shouldResetTrackClock(settled, { ...walk, title: '雨とカプチーノ' })).toBe(true)
+    expect(shouldResetTrackClock(settled, null)).toBe(false)
+    expect(shouldResetTrackClock('', walk)).toBe(false)
   })
 
   it('preserves the larger reliable duration and cover for the same track', () => {

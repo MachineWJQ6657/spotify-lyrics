@@ -46,6 +46,16 @@ describe('TransportClock', () => {
     expect(clock.position(2_000)).toBe(45_000)
   })
 
+  it('accepts sub-second local clock corrections without keeping early lyrics', () => {
+    const clock = new TransportClock()
+    const track = { id: 'x', name: 'x', artist: 'a', album: 'b', coverUrl: '', durationMs: 100_000 }
+    const sample = { track, positionMs: 10_000, observedAtMs: 1_000, isPlaying: true, playbackSource: 'local' as const }
+    clock.update(sample)
+    clock.update({ ...sample, positionMs: 10_200, observedAtMs: 2_000 })
+    expect(clock.position(2_000)).toBe(10_200)
+    expect(clock.position(3_000)).toBe(11_200)
+  })
+
   it('does not apply smoothing again when the same sample is rebroadcast with metadata', () => {
     const clock = new TransportClock()
     const track = { id: 'x', name: 'x', artist: 'a', album: 'b', coverUrl: '', durationMs: 100_000 }

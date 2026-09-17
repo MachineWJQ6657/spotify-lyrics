@@ -45,18 +45,18 @@ describe('local Spotify track identity', () => {
     expect(projectTransportState(state, 'pause', 3_500)).toMatchObject({ positionMs: 12_500, statusName: 'PAUSED', sampledAtMs: 3_500 })
   })
 
-  it('uses elapsed playing time when a delayed paused sample would rewind the UI', () => {
+  it('accepts Spotify pause time even when the previous extrapolation was ahead', () => {
     const shared = { artist: 'Artist', title: 'Song', album: 'Album', durationMs: 200_000, albumArtBase64: '' }
     const previous = { ...shared, positionMs: 10_000, statusName: 'PLAYING', sampledAtMs: 1_000 }
     const delayedPause = { ...shared, positionMs: 10_300, statusName: 'PAUSED', sampledAtMs: 3_000 }
-    expect(stabilizeLocalState(previous, delayedPause)?.positionMs).toBe(12_000)
+    expect(stabilizeLocalState(previous, delayedPause)?.positionMs).toBe(10_300)
   })
 
-  it('does not jump the lyric clock backwards on a stale pause event', () => {
+  it('does not preserve an early lyric clock after an authoritative pause', () => {
     const shared = { artist: 'Artist', title: 'Song', album: 'Album', durationMs: 200_000, albumArtBase64: '', sampledAtMs: 1 }
     const previous = { ...shared, positionMs: 37_694, statusName: 'PLAYING' }
     const next = { ...shared, positionMs: 36_175, statusName: 'PAUSED' }
-    expect(stabilizeLocalState(previous, next)?.positionMs).toBe(37_694)
+    expect(stabilizeLocalState(previous, next)?.positionMs).toBe(36_175)
   })
 })
 

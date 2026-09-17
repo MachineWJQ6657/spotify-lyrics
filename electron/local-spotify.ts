@@ -5,6 +5,7 @@ import type { PlaybackSnapshot } from './spotify'
 import type { SpotifyTransitionProfile } from '../src/types'
 import { spotifySourcePosition } from '../src/lib/clock'
 import { resolveSpotifyTransitionProfile } from './spotify-transition'
+import { nativeClockPosition, observeNativeClock } from './native-clock'
 
 type Command = 'play' | 'pause' | 'next' | 'previous'
 
@@ -159,16 +160,13 @@ export function shouldResetTrackClock(settledTrackIdentity: string, state: Pick<
 
 export function stabilizeLocalState(previous: LocalState | null, next: LocalState | null, allowShorterDuration = false) {
   if (!previous || !next || localTrackIdentity(previous) !== localTrackIdentity(next)) return next
-  const previousLivePosition = previous.statusName === 'PLAYING'
-    ? previous.positionMs + Math.max(0, next.sampledAtMs - previous.sampledAtMs)
-    : previous.positionMs
   return {
     ...next,
     albumArtBase64: next.albumArtBase64 || previous.albumArtBase64,
     durationMs: allowShorterDuration ? next.durationMs : Math.max(previous.durationMs, next.durationMs),
-    positionMs: previous.statusName === 'PLAYING' && next.statusName === 'PAUSED' && next.positionMs < previousLivePosition
-      ? Math.min(previous.durationMs || Number.MAX_SAFE_INTEGER, previousLivePosition)
-      : next.positionMs
+    // A pause is also an authoritative clock correction. Keeping the larger
+    // prediction would preserve an early clock even after Spotify stops.
+    positionMs: next.positionMs
   }
 }
 
@@ -321,8 +319,11 @@ export class LocalSpotifyService {
       const retainPendingLocalStateSource = retainPendingLocalState.toString()
       const shouldResetTrackClockSource = shouldResetTrackClock.toString()
       const localTrackIdentitySource = localTrackIdentity.toString()
+      const observeNativeClockSource = observeNativeClock.toString()
+      const nativeClockPositionSource = nativeClockPosition.toString()
       const workerSource = `
         const { parentPort, workerData } = require('node:worker_threads')
+        const { performance } = require('node:perf_hooks')
         const { SpotifyClient } = require(workerData.modulePath)
         const koffi = require(workerData.koffiPath)
         const user32 = koffi.load('user32.dll')
@@ -341,11 +342,14 @@ export class LocalSpotifyService {
         let startupClockGate = null
         let startupClockReady = false
         let settledTrackKey = ''
+        let nativeClock = null
 
         const advanceStartupClockGate = (${startupClockGateSource})
         const retainPendingLocalState = (${retainPendingLocalStateSource})
         const localTrackIdentity = (${localTrackIdentitySource})
         const shouldResetTrackClock = (${shouldResetTrackClockSource})
+        const observeNativeClock = (${observeNativeClockSource})
+        const nativeClockPosition = (${nativeClockPositionSource})
 
         const sendMediaCommand = command => sendNotifyMessage(0xFFFF, 0x0319, 0, command << 16)
 
@@ -376,15 +380,10 @@ export class LocalSpotifyService {
           settledTrackKey = trackKey
           const includeArt = trackKey !== lastPostedArtTrack && Boolean(lastState.albumArt && lastState.albumArt.length)
           if (includeArt) lastPostedArtTrack = trackKey
-          // State events are intentionally coalesced for up to 900 ms. Stamping
-          // an old event position with the later publish time makes every
-          // renderer believe that stale position was sampled just now. Read the
-          // native smooth clock at the actual publication instant instead.
-          const smoothPosition = Number(client && client.positionSmoothMs)
-          const publishable = lastState.statusName === 'PLAYING' && Number.isFinite(smoothPosition)
-            ? { ...lastState, positionMs: Math.max(0, smoothPosition) }
-            : lastState
-          lastState = publishable
+          // Project the last distinct raw observation to publication time once.
+          // Never use libspotifyctl's 1500ms-deadband smooth clock, and never
+          // overwrite lastState (the raw snapshot) with a projected position.
+          const publishable = { ...lastState, positionMs: nativeClockPosition(nativeClock, performance.now()) }
           parentPort.postMessage({ type: 'state', state: serialize(publishable, includeArt) })
         }
         const scheduleStateAt = dueAt => {
@@ -404,15 +403,15 @@ export class LocalSpotifyService {
           // worker's comparison key into an empty string. Outside that bounded
           // transaction, an empty snapshot still correctly clears the session.
           lastState = retainPendingLocalState(lastState, state, skipPendingTrack, Date.now(), skipPendingUntil)
+          nativeClock = observeNativeClock(nativeClock, lastState, performance.now())
           if (shouldResetTrackClock(settledTrackKey, lastState)) {
-            // A natural queue transition must not reuse the outgoing song's
-            // settled clock. Announce the new identity at a safe zero anchor
-            // while its native clock settles in the background. Normal starts
-            // continue smoothly; stale/high boundary samples cannot skip lines.
+            // Native clock ownership already reset with the new identity.
+            // Keep checking its initial sample, but announce the reported
+            // position rather than inventing zero (Mix may start mid-song).
             startupClockReady = false
             startupClockGate = null
             firstStateReadyAt = Date.now() + 5000
-            settledTrackKey = ''
+            settledTrackKey = localTrackIdentity(lastState)
             if (pendingStateTimer) clearTimeout(pendingStateTimer)
             pendingStateTimer = null
             pendingStateDueAt = 0
@@ -420,12 +419,12 @@ export class LocalSpotifyService {
             const boundaryTrackKey = localTrackIdentity(lastState)
             const includeArt = boundaryTrackKey !== lastPostedArtTrack && Boolean(lastState.albumArt && lastState.albumArt.length)
             if (includeArt) lastPostedArtTrack = boundaryTrackKey
-            parentPort.postMessage({ type: 'state', state: serialize({ ...lastState, positionMs: 0 }, includeArt) })
+            parentPort.postMessage({ type: 'state', state: serialize({ ...lastState, positionMs: nativeClockPosition(nativeClock, performance.now()) }, includeArt) })
           }
           if (!startupClockReady) {
             const now = Date.now()
             if (lastState && lastState.title) {
-              startupClockGate = advanceStartupClockGate(startupClockGate, lastState, now)
+              startupClockGate = advanceStartupClockGate(startupClockGate, { ...lastState, positionMs: nativeClockPosition(nativeClock, performance.now()) }, now)
               firstStateReadyAt = startupClockGate ? startupClockGate.readyAtMs : firstStateReadyAt
             }
             if (now < firstStateReadyAt) {
@@ -454,21 +453,17 @@ export class LocalSpotifyService {
               skipPendingTrack = ''
               skipPendingUntil = 0
             }
-            const important = !lastState || !state || state.title !== lastState.title || state.artist !== lastState.artist || state.durationMs !== lastState.durationMs || state.statusName !== lastState.statusName
+            const important = !lastState || !state || state.title !== lastState.title || state.artist !== lastState.artist || state.album !== lastState.album || state.durationMs !== lastState.durationMs || state.statusName !== lastState.statusName || state.positionMs !== lastState.positionMs
             sendState(state, important)
           })
-          client.on('positionChanged', positionMs => {
-            if (lastState) sendState({ ...lastState, positionMs })
-          })
+          // positionChanged is synthesized by the library's smooth clock;
+          // only stateChanged / distinct latestState positions are observations.
           client.on('closed', () => parentPort.postMessage({ type: 'closed' }))
           client.start()
           sendState(client.latestState(), true)
           setInterval(() => {
             try {
               const fresh = client.latestState()
-              if (fresh?.title && lastState?.title === fresh.title && lastState?.artist === fresh.artist && fresh.statusName === 'PLAYING') {
-                fresh.positionMs = client.positionSmoothMs
-              }
               sendState(fresh)
             } catch (_) {}
           }, 1500)
@@ -498,12 +493,7 @@ export class LocalSpotifyService {
             }
             else if (message.command === 'play') ok = lastState?.statusName === 'PLAYING' || client.play()
             else {
-              const livePosition = Number(client.positionSmoothMs) || Number(lastState?.positionMs) || 0
               ok = lastState?.statusName !== 'PLAYING' || client.pause()
-              if (ok && lastState) {
-                lastState = { ...lastState, positionMs: livePosition, statusName: 'PAUSED' }
-                sendState(lastState, true)
-              }
             }
             if (!ok) {
               if (attemptedSkipTrack && skipPendingTrack === attemptedSkipTrack) {

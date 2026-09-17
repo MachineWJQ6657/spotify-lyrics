@@ -21,7 +21,7 @@ export class TransportClock {
       this.rawAnchor = raw
       return
     }
-    if (snapshot && this.anchor && snapshot.track?.id === this.anchor.track?.id && snapshot.isPlaying && this.anchor.isPlaying) {
+    if (snapshot && snapshot.playbackSource !== 'local' && this.anchor && snapshot.track?.id === this.anchor.track?.id && snapshot.isPlaying && this.anchor.isPlaying) {
       const projected = this.position(snapshot.observedAtMs)
       const drift = snapshot.positionMs - projected
       // Native SMTC samples can arrive a few hundred milliseconds late. Small

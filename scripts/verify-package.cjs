@@ -34,6 +34,7 @@ const checks = {
   orderedPlaybackRefreshes: main.includes('class PlaybackRefreshGate') && main.includes('playbackRefreshes.invalidate()'),
   cancellableWebMutations: main.includes('controller.signal.throwIfAborted()') && main.includes('Spotify 控制请求超时'),
   retainedTransitionClock: native.includes('!matched && wasResolved'),
+  rawNativeClock: native.includes('function observeNativeClock(') && native.includes('nativeClockPosition(nativeClock, performance.now())') && !native.includes('client.positionSmoothMs'),
   activeQueueOccurrence: native.includes('const end = Math.min(nextTitle, nextTrack)') && native.includes('keyLength.value === needle.length'),
   isolatedRenderSurfaces: renderer.includes('function ClockedLyricsStage') && renderer.includes('function ClockedPlayerBar') && main.includes('render isolation:'),
   diagnosticExport: main.includes('class DiagnosticExporter') && main.includes('playback:export-diagnostics'),

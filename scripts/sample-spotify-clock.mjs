@@ -10,9 +10,9 @@ let generation = 0
 const observe = state => {
   const key = JSON.stringify([state.artist, state.title, state.album])
   if (key !== previousKey) { generation++; previousKey = key }
-  samples.push({ elapsedMs: Math.round(performance.now() - started), generation,
+  samples.push({ observedAtMs: Date.now(), elapsedMs: Math.round(performance.now() - started), generation,
     title: state.title, artist: state.artist, status: state.statusName,
-    positionMs: state.positionMs, durationMs: state.durationMs })
+    positionMs: state.positionMs, smoothPositionMs: client.positionSmoothMs, durationMs: state.durationMs })
 }
 try {
   client.start()

@@ -1,6 +1,7 @@
 // Local labeled regression matrix. No capture, playback control or upload.
 // node scripts/evaluate-acoustic-sync.mjs reference1.wav reference2.wav ...
 // --report=path.json writes metrics only, never PCM or source paths.
+// --warped selects the NON-PRODUCTION piecewise alignment research matcher.
 import { spawnSync } from 'node:child_process'
 import { build } from 'esbuild'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -13,6 +14,12 @@ if (!files.length) throw new Error('Provide at least one local reference audio f
 const outfile = path.resolve('.qa-acoustic/evaluation-matcher.mjs')
 await build({ entryPoints: ['electron/audio-sync/fingerprint.ts'], outfile, bundle: true, platform: 'node', format: 'esm' })
 const { fingerprint, matchFingerprint } = await import(pathToFileURL(outfile).href)
+let matcher = matchFingerprint
+if (process.argv.includes('--warped')) {
+  const warpedOut = path.resolve('.qa-acoustic/warped-matcher.mjs')
+  await build({ entryPoints: ['electron/audio-sync/warped-match.ts'], outfile: warpedOut, bundle: true, platform: 'node', format: 'esm' })
+  matcher = (await import(pathToFileURL(warpedOut).href)).matchWarped
+}
 const sr = 8000
 function decode(file, filter) {
   const result = spawnSync('ffmpeg', ['-v', 'error', '-i', file, ...(filter ? ['-af', filter] : []),
@@ -56,12 +63,14 @@ for (let recording = 0; recording < files.length; recording++) {
   if (recordings.length > 1) cases.push({ name: 'other-recording', positive: false, pcm: recordings[(recording + 1) % recordings.length].slice(0, sr * 12) })
   for (const item of cases) {
     const began = performance.now()
-    const result = matchFingerprint(reference, fingerprint(item.pcm, sr))
+    const result = matcher(reference, fingerprint(item.pcm, sr))
     const startErrorMs = item.positive ? result.sourceStartMs - item.startMs : undefined
     const endErrorMs = item.positive ? result.sourceEndMs - (item.endMs ?? item.startMs + item.pcm.length / sr * 1000 * item.rate) : undefined
     const correctPosition = item.positive && Math.abs(startErrorMs) <= 150 && Math.abs(endErrorMs) <= 150 && Math.abs(result.rate - item.rate) <= .015
     const passed = item.positive ? result.accepted && correctPosition : !result.accepted
     const row = { recording, case: item.name, positive: item.positive, passed, falseAcceptance: result.accepted && (!item.positive || !correctPosition),
+      expectedStartMs: item.startMs, expectedEndMs: item.positive ? item.endMs ?? item.startMs + item.pcm.length / sr * 1000 * item.rate : undefined,
+      expectedEndRate: item.rate,
       startErrorMs, endErrorMs, elapsedMs: Math.round(performance.now() - began), ...result }
     rows.push(row)
     console.log(JSON.stringify(row))
@@ -73,7 +82,7 @@ const summary = { cases: rows.length, passed: rows.filter(row => row.passed).len
 console.log(JSON.stringify({ summary }))
 if (reportPath) {
   mkdirSync(path.dirname(path.resolve(reportPath)), { recursive: true })
-  writeFileSync(reportPath, JSON.stringify({ createdAt: new Date().toISOString(), summary, rows }, null, 2))
+  writeFileSync(reportPath, JSON.stringify({ createdAt: new Date().toISOString(), matcher: process.argv.includes('--warped') ? 'experimental-warped' : 'production-affine', summary, rows }, null, 2))
 }
 // Strict: unsupported tempo positives stay red, not silently reclassified as successes.
 if (rows.some(row => !row.passed)) process.exitCode = 1

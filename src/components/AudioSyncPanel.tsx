@@ -28,6 +28,6 @@ export function AudioSyncPanel() {
     {state.referenceName && <p>当前参照：{state.referenceName}</p>}
     <p role="status">{error || state.message}</p>
     {state.score != null && <p>相似度 {state.score.toFixed(3)} · 估计速度 {state.rate?.toFixed(3)}×（实验判据，不代表准确率）</p>}
-    <p>两段声音都可靠且位置一致才接管歌词。重复副歌、强烈混音或变速可能暂时无法锁定；暂停或切歌会停止捕获。</p>
+    <p>两段声音都可靠且位置一致才接管歌词，最新声音匹配失败就撤销校准。重复副歌、强烈混音或变速可能暂时无法锁定；暂停或切歌会停止捕获。</p>
   </section>
 }

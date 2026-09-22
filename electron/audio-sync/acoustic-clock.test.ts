@@ -18,6 +18,19 @@ function lock(clock: AcousticClock) {
 }
 
 describe('acoustic clock safety', () => {
+  it.each(['unconfirmed-end', 'low-score', 'ambiguous', 'silence'] as const)('revokes a locked anchor immediately on fresh %s evidence', reason => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(observation(136000, { accepted: false, reason }), 136100)).toBe('rejected')
+    expect(clock.decorate(snapshot(), 136100)?.acousticAnchor).toBeUndefined()
+    expect(clock.accept(observation(148000), 148100)).toBe('confirming')
+  })
+  it('does not let rejected stale or other-track audio clear a newer anchor', () => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(observation(112000, { accepted: false, reason: 'unconfirmed-end' }), 124100)).toBe('rejected')
+    expect(clock.decorate(snapshot(), 124100)?.acousticAnchor).toBeDefined()
+    expect(clock.accept(observation(130000, { trackId: 'other', accepted: false, reason: 'silence' }), 130100)).toBe('rejected')
+    expect(clock.decorate(snapshot(), 130100)?.acousticAnchor).toBeDefined()
+  })
   it('requires two independent blocks and does not use Spotify position as truth', () => {
     const clock = setup()
     lock(clock)

@@ -50,4 +50,23 @@ describe('independent acoustic alignment', () => {
     expect(Number.isFinite(result.score)).toBe(true)
     expect(Math.abs(result.sourceEndMs - 36000)).toBeLessThan(100)
   })
+  it('does not turn a matched prefix into an anchor after the audio stops', () => {
+    const query = recording.slice(sr * 4, sr * 16)
+    query.fill(0, sr * 10)
+    const result = matchFingerprint(reference, fingerprint(query, sr))
+    expect(result.score).toBeGreaterThan(.8)
+    expect(result).toMatchObject({ accepted: false, reason: 'unconfirmed-end' })
+  })
+  it('rejects a last-second song change despite a strong whole-window average', () => {
+    const query = recording.slice(sr * 4, sr * 16)
+    query.set(music(2, 816), sr * 10)
+    const result = matchFingerprint(reference, fingerprint(query, sr))
+    expect(result.score).toBeGreaterThan(.8)
+    expect(result).toMatchObject({ accepted: false, reason: 'unconfirmed-end' })
+  })
+  it('rejects a tail spliced from a different position of the same recording', () => {
+    const query = recording.slice(sr * 4, sr * 16)
+    query.set(recording.subarray(sr * 30, sr * 32), sr * 10)
+    expect(matchFingerprint(reference, fingerprint(query, sr))).toMatchObject({ accepted: false, reason: 'unconfirmed-end' })
+  })
 })

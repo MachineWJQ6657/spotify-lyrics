@@ -118,9 +118,9 @@ async function start() {
         if (token !== generation) return
         const decision = await window.syllable.audioSync.observation({ ...result, trackId: observedTrack, capturedAtMs, captureDurationMs })
         if (token !== generation) return
-        const reasons = { silence: '声音太弱', 'too-short': '音频长度不足', 'low-score': '声音与参照不够相似', ambiguous: '多个段落相似', matched: '本次证据未通过时钟检查' }
+        const reasons = { silence: '声音太弱', 'too-short': '音频长度不足', 'low-score': '声音与参照不够相似', ambiguous: '多个段落相似', 'unconfirmed-end': '最近声音已无法确认，可能正在转场或跳转', matched: '本次证据未通过时钟检查' }
         update({ busy: false, score: result.score, rate: result.rate, message: decision === 'locked'
-          ? '声音对齐已接管歌词；每 12 秒复核，长时间无可靠匹配则恢复媒体时钟。'
+          ? '声音对齐已接管歌词；每 12 秒复核，匹配失败或校准过期则恢复媒体时钟。'
           : decision === 'confirming' ? '已找到位置，等待第二段声音确认（约 12 秒）。'
           : `暂不校正：${reasons[result.reason]}。继续采样。` })
       } catch (error) { if (token === generation) await stop(`音频校准停止：${error instanceof Error ? error.message : String(error)}`) }

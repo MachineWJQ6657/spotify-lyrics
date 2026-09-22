@@ -36,6 +36,12 @@ export class AcousticClock {
       || Math.abs(value.sourceEndMs - value.sourceStartMs - value.captureDurationMs * value.rate) > 100
       || !this.previousPlayback?.isPlaying || value.trackId !== this.previousPlayback.track?.id) {
       this.candidate = null
+      // A fresh rejected block no longer supports the old path. Do not continue
+      // that rate for the remaining TTL while the UI says calibration failed.
+      // An old result / other track must not revoke a newer valid anchor.
+      if (this.anchor && value?.trackId === this.anchor.trackId && Number.isFinite(value.capturedAtMs)
+        && value.capturedAtMs > this.anchor.observedAtMs && value.capturedAtMs <= now + 200
+        && now - value.capturedAtMs <= 5000) this.anchor = null
       return 'rejected'
     }
     const previous = this.candidate

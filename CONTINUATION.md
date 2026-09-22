@@ -1,6 +1,13 @@
 # Syllable continuation checkpoint — 2026-09-14 / 0.4.24 candidate
 
-## Latest source: 0.4.30 (experimental audio alignment; not a universal sync fix)
+## Latest source: 0.4.31 (experimental audio alignment; not a universal sync fix)
+
+- 2026-09-22: Fixed high whole-window scores accepting a two-second mismatched tail; tail score + independent tail search now reject silence/other audio/seek despite matched prefix. Main clock revokes old anchor on fresh rejected observations; stale/other-track results cannot revoke it. User's actual post-transition universal sync remains incomplete.
+- New `scripts/evaluate-acoustic-sync.mjs` derives a labeled matrix from local recordings without audio upload/capture/playback control. Before: 22 cases, 8 passed, 6 false acceptances. Same cases after: 14 passed, 0 false acceptances. Expanded final 24 cases: 14 passed, 0 false acceptances; 8 constant-tempo and 2 tempo-step positives still fail, intentional exit 1. Local reports `.qa-acoustic/matrix-*-20260922.json`. Smoothing 350ms/delta500ms worsened localization and caused 1 false acceptance, reverted to150ms/250ms.
+- 302 offline tests passed, 36 skipped; build, package verifier and secondary-display panel QA all passed (4 checks, exit 0). `release/current/Syllable.exe` updated to0.4.31; desktop shortcut verified unchanged; previous preserved `release/current-0.4.30-backup`. app.asar SHA256 `b3b46756299908afecaa59ea5514550ee8812142304c8e6e996540ef65de4b3b`. No newZIP/Setup. No normal app running before/after deployment; QA exited. No Spotify playback changes. Full import/start/lock remains unverified.
+- Next: variable-tempo alignment path + separate endpoint velocity (currentAcousticClock affine invariant must be redesigned), maintain negative tests, legitimate reference acquisition/reference-free audio-to-lyrics, detection latency, real listening verification. See `docs/acoustic-endpoint-2026-09-22.md`. Previous goal turn was progress (code, reproducible defect evidence, tests, verified build), not a wait or blocker.
+
+## 0.4.30 checkpoint
 
 - 2026-09-17: Added opt-in audio/reference matching pipeline and lyric-only acoustic anchors. See `docs/acoustic-sync-2026-09-17.md` for exact evidence and remaining limits. Current-song severe offset is NOT proven fixed. Same-version full reference still required; `atempo=1.08` real-recording acceptance fails conservatively. No cloud/audio upload. Default capture off.
 - Product reference/capture remain memory-only; explicit bounded capture diagnostics saved under ignored `.qa-acoustic/`. Native Spotify binding must stay out of the capture probe main process (loading it blocked startup); metadata sampling stays separate.

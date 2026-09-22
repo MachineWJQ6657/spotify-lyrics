@@ -44,6 +44,7 @@ const checks = {
   acousticWorker: entries.some(entry => /[\\/]renderer[\\/]assets[\\/]acoustic-worker-.*\.js$/.test(entry)),
   acousticWorklet: entries.some(entry => /[\\/]renderer[\\/]audio-sync-worklet\.js$/.test(entry)),
   acousticSafety: main.includes('captureDurationMs') && main.includes('invalidatedAtMs') && main.includes('audio-sync:observation'),
+  acousticEndpointSafety: main.includes('value.capturedAtMs > this.anchor.observedAtMs') && renderer.includes('unconfirmed-end'),
   experimentalAudioUi: renderer.includes('当前阶段不支持无参照校准') && renderer.includes('AUDIO ALIGNMENT'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,

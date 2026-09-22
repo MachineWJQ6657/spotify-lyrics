@@ -11,7 +11,7 @@ export interface AudioFingerprint {
 
 export interface AcousticMatch {
   accepted: boolean
-  reason: 'matched' | 'silence' | 'too-short' | 'low-score' | 'ambiguous'
+  reason: 'matched' | 'silence' | 'too-short' | 'low-score' | 'ambiguous' | 'unconfirmed-end'
   /** Reference recording position at the END of the captured audio. */
   sourceEndMs: number
   sourceStartMs: number
@@ -26,6 +26,8 @@ const SIZE = 1024
 const HOP = 400
 const BANDS = 48
 const DIMENSIONS = BANDS * 2
+const SMOOTH_RADIUS = 1
+const DELTA_FRAMES = 5
 
 /** Area averaging avoids the worst aliasing from selecting every Nth sample. */
 function downsample(pcm: Float32Array, sampleRate: number) {
@@ -118,8 +120,8 @@ export function fingerprint(pcm: Float32Array, sampleRate: number): AudioFingerp
   const smoothed = new Float32Array(frames.length)
   for (let frame = 0; frame < count; frame++) {
     for (let band = 0; band < BANDS; band++) {
-      for (let neighbor = Math.max(0, frame - 1); neighbor <= Math.min(count - 1, frame + 1); neighbor++) {
-        smoothed[frame * BANDS + band] += frames[neighbor * BANDS + band] / (Math.min(count - 1, frame + 1) - Math.max(0, frame - 1) + 1)
+      for (let neighbor = Math.max(0, frame - SMOOTH_RADIUS); neighbor <= Math.min(count - 1, frame + SMOOTH_RADIUS); neighbor++) {
+        smoothed[frame * BANDS + band] += frames[neighbor * BANDS + band] / (Math.min(count - 1, frame + SMOOTH_RADIUS) - Math.max(0, frame - SMOOTH_RADIUS) + 1)
       }
     }
   }
@@ -128,7 +130,7 @@ export function fingerprint(pcm: Float32Array, sampleRate: number): AudioFingerp
   // Add normalized spectral change across 250ms to distinguish musical events.
   const features = new Float32Array(count * DIMENSIONS)
   for (let frame = 0; frame < count; frame++) {
-    const earlier = Math.max(0, frame - 5)
+    const earlier = Math.max(0, frame - DELTA_FRAMES)
     let norm = 0
     for (let band = 0; band < BANDS; band++) norm += (frames[frame * BANDS + band] - frames[earlier * BANDS + band]) ** 2
     norm = Math.sqrt(norm)
@@ -162,17 +164,17 @@ export function matchFingerprint(reference: AudioFingerprint, query: AudioFinger
   // A held tone can correlate perfectly at many positions while carrying no
   // timing information. Even a short reference with no runner-up must reject it.
   let changingFrames = 0
-  for (let frame = 5; frame < count; frame++) {
+  for (let frame = DELTA_FRAMES; frame < count; frame++) {
     let changeEnergy = 0
     for (let band = BANDS; band < DIMENSIONS; band++) changeEnergy += query.frames[frame * DIMENSIONS + band] ** 2
     if (changeEnergy > .08) changingFrames++
   }
   if (changingFrames < count * .2) return empty('ambiguous')
-  const similarity = (start: number, rate: number, stride: number) => {
-    if (start < 0 || Math.round(start + rate * (count - 1)) >= referenceCount) return -1
+  const similarity = (start: number, rate: number, stride: number, from = DELTA_FRAMES, to = count, countSilence = false) => {
+    if (start + from * rate < 0 || Math.round(start + rate * (to - 1)) >= referenceCount) return -1
     let sum = 0, used = 0
-    for (let frame = 5; frame < count; frame += stride) {
-      if (!query.active[frame]) continue
+    for (let frame = from; frame < to; frame += stride) {
+      if (!query.active[frame]) { if (countSilence) used++; continue }
       used++
       const index = Math.round(start + frame * rate)
       if (!reference.active[index]) continue
@@ -215,7 +217,26 @@ export function matchFingerprint(reference: AudioFingerprint, query: AudioFinger
   const best = refined[0]
   const runnerUpScore = refined[1]?.score ?? 0
   const margin = best.score - runnerUpScore
-  const reason = best.score < .8 ? 'low-score' : margin < .075 ? 'ambiguous' : 'matched'
+  let reason: AcousticMatch['reason'] = best.score < .8 ? 'low-score' : margin < .075 ? 'ambiguous' : 'matched'
+  if (reason === 'matched') {
+    // The clock is anchored at the END of a capture. A high average over the
+    // preceding audio cannot validate an endpoint after a fade/seek/transition.
+    // Keep silence in this denominator instead of treating it as missing data.
+    const tailFrom = Math.max(DELTA_FRAMES, count - Math.ceil(2000 / query.stepMs))
+    const tailScore = similarity(best.start, best.rate, 1, tailFrom, count, true)
+    if (tailScore < .8) reason = 'unconfirmed-end'
+    else {
+      // Independently search the tail at this rate. If it describes another
+      // part of the recording substantially better, the affine path is stale.
+      // Start can be negative because only the tail frames participate here.
+      for (let start = -tailFrom * best.rate; start + best.rate * (count - 1) < referenceCount; start += 1) {
+        if (Math.abs(start - best.start) * query.stepMs < 500) continue
+        if (similarity(start, best.rate, 1, tailFrom, count, true) > tailScore + .05) {
+          reason = 'unconfirmed-end'; break
+        }
+      }
+    }
+  }
   const sourceStartMs = best.start * reference.stepMs + reference.centerMs - best.rate * query.centerMs
   return { accepted: reason === 'matched', reason, sourceStartMs, sourceEndMs: sourceStartMs + query.durationMs * best.rate,
     rate: best.rate, score: best.score, runnerUpScore, margin }

@@ -16,6 +16,7 @@ import { DiagnosticExporter } from './diagnostic-export'
 import { sanitizeLyricDiagnosticContext } from '../src/lib/sync-diagnostics'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
+import { isOverOverlayRegion } from './overlay-hover'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -35,6 +36,8 @@ let overlayControlsWindow: BrowserWindow | null = null
 let overlayControlsHideTimer: NodeJS.Timeout | null = null
 let overlayHovered = false
 let overlayControlsHovered = false
+let transparentHoverTimer: NodeJS.Timeout | null = null
+let controlsRecoveryUntil = 0
 let overlayDragSettleTimer: NodeJS.Timeout | null = null
 let overlayControlsRaisePending = false
 let overlayControlsSuppressedUntil = 0
@@ -210,9 +213,12 @@ function startOverlayControlsVisibilityTracking() {
   overlayControlsHideTimer = null
   overlayHovered = false
   overlayControlsHovered = false
+  refreshTransparentHoverTracking()
 }
 
 function stopOverlayControlsVisibilityTracking() {
+  if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+  transparentHoverTimer = null
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
   overlayHovered = false
@@ -221,9 +227,36 @@ function stopOverlayControlsVisibilityTracking() {
 }
 
 function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boolean) {
+  // Native cursor sampling owns hover while the lyric HWND ignores input.
+  if (transparentHoverTimer) return
   if (sender === overlayWindow?.webContents) overlayHovered = hovered
   else if (sender === overlayControlsWindow?.webContents) overlayControlsHovered = hovered
   else return
+  updateControlsVisibility()
+}
+
+function refreshTransparentHoverTracking() {
+  if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+  transparentHoverTimer = null
+  if (!overlayWindow?.isVisible() || !overlayMouseIgnored || quitting) return
+  // Only input-transparent visible overlays need this fallback. Four tiny
+  // native cursor reads per second; no renderer IPC or layout polling.
+  transparentHoverTimer = setInterval(() => sampleTransparentHover(screen.getCursorScreenPoint()), 250)
+}
+
+function sampleTransparentHover(cursor: Electron.Point) {
+    if (!overlayWindow?.isVisible() || !overlayControlsWindow || quitting) return
+    const lyricsHover = isOverOverlayRegion(cursor, overlayWindow.getBounds(), overlayHitRegions)
+    const controlsBounds = overlayControlsWindow.getBounds()
+    const controlsHover = overlayControlsWindow.isVisible() && isOverOverlayRegion(cursor, controlsBounds,
+      [{ x: 0, y: 0, width: controlsBounds.width, height: controlsBounds.height }])
+    if (lyricsHover === overlayHovered && controlsHover === overlayControlsHovered) return
+    overlayHovered = lyricsHover
+    overlayControlsHovered = controlsHover
+    updateControlsVisibility()
+}
+
+function updateControlsVisibility() {
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
   if (!overlayWindow?.isVisible() || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
@@ -233,7 +266,7 @@ function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boole
       syncOverlayControlsBounds()
       overlayControlsWindow.showInactive()
       raiseOverlayControls()
-      qaLog(`overlay controls shown: ${sender === overlayWindow.webContents ? 'lyrics' : 'controls'}`)
+      qaLog(`overlay controls shown: ${overlayHovered ? 'lyrics' : 'controls'}`)
     }
     return
   }
@@ -243,7 +276,22 @@ function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boole
   overlayControlsHideTimer = setTimeout(() => {
     overlayControlsHideTimer = null
     if (!overlayHovered && !overlayControlsHovered && !overlayPointerDrag) overlayControlsWindow?.hide()
-  }, 600)
+  }, Math.max(600, controlsRecoveryUntil - Date.now()))
+}
+
+async function recoverOverlayControls() {
+  await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
+  if (quitting) return false
+  setOverlayMovable(true)
+  await showOverlay()
+  if (!overlayControlsWindow || overlayControlsWindow.isDestroyed()) return false
+  controlsRecoveryUntil = Date.now() + 4000
+  overlayControlsSuppressedUntil = 0
+  syncOverlayControlsBounds()
+  overlayControlsWindow.showInactive()
+  raiseOverlayControls()
+  updateControlsVisibility()
+  return true
 }
 
 function suppressOverlayControls(durationMs = 180) {
@@ -322,6 +370,7 @@ function setOverlayClickThrough(value: boolean) {
   // the native thick-frame style itself changes DIP geometry on mixed-DPI
   // Windows desktops and gradually grows the saved window by a pixel.
   applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
+  refreshTransparentHoverTracking()
   for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:click-through-changed', overlayClickThrough)
   return overlayClickThrough
 }
@@ -521,7 +570,39 @@ function createWindows() {
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
         : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
-        : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock'] : [])
+        : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
+        : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds'] : [])
+      if (qaView === 'overlay-unlock' && overlayWindow && overlayControlsWindow) {
+        await showOverlay()
+        const initialBounds = overlayWindow.getBounds()
+        setOverlayMovable(false)
+        checks.record('locked-poll', transparentHoverTimer !== null)
+        // Exercise the exact native sampler with deterministic screen points,
+        // without injecting mouse input into the user's other applications.
+        if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+        transparentHoverTimer = null
+        overlayHitRegions = [{ x: 28, y: 40, width: 400, height: 90 }]
+        overlayHovered = false; overlayControlsHovered = false
+        overlayControlsWindow.hide()
+        sampleTransparentHover({ x: initialBounds.x + 100, y: initialBounds.y + 70 })
+        checks.record('hover', overlayControlsWindow.isVisible())
+        const native = enforceWindowsToolWindow(overlayWindow)
+        checks.record('pass-through', overlayMouseIgnored && !overlayMovable && Boolean((native.after ?? 0) & 0x20))
+        sampleTransparentHover({ x: initialBounds.x - 100, y: initialBounds.y - 100 })
+        const toolbar = overlayControlsWindow.getBounds()
+        sampleTransparentHover({ x: toolbar.x + 100, y: toolbar.y + 20 })
+        await new Promise(resolve => setTimeout(resolve, 700))
+        checks.record('bridge', overlayControlsWindow.isVisible())
+        hideOverlay()
+        checks.record('hidden-stop', transparentHoverTimer === null && !overlayControlsWindow.isVisible())
+        const recovered = await recoverOverlayControls()
+        await new Promise(resolve => setTimeout(resolve, 900))
+        checks.record('recover', recovered && overlayWindow.isVisible() && overlayControlsWindow.isVisible() && overlayMovable && !overlayMouseIgnored && transparentHoverTimer === null)
+        const saved = await mainWindow.webContents.executeJavaScript(`JSON.parse(localStorage.getItem('syllable-preferences')).state.settings`)
+        checks.record('state', saved.positionLocked === false && saved.clickThrough === false && saved.overlayVisible === true)
+        checks.record('shortcut', globalShortcut.isRegistered('CommandOrControl+Alt+U'))
+        checks.record('bounds', JSON.stringify(initialBounds) === JSON.stringify(overlayWindow.getBounds()))
+      }
       if (qaView?.startsWith('overlay-restore-check') && overlayWindow) {
         const area = secondaryDisplay().workArea
         const expected = { x: area.x + 137, y: area.y + area.height - 286, width: 704, height: 196 }
@@ -815,7 +896,7 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -921,6 +1002,7 @@ function createTray() {
     { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
     { label: '显示 / 隐藏桌面歌词', accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
     { label: '锁定 / 解锁桌面歌词（锁定后穿透）', click: () => setOverlayMovable(!overlayMovable) },
+    { label: '解锁并显示歌词控制栏', accelerator: 'Ctrl+Alt+U', click: () => { void recoverOverlayControls() } },
     { label: '切换鼠标穿透', accelerator: 'Ctrl+Alt+M', click: () => setOverlayClickThrough(!overlayClickThrough) },
     { label: '播放 / 暂停', click: () => { void executePlaybackCommand(lastPlayback?.isPlaying ? 'pause' : 'play').catch(() => undefined) } },
     { type: 'separator' },
@@ -1331,7 +1413,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     }, qaLogPath ? qaLog : undefined)
   }).catch(error => console.warn('Local Spotify module failed to load:', error))
   globalShortcut.register('CommandOrControl+Alt+L', toggleOverlay)
-  globalShortcut.register('CommandOrControl+Alt+M', () => setOverlayClickThrough(!overlayClickThrough))
+  globalShortcut.register('CommandOrControl+Alt+M', () => { if (!overlayMovable) void recoverOverlayControls(); else setOverlayClickThrough(!overlayClickThrough) })
+  const unlockRegistered = globalShortcut.register('CommandOrControl+Alt+U', () => { void recoverOverlayControls() })
+  if (!unlockRegistered) console.warn('Ctrl+Alt+U unavailable; use tray menu to unlock lyrics')
+  qaLog(`unlock shortcut registered=${unlockRegistered}`)
   globalShortcut.register('CommandOrControl+Alt+S', () => revealMainWindow('cursor'))
   void poll()
 })

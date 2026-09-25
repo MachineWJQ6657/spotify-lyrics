@@ -132,7 +132,7 @@ export const SettingsPanel = memo(function SettingsPanel() {
       <input type="range" min="100" max="160" step="2" value={settings.lineHeight} onChange={event => patchSettings({ lineHeight: Number(event.target.value) })} />
       <label className="setting-label top-gap">文字对齐</label>
       <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>左对齐</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>居中</button></div>
-      <label className="switch-row"><div><strong>锁定位置</strong><span>锁定后全窗口穿透桌面；解锁后可拖动、缩放</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
+      <label className="switch-row"><div><strong>锁定位置</strong><span>锁定后穿透桌面；移到歌词上显示控制栏，Ctrl+Alt+U 解锁</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
       <button className="wide-button subtle" onClick={() => void window.syllable.overlay.resetPosition()}><Move size={15} />恢复默认位置</button>
     </section>
 
@@ -143,6 +143,7 @@ export const SettingsPanel = memo(function SettingsPanel() {
       <button className="wide-button" onClick={() => inputRef.current?.click()}><FileUp size={16} />导入多语言 LRC</button>
       <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>L</kbd><span>显示 / 隐藏</span></div>
       <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>M</kbd><span>切换鼠标穿透</span></div>
+      <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>U</kbd><span>解锁并显示控制栏</span></div>
     </section>
 
     <section className="connect-card">

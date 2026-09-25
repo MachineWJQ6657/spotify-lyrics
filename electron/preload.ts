@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('syllable', {
     export: (filename: string, content: string) => ipcRenderer.invoke('lyrics:export', filename, content)
   },
   overlay: {
+    ready: () => ipcRenderer.invoke('overlay:ready'),
+    restore: (settings: unknown) => ipcRenderer.invoke('overlay:restore', settings),
     show: () => ipcRenderer.invoke('overlay:show'),
     hide: () => ipcRenderer.invoke('overlay:hide'),
     setClickThrough: (value: boolean) => ipcRenderer.invoke('overlay:click-through', value),
@@ -42,6 +44,11 @@ contextBridge.exposeInMainWorld('syllable', {
     setPosition: (position: 'top' | 'center' | 'bottom') => ipcRenderer.invoke('overlay:position', position),
     resetPosition: () => ipcRenderer.invoke('overlay:reset-position'),
     setMovable: (value: boolean) => ipcRenderer.invoke('overlay:movable', value),
+    onMovableChanged: (callback: (value: boolean) => void) => {
+      const handler = (_: unknown, value: boolean) => callback(value)
+      ipcRenderer.on('overlay:movable-changed', handler)
+      return () => ipcRenderer.removeListener('overlay:movable-changed', handler)
+    },
     onBoundsChanged: (callback: (bounds: unknown) => void) => {
       const handler = (_: unknown, bounds: unknown) => callback(bounds)
       ipcRenderer.on('overlay:bounds-changed', handler)

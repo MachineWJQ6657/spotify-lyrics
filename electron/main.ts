@@ -47,6 +47,18 @@ let boundsSaveTimer: NodeJS.Timeout | null = null
 let boundsPublishTimer: NodeJS.Timeout | null = null
 let pendingBoundsShapeUpdate = false
 let applyingOverlayBounds = false
+let overlayBoundsReady: Promise<void> = Promise.resolve()
+let overlayBoundsRestored = false
+let hadStoredOverlayBounds = false
+let overlayRestoreStarted = false
+let overlayNativeRestored = false
+let overlayShowRequested = false
+let acknowledgeOverlayRenderer!: () => void
+let acknowledgeOverlaySettings!: () => void
+const overlayRendererReady = new Promise<void>(resolve => { acknowledgeOverlayRenderer = resolve })
+const overlaySettingsReady = new Promise<void>(resolve => { acknowledgeOverlaySettings = resolve })
+let quitFlushed = false
+let firstOverlayPresentation: { bounds: Electron.Rectangle; movable: boolean; clickThrough: boolean; ignored: boolean } | null = null
 const transportGate = new TransportGate()
 const playbackRequests = new PlaybackRequestGate()
 const playbackRefreshes = new PlaybackRefreshGate()
@@ -255,7 +267,10 @@ function syncOverlayControlsBounds() {
   if (changed) qaLog(`controls anchored: ${JSON.stringify(overlayControlsWindow.getBounds())}`)
 }
 
-function showOverlay() {
+async function showOverlay() {
+  overlayShowRequested = true
+  await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
+  if (!overlayShowRequested || quitting) return false
   if (!overlayWindow || overlayWindow.isDestroyed()) return false
   const current = overlayWindow.getBounds()
   const visible = visibleOverlayBounds(current)
@@ -271,6 +286,8 @@ function showOverlay() {
   // shown, never during playback polling.
   overlayWindow.setFocusable(true)
   overlayWindow.setOpacity(1)
+  startOverlayMouseTracking()
+  firstOverlayPresentation ??= { bounds: overlayWindow.getBounds(), movable: overlayMovable, clickThrough: overlayClickThrough, ignored: overlayMouseIgnored }
   overlayWindow.showInactive()
   applyToolWindowStyle(overlayWindow, 'overlay')
   startOverlayMouseTracking()
@@ -283,6 +300,7 @@ function showOverlay() {
 }
 
 function hideOverlay() {
+  overlayShowRequested = false
   if (!overlayWindow || overlayWindow.isDestroyed()) return false
   overlayPointerDrag = null
   if (overlayDragSettleTimer) clearTimeout(overlayDragSettleTimer)
@@ -297,21 +315,34 @@ function hideOverlay() {
 }
 
 function setOverlayClickThrough(value: boolean) {
-  overlayClickThrough = value
-  qaLog(`overlay click-through=${value}`)
+  overlayClickThrough = !overlayMovable || value
+  qaLog(`overlay click-through=${overlayClickThrough}`)
   applyOverlayShape()
-  // Windows uses a shaped HWND: the transparent interior falls through while
-  // its thin native resize border stays available. Other platforms use the
-  // conventional whole-window mouse-ignore behavior.
-  applyOverlayMouseIgnore(process.platform === 'win32' ? false : value)
-  for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:click-through-changed', value)
+  // Ignore input across the entire HWND, including its resize frame. Toggling
+  // the native thick-frame style itself changes DIP geometry on mixed-DPI
+  // Windows desktops and gradually grows the saved window by a pixel.
+  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
+  for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:click-through-changed', overlayClickThrough)
+  return overlayClickThrough
+}
+
+function setOverlayMovable(value: boolean) {
+  overlayMovable = value
+  if (!value) overlayPointerDrag = null
+  overlayWindow?.setMovable(value)
+  overlayControlsWindow?.setMovable(value)
+  // Lock passes every pixel through; explicit unlock restores drag/resize.
+  setOverlayClickThrough(!value)
+  for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:movable-changed', value)
   return value
 }
 
 function applyOverlayMouseIgnore(value: boolean) {
   if (!overlayWindow || overlayWindow.isDestroyed() || overlayMouseIgnored === value) return
   overlayMouseIgnored = value
-  overlayWindow.setIgnoreMouseEvents(value)
+  // Forward movement only, never clicks/wheels: hover can reveal the separate
+  // unlock toolbar while the desktop underneath receives normal interaction.
+  overlayWindow.setIgnoreMouseEvents(value, { forward: true })
   qaLog(`overlay mouse ignored=${value}; regions=${overlayHitRegions.length}`)
 }
 
@@ -319,28 +350,35 @@ function applyOverlayShape() {
   if (!overlayWindow || overlayWindow.isDestroyed() || process.platform !== 'win32') return
   if (disableOverlayShapeForQa) { overlayWindow.setShape([]); return }
   const bounds = overlayWindow.getBounds()
-  overlayWindow.setShape(overlayShape(bounds.width, bounds.height, overlayHitRegions, overlayClickThrough))
+  // HWND shape also clips painting. Removing text regions for hit-through
+  // would erase the lyrics; input transparency belongs to native mouse-ignore.
+  overlayWindow.setShape(overlayShape(bounds.width, bounds.height, overlayHitRegions, false))
 }
 
 function startOverlayMouseTracking() {
   applyOverlayShape()
-  applyOverlayMouseIgnore(process.platform === 'win32' ? false : overlayClickThrough)
+  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
 }
 
 function stopOverlayMouseTracking() {
-  applyOverlayMouseIgnore(false)
+  // Hidden windows retain the intended native policy for their next show.
+  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
 }
 
 function publishOverlayBounds(updateShape = true) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return
+  // Never publish default/half-restored dimensions back into persisted UI state.
+  if (!overlayBoundsRestored || !overlayNativeRestored || applyingOverlayBounds) return
   const bounds = overlayWindow.getBounds()
   if (updateShape && !overlayDragSettleTimer) applyOverlayShape()
   if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) syncOverlayControlsBounds()
   overlayWindow.webContents.send('overlay:bounds-changed', bounds)
   mainWindow?.webContents.send('overlay:bounds-changed', bounds)
-  if (applyingOverlayBounds) return
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
-  boundsSaveTimer = setTimeout(() => void windowBoundsStore.set(bounds), 220)
+  boundsSaveTimer = setTimeout(() => {
+    boundsSaveTimer = null
+    void windowBoundsStore.set(bounds).catch(error => console.error('Overlay bounds save failed:', error))
+  }, 220)
 }
 
 function setExactOverlaySize(width: number, height: number, animate = false) {
@@ -439,14 +477,80 @@ function createWindows() {
       qaLog(`qa watchdog forced exit: view=${qaView ?? 'main'}`)
       quitting = true
       app.exit(2)
-    }, 20_000)
+    }, qaView === 'overlay-click-through-physical' ? 180_000 : 20_000)
     setTimeout(async () => {
       if (!mainWindow) return
+      if (qaView === 'overlay-click-through-physical' && overlayWindow) {
+        const area = secondaryDisplay().workArea
+        await applyOverlayBounds({ x: area.x + 200, y: area.y + 350, width: 820, height: 220 })
+        setOverlayMovable(false)
+        await showOverlay()
+        mainWindow.hide()
+        const bounds = overlayWindow.getBounds()
+        const probe = new BrowserWindow({ x: bounds.x - 40, y: bounds.y - 70, width: 900, height: 370,
+          frame: false, title: 'Syllable click-through QA', webPreferences: { sandbox: true, contextIsolation: true } })
+        await probe.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8"><title>Syllable click-through QA</title>
+          <style>body{margin:0;background:#e8eef2;font:18px sans-serif;color:#102030}h3{margin:16px}button{position:absolute;height:80px;font:18px sans-serif;background:#fff;border:2px solid #369;border-radius:12px}#center{left:200px;top:105px;width:300px}#edge{left:10px;top:215px;width:150px;height:50px}#finish{left:670px;top:300px;width:190px;height:44px}#state{position:absolute;top:300px;left:20px}</style>
+          <h3>本地鼠标穿透验证（副屏；无网络和播放操作）</h3>
+          <button id="center">点击歌词下面：0</button><button id="edge">窗口边缘：0</button><button id="finish">结束测试</button><div id="state">滚轮：0</div>
+          <script>window.probe={center:0,edge:0,wheel:0,trusted:true,finished:false};for(const id of ['center','edge'])document.getElementById(id).onclick=e=>{probe[id]++;probe.trusted&&=e.isTrusted;e.currentTarget.textContent=id+': '+probe[id]};document.onwheel=e=>{probe.wheel++;probe.trusted&&=e.isTrusted;document.getElementById('state').textContent='滚轮：'+probe.wheel};document.getElementById('finish').onclick=()=>probe.finished=true;</script>`))
+        probe.show()
+        qaLog(`physical lock test ready: overlay=${JSON.stringify(bounds)}, probe=${JSON.stringify(probe.getBounds())}`)
+        let finished = false
+        while (!finished && !probe.isDestroyed()) {
+          await new Promise(resolve => setTimeout(resolve, 250))
+          const state = await probe.webContents.executeJavaScript('window.probe')
+          finished = Boolean(state?.finished)
+          if (finished) {
+            const passed = state.center > 0 && state.edge > 0 && state.wheel > 0 && state.trusted && overlayMouseIgnored && !overlayMovable && overlayWindow.isVisible()
+            qaLog(`physical lock acceptance: ${JSON.stringify({ passed, state })}`)
+            process.exitCode = passed ? 0 : 1
+          }
+        }
+        clearTimeout(qaWatchdog)
+        quitting = true
+        app.quit()
+        return
+      }
+      if (qaView?.startsWith('overlay-restore')) {
+        mainWindow.showInactive()
+        await new Promise(resolve => setTimeout(resolve, 150))
+      }
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
         : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible']
-        : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close'] : [])
+        : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
+        : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock'] : [])
+      if (qaView?.startsWith('overlay-restore-check') && overlayWindow) {
+        const area = secondaryDisplay().workArea
+        const expected = { x: area.x + 137, y: area.y + area.height - 286, width: 704, height: 196 }
+        const matches = (bounds: Electron.Rectangle) => Object.entries(expected).every(([key, value]) => Math.abs(bounds[key as keyof Electron.Rectangle] - value) <= 1)
+        const initiallyVisible = qaView !== 'overlay-restore-check-hidden'
+        checks.record('bounds', matches(overlayWindow.getBounds()))
+        checks.record('visibility', overlayWindow.isVisible() === initiallyVisible)
+        checks.record('first-presentation', initiallyVisible ? Boolean(firstOverlayPresentation && matches(firstOverlayPresentation.bounds) && !firstOverlayPresentation.movable && firstOverlayPresentation.ignored) : firstOverlayPresentation === null)
+        const style = await overlayWindow.webContents.executeJavaScript(`(() => {
+          const shell = document.querySelector('.overlay-shell'); if (!shell) return null;
+          const s = getComputedStyle(shell);
+          return { className: shell.className, size: s.getPropertyValue('--overlay-size').trim(),
+            opacity: s.getPropertyValue('--overlay-text-opacity').trim(), bg: s.getPropertyValue('--overlay-bg-opacity').trim() };
+        })()`)
+        checks.record('appearance', Boolean(style?.className.includes('position-locked') && style.className.includes('has-background') && style.className.includes('center') && style.size === '64px' && style.opacity === '0.93' && style.bg === '0.34'))
+        const preferences = await mainWindow.webContents.executeJavaScript(`JSON.parse(localStorage.getItem('syllable-preferences')).state.settings`)
+        checks.record('preferences', preferences.romanization === false && JSON.stringify(preferences.enabledLanguages) === JSON.stringify(['ja', 'zh-Hans']) && preferences.positionLocked === true && preferences.clickThrough === true)
+        const native = enforceWindowsToolWindow(overlayWindow)
+        checks.record('native-lock', !overlayMovable && overlayClickThrough && overlayMouseIgnored && Boolean((native.after ?? 0) & 0x20))
+        hideOverlay()
+        await showOverlay()
+        checks.record('reopen-restored', overlayWindow.isVisible() && matches(overlayWindow.getBounds()) && overlayMouseIgnored)
+        setOverlayMovable(true)
+        checks.record('unlock', overlayMovable && !overlayClickThrough && !overlayMouseIgnored && overlayWindow.isResizable() && matches(overlayWindow.getBounds()))
+        setOverlayMovable(false)
+        hideOverlay()
+        await new Promise(resolve => setTimeout(resolve, 180))
+        qaLog(`overlay restoration: ${JSON.stringify({ bounds: overlayWindow.getBounds(), firstOverlayPresentation, style, native })}`)
+      }
       if (qaView === 'audio-sync') {
         const result = await mainWindow.webContents.executeJavaScript(`(async () => {
           [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
@@ -711,14 +815,26 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen') {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
       }
       clearTimeout(qaWatchdog)
+      if (qaView === 'overlay-restore-seed' && overlayWindow) {
+        const area = secondaryDisplay().workArea
+        await applyOverlayBounds({ x: area.x + 137, y: area.y + area.height - 286, width: 704, height: 196 })
+        await mainWindow.webContents.executeJavaScript(`(() => {
+          const saved = JSON.parse(localStorage.getItem('syllable-preferences'));
+          saved.state.settings = { ...saved.state.settings, overlayVisible: true, positionLocked: true, clickThrough: true,
+            fontSize: 64, textOpacity: 93, backgroundEnabled: true, backgroundOpacity: 34, alignment: 'center',
+            enabledLanguages: ['ja', 'zh-Hans'], romanization: false };
+          localStorage.setItem('syllable-preferences', JSON.stringify(saved));
+        })()`)
+      }
       quitting = true
-      app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
+      if (qaView?.startsWith('overlay-restore')) app.quit()
+      else app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
     }, 7000)
   }
 
@@ -738,12 +854,16 @@ function createWindows() {
     queueOverlayBounds(true)
   })
   void overlayWindow.loadURL(rendererUrl('#/overlay'))
-  void windowBoundsStore.get().then(storedBounds => {
+  overlayBoundsReady = windowBoundsStore.get().then(async storedBounds => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return
-    const bounds = secondaryMonitorQa
-      ? defaultOverlayBounds(undefined, undefined, secondaryDisplay())
-      : storedBounds
-    if (bounds) void applyOverlayBounds(visibleOverlayBounds(bounds))
+    hadStoredOverlayBounds = Boolean(storedBounds)
+    // Secondary-only testing must not erase a valid saved position on that
+    // monitor. If relocating is necessary, retain the user's logical size.
+    const bounds = secondaryMonitorQa && (!storedBounds || screen.getDisplayMatching(storedBounds).id !== secondaryDisplay().id)
+      ? defaultOverlayBounds(storedBounds?.width, storedBounds?.height, secondaryDisplay()) : storedBounds
+    if (bounds) await applyOverlayBounds(visibleOverlayBounds(bounds))
+  }).finally(() => {
+    overlayBoundsRestored = true
   })
   overlayWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   overlayWindow.webContents.on('console-message', (_details, _level, message) => {
@@ -800,6 +920,7 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
     { label: '显示 / 隐藏桌面歌词', accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
+    { label: '锁定 / 解锁桌面歌词（锁定后穿透）', click: () => setOverlayMovable(!overlayMovable) },
     { label: '切换鼠标穿透', accelerator: 'Ctrl+Alt+M', click: () => setOverlayClickThrough(!overlayClickThrough) },
     { label: '播放 / 暂停', click: () => { void executePlaybackCommand(lastPlayback?.isPlaying ? 'pause' : 'play').catch(() => undefined) } },
     { type: 'separator' },
@@ -1026,6 +1147,29 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     await writeFile(result.filePath, content, 'utf8')
     return result.filePath
   })
+  ipcMain.handle('overlay:ready', event => {
+    if (event.sender !== overlayWindow?.webContents) return false
+    acknowledgeOverlayRenderer()
+    return true
+  })
+  ipcMain.handle('overlay:restore', async (event, settings) => {
+    if (event.sender !== mainWindow?.webContents || overlayRestoreStarted || !settings) return false
+    overlayRestoreStarted = true
+    await overlayBoundsReady
+    if (!hadStoredOverlayBounds && Number.isFinite(settings.overlayWidth) && Number.isFinite(settings.overlayHeight)) {
+      const bounds = overlayWindow?.getBounds() ?? defaultOverlayBounds()
+      await applyOverlayBounds(visibleOverlayBounds({ ...bounds, width: settings.overlayWidth, height: settings.overlayHeight }))
+    }
+    overlayMovable = !settings.positionLocked
+    overlayWindow?.setMovable(overlayMovable)
+    overlayControlsWindow?.setMovable(overlayMovable)
+    // Restoration is not an explicit user unlock; do not clear saved hit-through.
+    setOverlayClickThrough(settings.clickThrough === true)
+    overlayNativeRestored = true
+    acknowledgeOverlaySettings()
+    publishOverlayBounds()
+    return settings.overlayVisible === true ? showOverlay() : hideOverlay()
+  })
   ipcMain.handle('overlay:show', showOverlay)
   ipcMain.handle('overlay:hide', hideOverlay)
   ipcMain.handle('overlay:click-through', (_event, value: boolean) => setOverlayClickThrough(value))
@@ -1056,7 +1200,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return true
   })
   ipcMain.on('overlay:controls-hover', (event, hovered: boolean) => updateOverlayControlsHover(event.sender, hovered === true))
-  ipcMain.handle('overlay:bounds', () => overlayWindow?.getBounds() ?? defaultOverlayBounds())
+  ipcMain.handle('overlay:bounds', async () => { await Promise.all([overlayBoundsReady, overlaySettingsReady]); return overlayWindow?.getBounds() ?? defaultOverlayBounds() })
   ipcMain.handle('overlay:size', (_event, width: number, height: number) => {
     if (!overlayWindow) return defaultOverlayBounds()
     const area = screen.getDisplayMatching(overlayWindow.getBounds()).workArea
@@ -1147,15 +1291,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return await applyOverlayBounds(bounds, true)
   })
   ipcMain.handle('overlay:movable', (_event, value: boolean) => {
-    overlayMovable = value
-    overlayWindow?.setMovable(value)
-    overlayControlsWindow?.setMovable(value)
-    // A user who explicitly unlocks the position expects direct dragging to
-    // work immediately. Full lyric hit-through would otherwise make the drag
-    // surface unreachable, while transparent blank pixels still pass through
-    // naturally via the shaped window.
-    if (value && overlayClickThrough) setOverlayClickThrough(false)
-    return value
+    return setOverlayMovable(value)
   })
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
   ipcMain.handle('window:maximize', () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize())
@@ -1202,4 +1338,21 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
 app.on('activate', () => { revealMainWindow() })
 app.on('window-all-closed', () => app.quit())
-app.on('before-quit', () => { quitting = true; void localSpotify?.close(); globalShortcut.unregisterAll(); stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking(); if (pollTimer) clearTimeout(pollTimer); if (boundsSaveTimer) clearTimeout(boundsSaveTimer); if (boundsPublishTimer) clearTimeout(boundsPublishTimer) })
+app.on('before-quit', event => {
+  quitting = true
+  void localSpotify?.close()
+  globalShortcut.unregisterAll()
+  stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking()
+  if (pollTimer) clearTimeout(pollTimer)
+  if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
+  if (boundsPublishTimer) clearTimeout(boundsPublishTimer)
+  if (quitFlushed) return
+  event.preventDefault()
+  mainWindow?.webContents.session.flushStorageData()
+  const save = overlayBoundsRestored && overlayWindow && !overlayWindow.isDestroyed()
+    ? windowBoundsStore.set(overlayWindow.getBounds()) : Promise.resolve()
+  void save.catch(error => console.error('Final overlay bounds save failed:', error)).finally(() => {
+    quitFlushed = true
+    app.quit()
+  })
+})

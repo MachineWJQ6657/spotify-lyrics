@@ -8,8 +8,8 @@ const languageOptions = [
   { code: 'zh-Hans', label: '中文' }, { code: 'en', label: 'English' }
 ]
 
-function Switch({ value, onChange, label }: { value: boolean; onChange(value: boolean): void; label: string }) {
-  return <button aria-label={label} aria-pressed={value} className={`switch ${value ? 'on' : ''}`} onClick={() => onChange(!value)}><i /></button>
+function Switch({ value, onChange, label, disabled = false }: { value: boolean; onChange(value: boolean): void; label: string; disabled?: boolean }) {
+  return <button disabled={disabled} aria-label={label} aria-pressed={value} className={`switch ${value ? 'on' : ''}`} onClick={() => onChange(!value)}><i /></button>
 }
 
 export const SettingsPanel = memo(function SettingsPanel() {
@@ -34,7 +34,6 @@ export const SettingsPanel = memo(function SettingsPanel() {
   const changeOffset = (value: number) => activeLyrics ? setLyricsOffset(value) : demoMode ? patchSettings({ offsetMs: value }) : undefined
 
   useEffect(() => {
-    void window.syllable.overlay.setMovable(!settings.positionLocked)
     const syncBounds = (bounds: { width: number; height: number }) => {
       const current = useAppStore.getState().settings
       if (current.overlayWidth !== bounds.width || current.overlayHeight !== bounds.height) patchSettings({ overlayWidth: bounds.width, overlayHeight: bounds.height })
@@ -133,13 +132,13 @@ export const SettingsPanel = memo(function SettingsPanel() {
       <input type="range" min="100" max="160" step="2" value={settings.lineHeight} onChange={event => patchSettings({ lineHeight: Number(event.target.value) })} />
       <label className="setting-label top-gap">文字对齐</label>
       <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>左对齐</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>居中</button></div>
-      <label className="switch-row"><div><strong>锁定位置</strong><span>关闭后可直接拖动歌词，并自动退出文字穿透</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, ...(!positionLocked ? { clickThrough: false } : {}) }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
+      <label className="switch-row"><div><strong>锁定位置</strong><span>锁定后全窗口穿透桌面；解锁后可拖动、缩放</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
       <button className="wide-button subtle" onClick={() => void window.syllable.overlay.resetPosition()}><Move size={15} />恢复默认位置</button>
     </section>
 
     <section className="action-stack">
       <button className="wide-button primary" onClick={toggleOverlay}>{settings.overlayVisible ? <EyeOff size={17} /> : <Eye size={17} />}{settings.overlayVisible ? '隐藏桌面歌词' : '显示桌面歌词'}</button>
-      <label className="switch-row compact"><div><MousePointer2 size={16} /><strong>歌词文字穿透（解锁位置时自动关闭）</strong></div><Switch label="鼠标穿透" value={settings.clickThrough} onChange={clickThrough => { patchSettings({ clickThrough }); void window.syllable.overlay.setClickThrough(clickThrough) }} /></label>
+      <label className="switch-row compact"><div><MousePointer2 size={16} /><strong>{settings.positionLocked ? '已锁定：全窗口穿透' : '鼠标穿透（开启后不可拖动、缩放）'}</strong></div><Switch label="鼠标穿透" disabled={settings.positionLocked} value={settings.clickThrough} onChange={clickThrough => { patchSettings({ clickThrough }); void window.syllable.overlay.setClickThrough(clickThrough) }} /></label>
       <input ref={inputRef} hidden multiple type="file" accept=".lrc,.txt" onChange={event => void importFiles(event.target.files)} />
       <button className="wide-button" onClick={() => inputRef.current?.click()}><FileUp size={16} />导入多语言 LRC</button>
       <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>L</kbd><span>显示 / 隐藏</span></div>

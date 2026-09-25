@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { AppSettings, LyricsDocument } from '../types'
 import { useAppStore } from '../store/useAppStore'
 import { receiveWindowDocument, snapshotOwnsTrack } from '../lib/window-document'
@@ -16,10 +16,12 @@ const isPrimaryWindow = window.location.hash !== '#/overlay' && window.location.
 
 /** Keeps the independently rendered main and overlay windows in lockstep. */
 export function useWindowSync(syncLibrary = true) {
+  const [settingsReady, setSettingsReady] = useState(isPrimaryWindow)
   useEffect(() => {
     const channel = new BroadcastChannel('syllable-window-state-v1')
     let applyingRemote = false
     let receivedSnapshot = isPrimaryWindow
+    let receivedSettings = isPrimaryWindow
     let acknowledgedTrackId: string | null | undefined
     const requestSnapshot = () => channel.postMessage({ source: instanceId, type: 'hello', wantsLibrary: syncLibrary } satisfies SyncMessage)
     let helloTimer: number | undefined
@@ -60,6 +62,7 @@ export function useWindowSync(syncLibrary = true) {
       }
       if (message.type === 'snapshot') {
         if (message.target !== instanceId) return
+        receivedSettings = true
         const currentTrackId = useAppStore.getState().playback?.track?.id ?? null
         const documentMatches = !syncLibrary || snapshotOwnsTrack(currentTrackId, message.trackId, message.document)
         receivedSnapshot = documentMatches
@@ -73,6 +76,8 @@ export function useWindowSync(syncLibrary = true) {
           } : {})
         }))
         applyingRemote = false
+        // Settings readiness is independent of delayed/current-song lyrics.
+        setSettingsReady(true)
         if (receivedSnapshot && !missingCurrentLyrics()) stopSnapshotRetry()
         else scheduleSnapshotRetry()
         return
@@ -108,7 +113,7 @@ export function useWindowSync(syncLibrary = true) {
     }
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (applyingRemote) return
-      if (state.settings !== previous.settings) channel.postMessage({ source: instanceId, type: 'settings', settings: state.settings } satisfies SyncMessage)
+      if (receivedSettings && state.settings !== previous.settings) channel.postMessage({ source: instanceId, type: 'settings', settings: state.settings } satisfies SyncMessage)
       if (!isPrimaryWindow && syncLibrary && state.playback?.track?.id !== previous.playback?.track?.id) {
         acknowledgedTrackId = undefined
         receivedSnapshot = state.lyrics?.trackId === state.playback?.track?.id
@@ -146,10 +151,16 @@ export function useWindowSync(syncLibrary = true) {
       }
     })
     const unsubscribeVisibility = window.syllable.overlay.onVisibilityChanged(visible => {
+      if (!receivedSettings) return
       if (useAppStore.getState().settings.overlayVisible !== visible) useAppStore.getState().patchSettings({ overlayVisible: visible })
     })
     const unsubscribeClickThrough = window.syllable.overlay.onClickThroughChanged(clickThrough => {
+      if (!receivedSettings) return
       if (useAppStore.getState().settings.clickThrough !== clickThrough) useAppStore.getState().patchSettings({ clickThrough })
+    })
+    const unsubscribeMovable = window.syllable.overlay.onMovableChanged(movable => {
+      if (!receivedSettings) return
+      if (useAppStore.getState().settings.positionLocked === movable) useAppStore.getState().patchSettings({ positionLocked: !movable })
     })
     if (!isPrimaryWindow) {
       requestSnapshot()
@@ -157,7 +168,8 @@ export function useWindowSync(syncLibrary = true) {
     }
     return () => {
       stopSnapshotRetry()
-      unsubscribe(); unsubscribeVisibility(); unsubscribeClickThrough(); channel.close()
+      unsubscribe(); unsubscribeVisibility(); unsubscribeClickThrough(); unsubscribeMovable(); channel.close()
     }
   }, [syncLibrary])
+  return settingsReady
 }

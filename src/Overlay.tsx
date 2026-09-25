@@ -9,8 +9,11 @@ import { calibratedPosition, lyricPlaybackPosition } from './lib/clock'
 
 export function Overlay() {
   usePlaybackConnection(false, false)
-  useWindowSync()
+  const settingsReady = useWindowSync()
   const { playback, lyrics, settings, patchSettings } = useAppStore()
+  useLayoutEffect(() => {
+    if (settingsReady) void window.syllable.overlay.ready()
+  }, [settingsReady])
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const offsetMs = activeLyrics?.offsetMs ?? (playback?.playbackSource === 'demo' ? settings.offsetMs : 0)
   const position = calibratedPosition(lyricPlaybackPosition(usePosition(playback, 80), playback, activeLyrics?.sourceDurationMs), offsetMs)

@@ -64,8 +64,9 @@ export function App() {
   }
 
   useEffect(() => {
-    if (settings.overlayVisible) void window.syllable.overlay.show()
-    if (settings.clickThrough) void window.syllable.overlay.setClickThrough(true)
+    // Restore native behavior as one transaction, before making the overlay
+    // visible. The auxiliary renderer separately acknowledges its styled DOM.
+    void window.syllable.overlay.restore(useAppStore.getState().settings)
   }, [])
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface TokenSession {
@@ -38,18 +38,26 @@ export class SessionStore {
 }
 
 export class WindowBoundsStore {
-  private file = path.join(app.getPath('userData'), 'overlay-window.json')
+  private pending: Promise<void> = Promise.resolve()
+  constructor(private file = path.join(app.getPath('userData'), 'overlay-window.json')) {}
 
   async get(): Promise<StoredWindowBounds | null> {
+    await this.pending.catch(() => undefined)
     try {
       const value = JSON.parse(await readFile(this.file, 'utf8')) as StoredWindowBounds
-      if (![value.x, value.y, value.width, value.height].every(Number.isFinite)) return null
+      if (!value || ![value.x, value.y, value.width, value.height].every(Number.isFinite) || value.width <= 0 || value.height <= 0) return null
       return value
     } catch { return null }
   }
 
-  async set(bounds: StoredWindowBounds) {
-    await mkdir(path.dirname(this.file), { recursive: true })
-    await writeFile(this.file, JSON.stringify(bounds), 'utf8')
+  set(bounds: StoredWindowBounds) {
+    // Snapshot now; serialize writes so an older resize can never finish last.
+    const raw = JSON.stringify(bounds)
+    this.pending = this.pending.catch(() => undefined).then(async () => {
+      await mkdir(path.dirname(this.file), { recursive: true })
+      await writeFile(`${this.file}.tmp`, raw, 'utf8')
+      await rename(`${this.file}.tmp`, this.file)
+    })
+    return this.pending
   }
 }

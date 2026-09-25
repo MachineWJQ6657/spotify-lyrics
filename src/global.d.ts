@@ -1,4 +1,4 @@
-import type { LyricsCandidate, PlaybackSnapshot, TrackInfo } from './types'
+import type { AppSettings, LyricsCandidate, PlaybackSnapshot, TrackInfo } from './types'
 
 interface SyllableApi {
   audioSync: {
@@ -28,6 +28,8 @@ interface SyllableApi {
     export(filename: string, content: string): Promise<string | null>
   }
   overlay: {
+    ready(): Promise<boolean>
+    restore(settings: Pick<AppSettings, 'overlayVisible' | 'clickThrough' | 'positionLocked' | 'overlayWidth' | 'overlayHeight'>): Promise<boolean>
     show(): Promise<boolean>; hide(): Promise<boolean>; setClickThrough(value: boolean): Promise<boolean>; setHitRegions(regions: Array<{ x: number; y: number; width: number; height: number }>, controlsAnchor?: { x: number; y: number }): Promise<boolean>
     setControlsHover(hovered: boolean): void
     getBounds(): Promise<{ x: number; y: number; width: number; height: number }>
@@ -38,6 +40,7 @@ interface SyllableApi {
     setPosition(position: 'top' | 'center' | 'bottom'): Promise<{ x: number; y: number; width: number; height: number }>
     resetPosition(): Promise<{ x: number; y: number; width: number; height: number }>
     setMovable(value: boolean): Promise<boolean>
+    onMovableChanged(callback: (value: boolean) => void): () => void
     onBoundsChanged(callback: (bounds: { x: number; y: number; width: number; height: number }) => void): () => void
     onVisibilityChanged(callback: (visible: boolean) => void): () => void
     onClickThroughChanged(callback: (value: boolean) => void): () => void

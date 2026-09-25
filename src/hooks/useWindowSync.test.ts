@@ -4,8 +4,13 @@ const harness = vi.hoisted(() => ({
   state: {} as Record<string, any>,
   listeners: new Set<(next: any, previous: any) => void>(),
   cleanup: undefined as undefined | (() => void),
+  settingsReady: false,
+  nativeEvents: {} as Record<string, (value: boolean) => void>,
 }))
-vi.mock('react', () => ({ useEffect: (effect: () => () => void) => { harness.cleanup = effect() } }))
+vi.mock('react', () => ({
+  useEffect: (effect: () => () => void) => { harness.cleanup = effect() },
+  useState: (value: boolean) => { harness.settingsReady = value; return [value, (next: boolean) => { harness.settingsReady = next }] }
+}))
 vi.mock('../store/useAppStore', () => ({ useAppStore: {
   getState: () => harness.state,
   setState: (update: any) => {
@@ -38,7 +43,11 @@ beforeEach(() => {
   harness.state = { playback: { track: { id: 'new' } }, lyrics: doc('old'), library: {}, settings: {} }
   vi.stubGlobal('BroadcastChannel', TestChannel)
   vi.stubGlobal('window', { location: { hash: '#/overlay' }, setTimeout, clearTimeout,
-    syllable: { overlay: { onVisibilityChanged: () => () => {}, onClickThroughChanged: () => () => {} } } })
+    syllable: { overlay: {
+      onVisibilityChanged: (callback: (value: boolean) => void) => { harness.nativeEvents.visible = callback; return () => {} },
+      onClickThroughChanged: (callback: (value: boolean) => void) => { harness.nativeEvents.clickThrough = callback; return () => {} },
+      onMovableChanged: (callback: (value: boolean) => void) => { harness.nativeEvents.movable = callback; return () => {} }
+    } } })
 })
 afterEach(() => {
   harness.cleanup?.()
@@ -56,6 +65,30 @@ async function start() {
 }
 
 describe('cross-window message and timer integration', () => {
+  it('does not broadcast auxiliary defaults when native restoration arrives before its snapshot', async () => {
+    harness.state.patchSettings = vi.fn()
+    const { channel } = await start()
+    channel.postMessage.mockClear()
+    harness.nativeEvents.visible(true)
+    harness.nativeEvents.clickThrough(true)
+    harness.nativeEvents.movable(false)
+    expect(harness.state.patchSettings).not.toHaveBeenCalled()
+    const previous = harness.state
+    harness.state = { ...previous, settings: { fontSize: 52, clickThrough: true } }
+    for (const listener of harness.listeners) listener(harness.state, previous)
+    expect(channel.postMessage).not.toHaveBeenCalled()
+  })
+  it('waits for a targeted settings snapshot before marking the auxiliary view ready', async () => {
+    const { channel, target } = await start()
+    expect(harness.settingsReady).toBe(false)
+    channel.deliver({ type: 'snapshot', target: 'another-window', settings: { fontSize: 64 } })
+    expect(harness.settingsReady).toBe(false)
+    // Song data may still be stale; persisted appearance is already valid.
+    channel.deliver({ type: 'snapshot', target, trackId: 'old', document: doc('old'), settings: { fontSize: 64, backgroundOpacity: 34 } })
+    expect(harness.settingsReady).toBe(true)
+    expect(harness.state.settings.fontSize).toBe(64)
+    expect(harness.state.lyrics).toEqual(doc('old'))
+  })
   it('keeps bulk imports local while still delivering the current document', async () => {
     window.location.hash = '#/'
     const { useWindowSync } = await import('./useWindowSync')

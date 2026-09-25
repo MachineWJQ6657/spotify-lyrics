@@ -65,6 +65,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms（仅诊断），重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}，速度曲线时钟修正 {mixCorrectionMs > 0 ? '+' : ''}{mixCorrectionMs} ms。</div>}
     {!playback?.transition && durationScale !== 1 && <div className="info-note">Spotify 的混合播放时长与高置信度发行版歌词不同；仅将歌词时钟按 {durationScale.toFixed(4)}× 映射到 Spotify 实时进度，播放本身不会被修改。</div>}
     <div className="help-grid">
+      <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + L</strong><span>显示或隐藏桌面悬浮歌词</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + M</strong><span>切换悬浮窗鼠标穿透</span></article>
       <article><CircleHelp /><strong>歌词不匹配</strong><span>点击歌曲标题右侧的铅笔，搜索候选并逐行校时。</span></article>

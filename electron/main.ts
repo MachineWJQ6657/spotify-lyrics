@@ -142,7 +142,7 @@ function secondaryDisplay() {
 function revealMainWindow(preferredDisplay: 'preserve' | 'cursor' | 'overlay' = 'preserve') {
   if (!mainWindow || mainWindow.isDestroyed()) return false
   if (preferredDisplay !== 'preserve') {
-    const display = preferredDisplay === 'overlay' && overlayWindow && !overlayWindow.isDestroyed()
+    const display = secondaryMonitorQa ? secondaryDisplay() : preferredDisplay === 'overlay' && overlayWindow && !overlayWindow.isDestroyed()
       ? screen.getDisplayMatching(overlayWindow.getBounds())
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const area = display.workArea
@@ -427,9 +427,11 @@ function createWindows() {
   mainWindow.on('close', event => {
     if (quitting) return
     event.preventDefault()
-    // Keep an ordinary taskbar entry so the client never becomes impossible
-    // to find while its lyrics overlay continues running.
-    mainWindow?.minimize()
+    // Close dismisses the client immediately, without the minimize animation
+    // or a lingering taskbar button. The tray and lyrics stay available.
+    // Never strand the user in the background if tray creation failed.
+    if ((!tray || tray.isDestroyed()) && !createTray()) return
+    mainWindow?.hide()
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' } })
   if (qaCapturePath) {
@@ -443,7 +445,8 @@ function createWindows() {
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
-        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible'] : [])
+        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible']
+        : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close'] : [])
       if (qaView === 'audio-sync') {
         const result = await mainWindow.webContents.executeJavaScript(`(async () => {
           [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
@@ -516,12 +519,26 @@ function createWindows() {
         } else qaLog('skip test aborted: Spotify did not publish a replacement track before timeout')
       }
       if (qaView === 'reopen') {
+        let minimizeEvents = 0
+        const onMinimize = () => { minimizeEvents += 1 }
+        mainWindow.on('minimize', onMinimize)
+        const overlayWasVisible = overlayWindow?.isVisible()
+        checks.record('tray', Boolean(tray && !tray.isDestroyed()))
+        const closeFound = await mainWindow.webContents.executeJavaScript(`(() => {
+          const button = document.querySelector('.window-close'); button?.click(); return Boolean(button);
+        })()`)
+        await new Promise(resolve => setTimeout(resolve, 180))
+        const closed = !mainWindow.isVisible() && !mainWindow.isMinimized() && !mainWindow.isDestroyed() && minimizeEvents === 0
+        checks.record('close', closeFound && closed)
+        checks.record('overlay-preserved', overlayWasVisible === overlayWindow?.isVisible())
+        qaLog(`close-to-tray: hidden=${!mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, minimizeEvents=${minimizeEvents}`)
+        tray?.emit('click')
+        await new Promise(resolve => setTimeout(resolve, 180))
+        checks.record('reopen', mainWindow.isVisible() && !mainWindow.isMinimized())
         mainWindow.close()
-        await new Promise(resolve => setTimeout(resolve, 350))
-        qaLog(`close-to-taskbar: minimized=${mainWindow.isMinimized()}, destroyed=${mainWindow.isDestroyed()}`)
+        checks.record('repeat-close', !mainWindow.isVisible() && minimizeEvents === 0)
+        mainWindow.removeListener('minimize', onMinimize)
         revealMainWindow()
-        await new Promise(resolve => setTimeout(resolve, 350))
-        qaLog(`taskbar-reopen: visible=${mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, destroyed=${mainWindow.isDestroyed()}`)
       }
       if (qaView === 'overlay-sync') {
         await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.language-grid button')].find(button => button.textContent?.includes('中文'))?.click()`)
@@ -694,7 +711,7 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync') {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen') {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -771,11 +788,14 @@ function toggleOverlay() {
 }
 
 function createTray() {
-  const icon = appIcon()
-  if (icon.isEmpty()) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#1ed760"/><path d="M10 9v14m0-10 12-3v9" fill="none" stroke="#07150c" stroke-width="2.4" stroke-linecap="round"/><circle cx="7.5" cy="23" r="3" fill="#07150c"/><circle cx="19.5" cy="19" r="3" fill="#07150c"/></svg>`
-    tray = new Tray(nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`).resize({ width: 16, height: 16 }))
-  } else tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  if (tray && !tray.isDestroyed()) return true
+  // Give Windows the multi-resolution ICO directly (16/20/24/32/... px).
+  // NativeImage's SVG fallback could be empty; a fixed 16px resize also blurred
+  // the notification icon on higher-DPI taskbars.
+  const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
+  const iconPath = app.isPackaged ? path.join(process.resourcesPath, iconName) : path.join(directory, '../../build', iconName)
+  try { tray = new Tray(iconPath) }
+  catch (error) { tray = null; console.error('Syllable tray creation failed:', error); return false }
   tray.setToolTip('Syllable · 单击打开客户端')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
@@ -786,6 +806,8 @@ function createTray() {
     { label: '退出', click: () => { quitting = true; app.quit() } }
   ]))
   tray.on('click', () => revealMainWindow('cursor'))
+  qaLog(`tray ready: destroyed=${tray.isDestroyed()}, bounds=${JSON.stringify(tray.getBounds())}`)
+  return true
 }
 
 function withoutEmbeddedCover(value: typeof lastPlayback) {

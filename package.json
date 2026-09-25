@@ -1,6 +1,6 @@
 {
   "name": "syllable",
-  "version": "0.4.31",
+  "version": "0.4.32",
   "private": true,
   "description": "A multilingual floating lyrics companion for Spotify",
   "author": "Syllable Contributors",
@@ -51,6 +51,10 @@
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "asarUnpack": [

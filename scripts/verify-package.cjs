@@ -15,6 +15,7 @@ if (!mainEntry) throw new Error('Packaged main entry is missing')
 const main = read(mainEntry)
 const native = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]local-spotify-.*\.js$/.test(entry)).map(read).join('\n')
 const renderer = entries.filter(entry => /[\\/]renderer[\\/].*\.js$/.test(entry)).map(read).join('\n')
+const rendererCss = entries.filter(entry => /[\\/]renderer[\\/].*\.css$/.test(entry)).map(read).join('\n')
 const checks = {
   executable: fs.existsSync(path.join(directory, 'Syllable.exe')),
   version: packaged.version === expectedVersion,
@@ -46,6 +47,9 @@ const checks = {
   acousticSafety: main.includes('captureDurationMs') && main.includes('invalidatedAtMs') && main.includes('audio-sync:observation'),
   acousticEndpointSafety: main.includes('value.capturedAtMs > this.anchor.observedAtMs') && renderer.includes('unconfirmed-end'),
   experimentalAudioUi: renderer.includes('当前阶段不支持无参照校准') && renderer.includes('AUDIO ALIGNMENT'),
+  closeToTray: main.includes('close-to-tray:') && main.includes('mainWindow?.hide()') && main.includes('new Tray(iconPath)'),
+  trayIconAssets: ['icon.ico', 'icon.png'].every(name => fs.existsSync(path.join(directory, 'resources', name))),
+  secondaryContrast: /-webkit-text-stroke:\s*1\.5px #121212/.test(rendererCss) && rendererCss.includes('.no-background.effect-none .overlay-secondary'),
 }
 console.log(JSON.stringify({ directory, expectedVersion, packagedVersion: packaged.version, checks,
   archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') }, null, 2))

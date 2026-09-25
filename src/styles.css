@@ -557,13 +557,23 @@ input[type=range]::-webkit-slider-thumb { width: 14px; height: 14px; border: 0; 
   word-break: normal;
   text-shadow: none;
 }
-.overlay-secondary { width: fit-content; max-width: 100%; color: #d5d5d5; font-family: inherit; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+.overlay-shell .overlay-secondary { width: fit-content; max-width: 100%; color: #fff; font-family: inherit; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
 .overlay-shell.center .overlay-primary, .overlay-shell.center .overlay-secondary { margin-left: auto; margin-right: auto; }
-.overlay-secondary.romanization { color: #9fd6b2; font-size: 14px; }
+.overlay-shell .overlay-secondary.romanization { color: #b8f5cc; font-size: 16px; }
 .overlay-shell.effect-shadow .overlay-primary { text-shadow: 0 3px 12px rgba(0,0,0,.92), 0 1px 2px rgba(0,0,0,.95); }
-.overlay-shell.effect-shadow .overlay-secondary { text-shadow: 0 2px 8px rgba(0,0,0,.9); }
+/* Small secondary lines need a solid local edge, not a broad blurry halo.
+   Paint the outline behind the fill so it cannot eat thin CJK/Latin stems.
+   Transparent "none" retains this minimum contrast guard; with a background
+   enabled, "none" still means no text effects. No rectangular backdrop. */
+.overlay-shell.effect-shadow .overlay-secondary,
+.overlay-shell.effect-outline .overlay-secondary,
+.overlay-shell.no-background.effect-none .overlay-secondary {
+  -webkit-text-stroke: 1.5px #121212;
+  paint-order: stroke fill;
+  text-shadow: 0 1px 2px #000, 0 0 1px #000;
+}
 .overlay-shell.effect-outline .overlay-primary { -webkit-text-stroke: 1px rgba(0,0,0,.92); paint-order: stroke fill; text-shadow: 0 1px 3px #000; }
-.overlay-shell.effect-outline .overlay-secondary { -webkit-text-stroke: .45px rgba(0,0,0,.9); paint-order: stroke fill; }
+.overlay-shell.effect-outline .overlay-secondary { -webkit-text-stroke-width: 2px; }
 .overlay-shell.no-background.effect-none .overlay-primary { text-shadow: 0 2px 6px rgba(0,0,0,.92); }
 .lyrics-list { transition: none; }
 .lyric-group { transition: opacity 260ms cubic-bezier(.22, .61, .36, 1); }

@@ -3,6 +3,21 @@ import { createReferenceDeduplicatingStorage, useAppStore } from './useAppStore'
 import type { LyricsDocument } from '../types'
 
 describe('application-state persistence', () => {
+  it('replaces the original across languages without erasing translations or retaining stale verification', () => {
+    const before = useAppStore.getState()
+    const document: LyricsDocument = { trackId: 'switch-original', tracks: [
+      { id: 'old', kind: 'original', language: 'en', label: 'English', source: 'wrong', lines: [] },
+      { id: 'translation', kind: 'translation', language: 'ja', label: '日本語訳', source: 'User', lines: [] }
+    ], untimedOriginal: { text: 'original', language: 'ja', source: 'Spotify' },
+    textReference: { referenceSource: 'Spotify', status: 'consistent', matchedLines: 12, referenceLines: 12 } }
+    try {
+      useAppStore.setState({ lyrics: document })
+      useAppStore.getState().addLyricTrack({ id: 'new', kind: 'original', language: 'ja', label: '日本語', source: 'User', lines: [] })
+      expect(useAppStore.getState().lyrics?.tracks.map(track => track.id)).toEqual(['translation', 'new'])
+      expect(useAppStore.getState().lyrics?.untimedOriginal).toBeUndefined()
+      expect(useAppStore.getState().lyrics?.textReference).toBeUndefined()
+    } finally { useAppStore.setState(before) }
+  })
   it('invalidates a manual refresh without deleting imported lyrics or per-song calibration', () => {
     const before = useAppStore.getState()
     const document: LyricsDocument = { trackId: 'refresh-test', providerRevision: 34, offsetMs: 2300,

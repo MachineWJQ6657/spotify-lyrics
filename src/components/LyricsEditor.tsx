@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { sourceLabel } from '../lib/source-label'
 import { Clock3, Download, Languages, LoaderCircle, Plus, Save, Search, Trash2, WandSparkles, X } from 'lucide-react'
 import type { LyricsCandidate, LyricTrack } from '../types'
 import { detectLyricsLanguage, makeRomanizedTrack, makeTrack, serializeLrc } from '../lib/lyrics'
@@ -51,7 +52,7 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
     if (!candidate.syncedLyrics) { setMessage('这个候选只有纯文本歌词，暂时不能自动同步'); return }
     const language = detectLyricsLanguage(candidate.syncedLyrics)
     const label = language === 'ja' ? '日本語' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
-    const original = makeTrack(`remote-${candidate.id}`, language, label, 'original', candidate.syncedLyrics, `${candidate.provider} · ${candidate.score}%`)
+    const original = makeTrack(`remote-${candidate.id}`, language, label, 'original', candidate.syncedLyrics, `${candidate.provider} · 手动选择`)
     addLyricTrack(original); setActiveId(original.id); setResults([]); setMessage('已应用候选歌词')
     if (language === 'ja') {
       try {
@@ -86,7 +87,7 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
         <div><Search size={14} /><input {...trackQueryPresentation} value={query.track} onChange={event => setQuery({ ...query, track: event.target.value })} placeholder="歌曲名" /><input {...artistQueryPresentation} value={query.artist} onChange={event => setQuery({ ...query, artist: event.target.value })} placeholder="艺人" /></div>
         <button onClick={() => void search()} disabled={searching}>{searching ? <LoaderCircle className="spin-icon" size={14} /> : <Search size={14} />}搜索候选</button>
       </div>
-      <div className="candidate-strip">{results.map(item => <button key={item.id} onClick={() => void applyCandidate(item)}><strong {...scriptPresentation(item.trackName, item.artistName)}>{item.trackName}</strong><span><span {...scriptPresentation(item.artistName, item.trackName)}>{item.artistName}</span> · {formatTime(item.durationMs)}</span><i>{item.score}%</i></button>)}</div>
+      <div className="candidate-strip">{results.map(item => <button key={item.id} onClick={() => void applyCandidate(item)}><strong {...scriptPresentation(item.trackName, item.artistName)}>{item.trackName}</strong><span><span {...scriptPresentation(item.artistName, item.trackName)}>{item.artistName}</span> · {formatTime(item.durationMs)}</span><i>待核验</i></button>)}</div>
       <div className="editor-toolbar">
         <div className="track-tabs">{lyrics?.tracks.map(track => <button className={`${track.id === active?.id ? 'active' : ''} ${languagePresentation(track.language).className}`} lang={languagePresentation(track.language).lang} onClick={() => setActiveId(track.id)} key={track.id}><i />{track.label}<small>{track.lines.length}</small></button>)}</div>
         <div className="editor-actions">
@@ -108,7 +109,7 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
           </div>)}</div>
         </>}
       </div>
-      <footer className="editor-footer"><span>{message || `${active?.source ?? '未选择轨道'} · 所有修改会自动保存`}</span><button onClick={() => setEditorOpen(false)}><Save size={13} />完成</button></footer>
+      <footer className="editor-footer"><span>{message || `${sourceLabel(active?.source ?? '未选择轨道')} · 所有修改会自动保存`}</span><button onClick={() => setEditorOpen(false)}><Save size={13} />完成</button></footer>
     </div>
   </div>
 }

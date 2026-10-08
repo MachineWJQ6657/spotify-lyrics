@@ -78,6 +78,16 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
   }, [active, following, centerActive, viewportHeight])
 
   if (!document) return <div className="empty-lyrics"><span className="spinner" /><p>正在寻找最合适的歌词…</p></div>
+  if (document.untimedOriginal) return <div className="lyrics-stage-shell">
+    <div className="lyrics-viewport untimed-lyrics" tabIndex={0} aria-label="原文歌词，暂无可信时间轴，可上下滚动查看">
+      <div className="info-note"><strong>已取得原文，暂无可信时间轴</strong><p>{document.textReference?.status === 'conflict' ? '已排除与 Spotify 原文冲突的同步歌词。' : '下方原文仅供阅读，不随播放进度滚动。'}</p>{onRetry && <button onClick={onRetry}>重新匹配时间轴</button>}</div>
+      <div className="lyrics-list" style={{ paddingTop: 24, paddingBottom: 80 }}>
+        {document.untimedOriginal.text.split(/\r?\n/).filter(Boolean).map((text, index) => <div className="lyric-group" key={index}>
+          <div lang={document.untimedOriginal!.language} className={`lyric-primary ${document.untimedOriginal!.language === 'ja' ? 'japanese-grid' : document.untimedOriginal!.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'}`}>{text}</div>
+        </div>)}
+      </div>
+    </div>
+  </div>
   if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配，或导入本地 LRC。</p>{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}</div>
 
   return <div className="lyrics-stage-shell">

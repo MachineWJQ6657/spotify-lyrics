@@ -1,5 +1,6 @@
 import type { PlaybackSnapshot } from './spotify'
 import { isLyricCredit } from '../src/lib/lyric-metadata'
+import { compareOriginalText, type TextReferenceCheck } from './lyrics-text-reference'
 
 export interface SupplementalLyrics {
   language: string
@@ -10,6 +11,7 @@ export interface SupplementalLyrics {
 }
 
 export interface LyricsResult {
+  textReference?: TextReferenceCheck
   syncedLyrics: string | null
   plainLyrics: string | null
   source: string
@@ -28,8 +30,9 @@ export interface LyricsCandidate {
 const LRC_TIMESTAMP = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?]/g
 const KANA = /[\u3040-\u30ff]/
 const HAN = /[\u3400-\u9fff]/
+const HANGUL = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/
 const LATIN = /[a-z]/i
-const isRomanizedText = (value: string) => LATIN.test(value) && !KANA.test(value) && !HAN.test(value)
+const isRomanizedText = (value: string) => LATIN.test(value) && !KANA.test(value) && !HAN.test(value) && !HANGUL.test(value)
 
 function timestampMs(timestamp: string) {
   const match = timestamp.match(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]/)
@@ -680,6 +683,8 @@ function dominantLyricScript(rows: TimedLyricsRow[]) {
   const kana = [...joined].filter(character => KANA.test(character)).length
   const han = [...joined].filter(character => HAN.test(character)).length
   const latin = [...joined].filter(character => LATIN.test(character)).length
+  const hangul = [...joined].filter(character => HANGUL.test(character)).length
+  if (hangul > kana + han && hangul >= 3) return 'ko'
   if (kana >= 3) return 'ja'
   if (han > latin) return 'han'
   return latin ? 'latin' : 'other'
@@ -821,6 +826,18 @@ function mergeChineseSupplementals(items: OwnedSupplemental[], base: LyricsResul
   }
 }
 
+/** Multi-track exports often duplicate each onset with different words.
+ * Structural evidence only, never a blacklist of Korean or another language. */
+export function hasParallelLyricRows(value: string | null | undefined) {
+  const groups = new Map<number, Set<string>>()
+  for (const row of parseTimedRows(value)) {
+    const group = groups.get(row.timeMs) ?? new Set<string>()
+    group.add(row.normalizedText); groups.set(row.timeMs, group)
+  }
+  const paired = [...groups.values()].filter(group => group.size >= 2).length
+  return paired >= 4 && paired / Math.max(1, groups.size) >= .55
+}
+
 function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // Filter before choosing a winner inside each provider as well as in the
   // final cross-provider merge. Otherwise an impossible high-score search hit
@@ -828,7 +845,14 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // after the provider has already discarded that usable alternative.
   const durationMatched = candidates.filter(item => durationPlausibleForPlayback(item, durationMs))
   if (!durationMatched.length) return null
-  const prepared = durationMatched.map(splitEmbeddedTranslation)
+  const split = durationMatched.map(splitEmbeddedTranslation)
+  // /get proves metadata, not that a user-uploaded body is the sung original.
+  // A healthy near-equal-identity single-track source beats an unresolved
+  // parallel export. A sole Korean source / real Korean song remains eligible.
+  const prepared = split.filter(item => !hasParallelLyricRows(item.syncedLyrics) || !split.some(other => other !== item
+    && other.confidence >= item.confidence - 5 && !hasParallelLyricRows(other.syncedLyrics)
+    && timedLyricsStats(other.syncedLyrics, durationMs).lineCount >= 8
+    && timedLyricsStats(other.syncedLyrics, durationMs).tailCoverage >= .7))
   const strongestIdentity = Math.max(...prepared.map(item => item.confidence))
   const wide = prepared.filter(item => item.confidence >= strongestIdentity - 20)
   // Six identity points is enough for an unrelated same-artist song with a
@@ -893,11 +917,17 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
 
 export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs = 0, preferredScript?: 'ja' | 'han' | 'latin'): LyricsResult | null {
   const normalized = results.flatMap(result => result ? [splitEmbeddedTranslation(result)] : [])
+  const spotifyText = normalized.find(item => item.source.startsWith('Spotify')
+    && compareOriginalText(item.plainLyrics ?? '', item.plainLyrics ?? '', item.source))
+  const textCheck = (item: LyricsResult) => spotifyText ? compareOriginalText(
+    parseTimedRows(item.syncedLyrics).map(row => row.text).join('\n'), spotifyText.plainLyrics!, spotifyText.source) : null
   const authoritativePlain = normalized.filter(item => item.source.startsWith('LRCLIB · 精确匹配')
     && (item.plainLyrics?.replace(/\s+/g, '').length ?? 0) >= 40)
   const timed = normalized.filter(item => {
     if (!isTimedLyrics(item.syncedLyrics)) return false
     if (!durationPlausibleForPlayback(item, durationMs)) return false
+    const evidence = textCheck(item)
+    if (evidence && evidence.status !== 'conflict' && evidence.matchedLines >= 4) return true
     if (item.confidence >= 78 || !authoritativePlain.length) return true
     const candidateText = timelineRows(item.syncedLyrics).map(row => row.text).join('')
     // A low-identity fallback must at least resemble the exact provider's
@@ -913,9 +943,19 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   // A title written in kana is direct evidence that a Han-only LRC is a
   // translation, not a denser Japanese original. Keep the fallback when no
   // plausible Japanese source exists so rare community-only songs still show.
-  const selectionPool = preferredTimed.some(item => item.confidence >= strongestIdentity - 20) ? preferredTimed : timed
+  const scriptPool = preferredTimed.some(item => item.confidence >= strongestIdentity - 20) ? preferredTimed : timed
+  const consistentPool = timed.filter(item => textCheck(item)?.status === 'consistent')
+  const partialPool = timed.filter(item => {
+    const check = textCheck(item)
+    return check?.status === 'partial' && check.matchedLines >= 4
+  })
+  const referencePool = consistentPool.length ? consistentPool : partialPool
+  const nonConflicting = scriptPool.filter(item => textCheck(item)?.status !== 'conflict')
+  // Actual Spotify words outrank metadata scores, including for kanji-only or
+  // romanized song titles. Never synthesize timestamps from untimed words.
+  const selectionPool = referencePool.length ? referencePool : nonConflicting
   const qualityBase = bestLyricsCandidate(selectionPool, durationMs)
-  const spotifyBase = bestLyricsCandidate(timed.filter(item => item.source.startsWith('Spotify')), durationMs)
+  const spotifyBase = bestLyricsCandidate(selectionPool.filter(item => item.source.startsWith('Spotify')), durationMs)
   const spotifyStats = timedLyricsStats(spotifyBase?.syncedLyrics, durationMs)
   // A complete Spotify-provided timeline is the closest available reference
   // to what its client renders. Prefer it over a denser community LRC, but do
@@ -923,15 +963,23 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   const trustedSpotifyBase = spotifyBase && spotifyStats.lineCount >= 4 && spotifyStats.continuity >= .82
     && (!durationMs || spotifyStats.tailCoverage >= .55)
     && !isProvenIncomplete(spotifyBase, timed)
+    && !isTimelineConsensusOutlier(spotifyBase, timed)
     ? spotifyBase
     : null
   // Untimed plain text is useful search metadata but cannot drive the desktop
   // lyric clock. Returning it as a successful fetch used to poison the
   // in-memory cache after a temporary outage and suppress later provider
   // retries for the rest of the process lifetime.
-  const selectedBase = trustedSpotifyBase ?? qualityBase ?? timed[0]
-  if (!selectedBase) return null
-  const timedBase = repairRepeatedWords(repairBoundedGaps(selectedBase, timed), timed)
+  const selectedBase = trustedSpotifyBase ?? qualityBase ?? selectionPool[0]
+  if (!selectedBase) {
+    // Keep actual original words, but never attach a conflicting community
+    // clock or fabricate timestamps. The renderer has a separate untimed view.
+    if (!spotifyText) return null
+    const rejected = timed.map(textCheck).find(check => check?.status === 'conflict')
+    return { ...spotifyText, syncedLyrics: null, additionalTracks: [], ...(rejected ? { textReference: rejected } : {}) }
+  }
+  const repairPool = timed.filter(item => textCheck(item)?.status !== 'conflict')
+  const timedBase = repairRepeatedWords(repairBoundedGaps(selectedBase, repairPool), repairPool)
   const compatibleSupplementalOwners = normalized.filter(owner => supplementalOwnerCompatible(owner, selectedBase))
   const supplementalCandidates: OwnedSupplemental[] = compatibleSupplementalOwners.flatMap(owner => (owner.additionalTracks ?? []).map(track => ({ owner, track: alignSupplementalTimeline(track, owner, timedBase) })))
   const chinese = mergeChineseSupplementals(supplementalCandidates.filter(item => item.track.language === 'zh-Hans' && item.track.kind === 'translation'), timedBase)
@@ -951,7 +999,9 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
     return scored[0] ? [scored[0].item.track] : []
   })
   if (chinese) additionalTracks.push(chinese)
-  return { ...timedBase, additionalTracks }
+  const textReference = spotifyText ? compareOriginalText(parseTimedRows(timedBase.syncedLyrics).map(row => row.text).join('\n'),
+    spotifyText.plainLyrics!, spotifyText.source) : null
+  return { ...timedBase, additionalTracks, ...(textReference ? { textReference } : {}) }
 }
 
 export function mergeProviderResults(primary: LyricsResult | null, supplemental: LyricsResult | null, durationMs = 0): LyricsResult | null {
@@ -1111,7 +1161,10 @@ function scriptAwareSimilarity(left: string, right: string) {
   // lossy machine translation of kanji lyric content.
   const romanizedLeft = KANA.test(left) ? romanizeKanaIdentity(left) : left
   const romanizedRight = KANA.test(right) ? romanizeKanaIdentity(right) : right
-  return Math.max(direct, similarity(romanizedLeft, right), similarity(left, romanizedRight), similarity(romanizedLeft, romanizedRight))
+  const compactLeft = normalize(romanizedLeft).replace(/\s+/g, '')
+  const compactRight = normalize(romanizedRight).replace(/\s+/g, '')
+  const sameSpelling = compactLeft.length >= 6 && compactLeft === compactRight ? 1 : 0
+  return Math.max(direct, sameSpelling, similarity(romanizedLeft, right), similarity(left, romanizedRight), similarity(romanizedLeft, romanizedRight))
 }
 
 export function recordingEdition(value: string) {
@@ -1121,11 +1174,36 @@ export function recordingEdition(value: string) {
   descriptors.push(...normalized.split(/\s+[-–—]\s+/).slice(1))
   if (/\blive\s+(?:at|from|in)\b/.test(normalized)) descriptors.push('live')
   const text = descriptors.join(' ')
-  if (/\blive\b|ライブ|现场|現場/.test(text)) return 'live'
-  if (/\binstrumental\b|\bkaraoke\b|伴奏|カラオケ/.test(text)) return 'instrumental'
-  if (/\bacoustic\b|アコースティック/.test(text)) return 'acoustic'
-  if (/\bremix\b|リミックス/.test(text)) return 'remix'
-  return 'unspecified'
+  const language = languageEdition(value)
+  const kind = /\blive\b|ライブ|现场|現場/.test(text) ? 'live'
+    : /\binstrumental\b|\bkaraoke\b|伴奏|カラオケ/.test(text) ? 'instrumental'
+    : /\bacoustic\b|アコースティック/.test(text) ? 'acoustic'
+    : /\bremix\b|リミックス/.test(text) ? 'remix' : 'unspecified'
+  return language ? `language:${language}:${kind}` : kind
+}
+
+/** Explicit recording language, not language inferred from title characters. */
+export function languageEdition(value: string) {
+  const normalized = value.normalize('NFKC').toLowerCase()
+  const markers = [...normalized.matchAll(/[([]([^\])]+)[)\]]/g)].map(match => match[1])
+  markers.push(...normalized.split(/\s+[-–—]\s+/).slice(1))
+  const suffix = normalized.match(/(?:\s|^)((?:(?:english|eng|japanese|jpn|jp|korean|kor|kr|chinese|mandarin|chn)\s+ver(?:sion)?\.?|英语版|英語版|英文版|日语版|日本語版|日文版|韩语版|韓語版|中文版|国语版|國語版))\s*$/i)
+  if (suffix) markers.push(suffix[1])
+  const text = markers.join(' ')
+  const languages: Array<[string, RegExp]> = [
+    ['en', /\b(?:english|eng)\s*(?:ver(?:sion)?\.?|版)|英语版|英語版|英文版/],
+    ['ja', /\b(?:japanese|jpn|jp)\s*(?:ver(?:sion)?\.?|版)|日语版|日本語版|日文版/],
+    ['ko', /\b(?:korean|kor|kr)\s*(?:ver(?:sion)?\.?|版)|韩语版|韓語版|한국어/],
+    ['zh', /\b(?:chinese|mandarin|chn)\s*(?:ver(?:sion)?\.?|版)|中文版|国语版|國語版/]
+  ]
+  return languages.find(([, pattern]) => pattern.test(text))?.[0] ?? null
+}
+
+export function lyricHeaderCompatible(value: string, title: string) {
+  const header = value.match(/^\s*\[ti:([^\r\n]*)\]/im)?.[1]
+  if (!header) return true
+  const edition = recordingEdition(header)
+  return edition === 'unspecified' || edition === recordingEdition(title)
 }
 
 export function weightedScore(candidateTrack: string, candidateArtist: string, candidateDurationMs: number, query: { track: string; artist: string; album?: string; durationMs?: number }, synced: boolean, candidateAlbum = '') {
@@ -1260,6 +1338,19 @@ export async function searchLyrics(query: { track: string; artist: string; album
   }))
   const records = new Map<number, LrcLibRecord>()
   for (const result of settled) if (result.status === 'fulfilled') for (const item of result.value) records.set(item.id, item)
+  // Spotify romanization may join particles (Byoushinwo vs Byoushin wo).
+  // Broaden retrieval only when empty/all-parallel, using artist + one stable
+  // title word. Rank against the FULL original query, never the short token.
+  if (!records.size || [...records.values()].every(item => !isTimedLyrics(item.syncedLyrics) || hasParallelLyricRows(item.syncedLyrics))) {
+    const words = cleanedTrack.match(/[a-z]{4,}/gi) ?? []
+    if (words.length >= 2) {
+      const params = new URLSearchParams({ artist_name: cleanedArtist, track_name: words.at(-1)! })
+      try {
+        const response = await fetchWithTimeout(`${LRCLIB_API}/search?${params}`, { headers }, 2200, 0, signal)
+        if (response.ok) for (const item of await response.json() as LrcLibRecord[]) records.set(item.id, item)
+      } catch { /* Optional retrieval must not discard completed results. */ }
+    }
+  }
   if (!records.size) {
     const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failure) throw failure.reason
@@ -1290,6 +1381,7 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
         // exact hit does not override a contradictory recording edition.
         if (recordingEdition(`${data.trackName ?? ''} ${data.albumName ?? ''}`)
           !== recordingEdition(`${track.name} ${track.album}`)) return null
+        if (!lyricHeaderCompatible(data.syncedLyrics ?? data.plainLyrics ?? '', track.name)) return null
         if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
       }
       if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)
@@ -1299,8 +1391,8 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
   ])
   for (const result of exactResults) if (result.status === 'fulfilled' && result.value) candidates.push(result.value)
   const fallback = searched
-    .filter(item => isTimedLyrics(item.syncedLyrics) && item.score >= 55)
-    .map(item => ({ syncedLyrics: item.syncedLyrics, plainLyrics: item.plainLyrics, source: `LRCLIB · 搜索匹配 ${item.score}%`, confidence: item.score, matchedDurationMs: item.durationMs } satisfies LyricsResult))
+    .filter(item => isTimedLyrics(item.syncedLyrics) && item.score >= 55 && lyricHeaderCompatible(item.syncedLyrics ?? '', track.name))
+    .map(item => ({ syncedLyrics: item.syncedLyrics, plainLyrics: item.plainLyrics, source: 'LRCLIB · 搜索候选', confidence: item.score, matchedDurationMs: item.durationMs } satisfies LyricsResult))
   candidates.push(...fallback)
   if (!candidates.length) {
     const exactFailure = exactResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -1354,10 +1446,11 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
       const originalValue = lyrics.lrc?.lyric?.trim() || null
       const original = isTimedLyrics(originalValue) ? originalValue : null
       if (!original) return null
+      if (!lyricHeaderCompatible(original, track.name)) return null
       const additionalTracks: SupplementalLyrics[] = []
       if (isTimedLyrics(lyrics.romalrc?.lyric)) additionalTracks.push({ language: 'romaji', label: 'Romaji', kind: 'romanization', syncedLyrics: lyrics.romalrc!.lyric!, source: '网易云音乐 · 罗马音' })
       if (isTimedLyrics(lyrics.tlyric?.lyric)) additionalTracks.push({ language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: lyrics.tlyric!.lyric!, source: '网易云音乐 · 翻译' })
-      return { syncedLyrics: original, plainLyrics: null, source: `网易云音乐 · 搜索匹配 ${match.score}%`, confidence: match.score, matchedDurationMs: neteaseDuration(match.song), additionalTracks } satisfies LyricsResult
+      return { syncedLyrics: original, plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: match.score, matchedDurationMs: neteaseDuration(match.song), additionalTracks } satisfies LyricsResult
     }))
     const details = detailResults.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
     if (!details.length) {
@@ -1424,32 +1517,37 @@ async function fetchKugou(track: NonNullable<PlaybackSnapshot['track']>, signal?
         return null
       }
       const lyricPayload = await lyricResponse.json() as { candidates?: KugouLyricCandidate[] }
-      const lyricCandidate = (lyricPayload.candidates ?? []).sort((a, b) => {
+      const lyricCandidates = (lyricPayload.candidates ?? []).filter(candidate => !candidate.song
+        || recordingEdition(candidate.song) === recordingEdition(track.name)).sort((a, b) => {
         const left = Math.abs((a.duration ?? 0) - durationMs)
         const right = Math.abs((b.duration ?? 0) - durationMs)
         return left - right
-      })[0]
-      if (!lyricCandidate?.id || !lyricCandidate.accesskey) return null
+      }).slice(0, 3)
+      for (const lyricCandidate of lyricCandidates) {
+      if (!lyricCandidate?.id || !lyricCandidate.accesskey) continue
       const download = new URLSearchParams({ ver: '1', client: 'pc', id: String(lyricCandidate.id), accesskey: lyricCandidate.accesskey, fmt: 'lrc', charset: 'utf8' })
       const downloadResponse = await fetchWithTimeout(`${KUGOU_LYRICS_API}/download?${download}`, { headers }, 4200, 2, signal)
       if (!downloadResponse.ok) {
         if (isTransientProviderStatus(downloadResponse.status)) throw new Error(`酷狗歌词下载暂时不可用 (${downloadResponse.status})`)
-        return null
+        continue
       }
       const downloadPayload = await downloadResponse.json() as { content?: string }
       const syncedLyrics = downloadPayload.content ? Buffer.from(downloadPayload.content, 'base64').toString('utf8').replace(/^\uFEFF/, '').trim() : null
-      if (!isTimedLyrics(syncedLyrics)) return null
+      if (!isTimedLyrics(syncedLyrics)) continue
+      if (!lyricHeaderCompatible(syncedLyrics!, track.name)) continue
       // Some search hits omit the edition while the downloaded file names it.
       // Only early track-header evidence qualifies; ordinary sung lyrics do not.
       const headerEdition = parseTimedRows(syncedLyrics).filter(row => row.timeMs <= 5000
         && (row.text.includes(' - ') || /^\s*(?:title|曲名|歌曲)\s*[:：]/i.test(row.text)))
         .map(row => recordingEdition(row.text)).find(edition => edition !== 'unspecified')
-      if (headerEdition && headerEdition !== recordingEdition(`${track.name} ${track.album}`)) return null
+      if (headerEdition && headerEdition !== recordingEdition(`${track.name} ${track.album}`)) continue
       return {
         syncedLyrics: stripTimedTrackMetadata(syncedLyrics, { name: match.song.SongName, artist: match.song.SingerName }),
-        plainLyrics: null, source: `酷狗音乐 · 搜索匹配 ${match.score}%`, confidence: match.score,
+        plainLyrics: null, source: '酷狗音乐 · 搜索候选', confidence: match.score,
         matchedDurationMs: lyricCandidate.duration || (match.song.Duration ?? 0) * 1000
       } satisfies LyricsResult
+      }
+      return null
   }))
   const results = detailResults.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
   if (!results.length) {
@@ -1498,9 +1596,11 @@ async function fetchSpotifyLyrics(track: NonNullable<PlaybackSnapshot['track']>,
   }, 3500, 0, signal)
   if (!response.ok) return null
   const payload = await response.json() as SpotifyLyricsPayload
-  if (!isSpotifySyncedLyricsType(payload.lyrics?.syncType) || !payload.lyrics?.lines?.length) return null
-  const syncedLyrics = spotifyLinesToLrc(payload.lyrics.lines)
-  if (!isTimedLyrics(syncedLyrics)) return null
+  if (!payload.lyrics?.lines?.length) return null
+  // UNSYNCED Musixmatch words still establish original content. They cannot
+  // drive the lyric clock; do not fabricate [00:00] lines from that payload.
+  const timedLyrics = isSpotifySyncedLyricsType(payload.lyrics.syncType) ? spotifyLinesToLrc(payload.lyrics.lines) : null
+  const syncedLyrics = isTimedLyrics(timedLyrics) ? timedLyrics : null
   return {
     syncedLyrics,
     plainLyrics: payload.lyrics.lines.map(line => line.words ?? '').filter(Boolean).join('\n'),

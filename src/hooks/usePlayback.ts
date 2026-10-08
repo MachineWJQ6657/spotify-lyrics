@@ -13,7 +13,7 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // invalidated exact-provider timelines that silently omitted short repeated
 // outro refrains; revision 23 covered translated rewrites and collaboration
 // releases whose producer credit exists only in album aliases.
-const LYRICS_PROVIDER_REVISION = 34
+const LYRICS_PROVIDER_REVISION = 36
 // Maps a provider context to the retry token of its one allowed automatic
 // recovery generation. Token ownership prevents a stale async continuation
 // from clearing (or re-arming) a newer generation's guard.
@@ -53,7 +53,8 @@ export function mergeUserEditedTracks(providerTracks: LyricTrack[], baseline?: L
   const preserved = baseline.tracks.filter(track => isUserOwnedTrack(track, baseline))
   if (!preserved.length) return providerTracks
   const conflicts = new Set(preserved.map(track => `${track.kind}\0${track.language}`))
-  return [...providerTracks.filter(track => !conflicts.has(`${track.kind}\0${track.language}`)), ...preserved]
+  return [...providerTracks.filter(track => !(track.kind === 'original' && preserved.some(item => item.kind === 'original'))
+    && !conflicts.has(`${track.kind}\0${track.language}`)), ...preserved]
 }
 
 /** Partial provider responses must use the same calibration as final results. */
@@ -354,8 +355,12 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         }
         // Never persist a transient empty/partial generation over a usable
         // library entry. Empty failures retain the previous visible lyrics.
-        const visibleDocument = document.tracks.length || !requestBaseline?.tracks.length ? calibrated : requestBaseline
-        setTransientLyrics(visibleDocument)
+        const visibleDocument = document.tracks.length || document.untimedOriginal || !requestBaseline?.tracks.length ? calibrated : requestBaseline
+        // A network outage cannot invalidate good cache, but actual original
+        // words disproving it can. Persist the quarantine without a revision
+        // so reopening never resurrects a known-wrong automatic original.
+        if (calibrated.untimedOriginal && calibrated.textReference?.status === 'conflict') setLyrics(calibrated)
+        else setTransientLyrics(visibleDocument)
         transientGeneration = useAppStore.getState().lyrics
         scheduleTransientRetry()
         return transientGeneration
@@ -363,6 +368,18 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
       window.syllable.lyrics.fetch(latestTrack, { bypassCache: bypassProviderCache }).then(async result => {
         if (!requestIsCurrent()) return
         if (!result?.syncedLyrics) {
+          if (result?.source.startsWith('Spotify') && result.plainLyrics?.trim()) {
+            const tracks = mergeUserEditedTracks([], requestBaseline)
+            const keepsUserOriginal = tracks.some(track => track.kind === 'original')
+            commit({ trackId: latestTrack.id, track: latestTrack, tracks,
+              untimedOriginal: keepsUserOriginal ? undefined : { text: result.plainLyrics, source: result.source, language: detectLyricsLanguage(result.plainLyrics) },
+              textReference: keepsUserOriginal ? undefined : result.textReference,
+              userEditedTrackIds: preservedUserEditedTrackIds(tracks, requestBaseline),
+              // Untimed text must not suppress a later timing lookup.
+              updatedAt: Date.now(), providerContext, providerRevision: undefined
+            }, Boolean(result.transient))
+            return
+          }
           const emptyDocument: LyricsDocument = {
             trackId: latestTrack.id, track: latestTrack, tracks: [], updatedAt: Date.now(),
             providerRevision: result?.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext
@@ -379,7 +396,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           return
         }
         const language = detectLyricsLanguage(result.syncedLyrics)
-        const label = language === 'ja' ? '日本語' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
+        const label = language === 'ja' ? '日本語' : language === 'ko' ? '한국어' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
         const original = makeTrack(`${latestTrack.id}-original`, language, label, 'original', result.syncedLyrics, result.source)
         let providerTracks = [original, ...(result.additionalTracks ?? []).map((item, index) =>
           makeTrack(`${latestTrack.id}-${item.language}-${index}`, item.language, item.label, item.kind, item.syncedLyrics, item.source)
@@ -387,6 +404,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         let tracks = mergeUserEditedTracks(providerTracks, requestBaseline)
         const providerDocument: LyricsDocument = {
           trackId: latestTrack.id, track: latestTrack, tracks,
+          textReference: tracks.find(track => track.kind === 'original') === original ? result.textReference : undefined,
           sourceDurationMs: (result.confidence ?? 0) >= 78 ? result.matchedDurationMs : undefined,
           updatedAt: Date.now(), providerRevision: result.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext,
           userEditedTrackIds: preservedUserEditedTrackIds(tracks, requestBaseline)

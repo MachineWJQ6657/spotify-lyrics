@@ -100,6 +100,7 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
 
 export function visibleTracks(document: LyricsDocument | null, enabled: string[], romanization: boolean) {
   if (!document) return []
+  if (document.untimedOriginal) return []
   const creditTimes = new Set(document.tracks.filter(track => track.kind === 'original')
     .flatMap(track => track.lines.filter(line => isLyricCredit(line.text)).map(line => line.startMs)))
   return document.tracks
@@ -117,6 +118,9 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
 }
 
 export function detectLyricsLanguage(text: string) {
+  const hangul = (text.match(/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/g) ?? []).length
+  const kana = (text.match(/[\u3040-\u30ff]/g) ?? []).length
+  if (hangul >= 3 && hangul > kana) return 'ko'
   if (/[\u3040-\u30ff]/.test(text)) return 'ja'
   if (/[\u3400-\u9fff]/.test(text)) return 'zh-Hans'
   if (/[A-Za-z]/.test(text)) return 'en'

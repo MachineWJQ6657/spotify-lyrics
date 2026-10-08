@@ -153,7 +153,10 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     if (!state.lyrics) return state
     const document = {
       ...state.lyrics,
-      tracks: [...state.lyrics.tracks.filter(item => item.id !== track.id && item.language !== track.language), track],
+      textReference: track.kind === 'original' ? undefined : state.lyrics.textReference,
+      untimedOriginal: track.kind === 'original' ? undefined : state.lyrics.untimedOriginal,
+      tracks: [...state.lyrics.tracks.filter(item => item.id !== track.id
+        && !(item.kind === track.kind && (track.kind === 'original' || item.language === track.language))), track],
       userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), track.id])],
       updatedAt: Date.now()
     }
@@ -161,7 +164,8 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   }),
   removeLyricTrack: trackId => set(state => {
     if (!state.lyrics) return state
-    const document = { ...state.lyrics, tracks: state.lyrics.tracks.filter(track => track.id !== trackId), updatedAt: Date.now() }
+    const document = { ...state.lyrics, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
+      tracks: state.lyrics.tracks.filter(track => track.id !== trackId), updatedAt: Date.now() }
     return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   updateLyricLine: (trackId, lineIndex, patch) => set(state => {
@@ -171,7 +175,8 @@ export const useAppStore = create<AppState>()(persist((set) => ({
       const lines = track.lines.map((line, index) => index === lineIndex ? { ...line, ...patch } : line).sort((a, b) => a.startMs - b.startMs)
       return { ...track, lines: lines.map((line, index) => ({ ...line, endMs: lines[index + 1]?.startMs })) }
     })
-    const document = { ...state.lyrics, tracks, userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])], updatedAt: Date.now() }
+    const document = { ...state.lyrics, tracks, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
+      userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])], updatedAt: Date.now() }
     return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   shiftLyricTrack: (trackId, deltaMs) => set(state => {

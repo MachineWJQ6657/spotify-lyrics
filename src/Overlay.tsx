@@ -24,7 +24,7 @@ export function Overlay() {
   const line = base?.lines[index]
   const alignedSecondaries = useMemo(() => base ? tracks.filter(track => track.id !== base.id).map(track => ({ track, lines: alignSecondaryTrack(base.lines, track.lines) })) : [], [base, tracks])
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
-  const hitRegionText = JSON.stringify([line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
+  const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
   useEffect(() => {
     const cancel = () => finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
@@ -113,6 +113,7 @@ export function Overlay() {
             const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
             return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling?.text}</div>
           })}
+          {activeLyrics?.untimedOriginal && <div className="overlay-secondary chinese-text" lang="zh-CN">暂无可信时间轴 · 原文可在客户端查看</div>}
         </div>
       </div>
       <span className="overlay-resize-cue" aria-hidden="true" />

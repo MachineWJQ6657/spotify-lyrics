@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('syllable', {
   audioSync: {
-    prepare: () => ipcRenderer.invoke('audio-sync:prepare'),
+    prepare: (mode?: string) => ipcRenderer.invoke('audio-sync:prepare', mode),
+    engineStatus: () => ipcRenderer.invoke('audio-sync:engine-status'),
+    configureEngine: () => ipcRenderer.invoke('audio-sync:configure-engine'),
+    vocal: (value: unknown) => ipcRenderer.invoke('audio-sync:vocal', value),
     clear: () => ipcRenderer.invoke('audio-sync:clear'),
     observation: (value: unknown) => ipcRenderer.invoke('audio-sync:observation', value)
   },

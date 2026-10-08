@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { recordingEdition, repairRepeatedWords } from './lyrics-provider'
+import { lyricHeaderCompatible, hasParallelLyricRows, recordingEdition, repairRepeatedWords } from './lyrics-provider'
 import { alignSupplementalTimeline, cleanTrackTitle, durationPlausibleForPlayback, fetchLyrics, fetchWithTimeout, isSpotifySyncedLyricsType, isTimedLyrics, lyricsCacheKey, mergeProviderResults, mergeProviderSet, parseTimedRows, primaryArtist, repairBoundedGaps, spotifyLinesToLrc, splitEmbeddedTranslation, stripTimedTrackMetadata, timedLyricsStats, weightedScore, type LyricsResult } from './lyrics-provider'
 
 const timed: LyricsResult = {
@@ -8,6 +8,15 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('rejects foreign-language recording editions even with identical artist and duration', () => {
+    for (const version of ['English ver.', 'English Version', 'Korean ver.', '英文版']) {
+      expect(weightedScore(`雲外憧憬 (${version})`, 'FantasticYouth', 228721,
+        { track: '雲外憧憬', artist: 'FantasticYouth', durationMs: 228721 }, true)).toBe(0)
+      expect(lyricHeaderCompatible(`[ti:雲外憧憬 (${version})]\n[00:12.00]words`, '雲外憧憬')).toBe(false)
+    }
+    expect(lyricHeaderCompatible('[ti:Song (English ver.)]', 'Song (English ver.)')).toBe(true)
+    expect(lyricHeaderCompatible('[00:12.00]English words inside a genuine multilingual song', 'Song')).toBe(true)
+  })
   it('does not prefer contradictory duration metadata for an identical full timeline', () => {
     const syncedLyrics = Array.from({ length: 26 }, (_, index) => `[${String(Math.floor(index * 10 / 60)).padStart(2, '0')}:${String(index * 10 % 60).padStart(2, '0')}.00]verse number ${index}`).join('\n')
     const accurate: LyricsResult = { syncedLyrics, plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 256000 }
@@ -107,6 +116,34 @@ describe('conservative repeated-word repair', () => {
 })
 
 describe('lyrics provider request budget', () => {
+  it('retrieves spaced romanization and rejects a metadata-exact Korean pronunciation export', async () => {
+    const japanese = Array.from({ length: 12 }, (_, i) => `[${String(Math.floor(i * 22 / 60)).padStart(2, '0')}:${String(i * 22 % 60).padStart(2, '0')}.00]テストの原文を歌っている ${i}`).join('\n')
+    const korean = japanese.split('\n').map((line, i) => `${line.slice(0, 10)}한국어 발음 표기 ${i}\n${line.slice(0, 10)}번역된 다른 문장 ${i}`).join('\n')
+    const wrong = { id: 881, trackName: 'Byoushinwo Kamu', artistName: 'ZUTOMAYO', albumName: 'Hisohiso Banashi', duration: 261, syncedLyrics: korean }
+    const correct = { ...wrong, id: 882, trackName: 'Byoushin wo Kamu', syncedLyrics: japanese }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') {
+        if (url.pathname.endsWith('/get')) return new Response(JSON.stringify(wrong))
+        return new Response(JSON.stringify(url.searchParams.get('track_name') === 'Kamu' ? [correct] : [wrong]))
+      }
+      if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+      return new Response('{"data":{"lists":[]}}')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const result = await fetchLyrics({ id: 'qa-korean-export', name: wrong.trackName, artist: wrong.artistName, album: wrong.albumName, durationMs: 260800, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(japanese)
+      expect(result?.syncedLyrics).not.toMatch(/[\uac00-\ud7af]/)
+      expect(fetchMock.mock.calls.some(([url]) => new URL(String(url)).searchParams.get('track_name') === 'Kamu')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
+  it('retains real Korean originals and does not treat repeated identical rows as translations', () => {
+    const korean = Array.from({ length: 10 }, (_, i) => `[00:${String(i * 5).padStart(2, '0')}.00]서로 다른 한국어 가사 ${i}`).join('\n')
+    expect(hasParallelLyricRows(korean)).toBe(false)
+    expect(hasParallelLyricRows(`${korean}\n${korean}`)).toBe(false)
+    expect(mergeProviderSet([{ source: 'LRCLIB · 精确匹配', confidence: 100, syncedLyrics: korean, plainLyrics: null }], 50000)?.syncedLyrics).toBe(korean)
+  })
   it('rejects an exact-get studio response for an explicitly live request', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input)

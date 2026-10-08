@@ -1,8 +1,8 @@
 import { useAppStore } from '../store/useAppStore'
 import type { AcousticMatch } from '../../electron/audio-sync/fingerprint'
 
-export interface AcousticUiState { referenceName: string; trackId: string; running: boolean; busy: boolean; message: string; score?: number; rate?: number }
-let state: AcousticUiState = { referenceName: '', trackId: '', running: false, busy: false, message: '未启用。需要与当前歌曲同一版本、从头开始的本地音频作为参照。' }
+export interface AcousticUiState { mode: 'reference' | 'vocal'; referenceName: string; trackId: string; running: boolean; busy: boolean; message: string; score?: number; rate?: number }
+let state: AcousticUiState = { mode: 'vocal', referenceName: '', trackId: '', running: false, busy: false, message: '未启用。可用本地人声识别匹配原文，无需整首参考音频。' }
 const listeners = new Set<() => void>()
 let worker: Worker | null = null
 let sequence = 0
@@ -81,22 +81,27 @@ async function loadReference(file: File) {
   } finally { await decoder.close() }
 }
 
-async function start() {
+async function start(mode: 'reference' | 'vocal' = 'reference') {
   if (state.running || state.busy) return
-  const playback = useAppStore.getState().playback
-  if (!worker || !state.referenceName || playback?.track?.id !== state.trackId || !playback.isPlaying) throw new Error('请导入当前歌曲的参考音频，并开始播放')
+  const store = useAppStore.getState(), playback = store.playback
+  if (!playback?.track || !playback.isPlaying) throw new Error('请先播放歌曲')
+  const original = store.lyrics?.trackId === playback.track.id ? store.lyrics.tracks.find(track => track.kind === 'original') : undefined
+  if (mode === 'reference' && (!worker || !state.referenceName || playback.track.id !== state.trackId)) throw new Error('请导入当前歌曲的参考音频')
+  if (mode === 'vocal' && (!original || original.lines.length < 4)) throw new Error('请等待当前歌曲的原文歌词加载完成')
   const token = ++generation
   capturing = true
-  update({ busy: true, message: '正在连接系统输出音频…' })
+  update({ mode, trackId: playback.track.id, busy: true, message: '正在连接系统输出音频…', score: undefined, rate: undefined })
   try {
-    await window.syllable.audioSync.prepare()
+    if (mode === 'vocal' && !(await window.syllable.audioSync.engineStatus()).ready) throw new Error('请先配置本地人声识别引擎')
+    if (token !== generation) return
+    await window.syllable.audioSync.prepare(mode)
     const captured = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 16, height: 16, frameRate: 1 } })
     if (token !== generation) { captured.getTracks().forEach(track => track.stop()); return }
     stream = captured
     captured.getVideoTracks().forEach(track => track.stop())
     if (!captured.getAudioTracks().length) throw new Error('系统没有返回输出音频')
     captured.getAudioTracks()[0].onended = () => { if (token === generation) void stop('音频捕获已结束。') }
-    const audio = new AudioContext({ sampleRate: 8000 })
+    const audio = new AudioContext({ sampleRate: mode === 'vocal' ? 16000 : 8000 })
     context = audio
     await audio.audioWorklet.addModule(new URL('audio-sync-worklet.js', document.baseURI).href)
     await audio.resume()
@@ -104,16 +109,34 @@ async function start() {
     processor = new AudioWorkletNode(audio, 'syllable-audio-capture')
     audio.createMediaStreamSource(captured).connect(processor)
     processor.connect(audio.destination) // Worklet outputs silence, not the captured sound.
+    let processing = false
     processor.port.onmessage = async event => {
-      if (token !== generation || requestPending) return
+      if (token !== generation || requestPending || processing) return
       // Match completion time is NOT capture time. Preserve the block's end
       // timestamp so slow analysis never shifts lyrics backwards.
       const capturedAtMs = Date.now() - Math.max(0, audio.currentTime - event.data.endContextTime) * 1000
       const captureDurationMs = event.data.pcm.length / event.data.sampleRate * 1000
       const observedTrack = useAppStore.getState().playback?.track?.id
       if (observedTrack !== state.trackId) return
-      update({ busy: true, message: '正在对齐最近 12 秒声音…' })
+      processing = true
+      update({ busy: true, message: mode === 'vocal' ? '正在本地识别人声并搜索整首原文…' : '正在对齐最近 12 秒声音…' })
       try {
+        if (mode === 'vocal') {
+          const result = await window.syllable.audioSync.vocal({ trackId: observedTrack, capturedAtMs, captureDurationMs,
+            sampleRate: event.data.sampleRate, pcm: event.data.pcm,
+            language: original!.language === 'ja' ? 'ja' : original!.language === 'en' ? 'en' : original!.language.startsWith('zh') ? 'zh' : 'auto',
+            lines: original!.lines.map(line => ({ text: line.text, startMs: line.startMs })) })
+          if (token !== generation) return
+          const reasons: Record<string, string> = { 'insufficient-words': '未识别到足够可靠的完整歌词', ambiguous: '重复段落无法唯一定位',
+            'inconsistent-timing': '识别文字与歌词时间关系不一致', matched: '证据已过期或不连续', inactive: '播放或校准状态已改变',
+            'lyrics-changed': '原文已更新', cancelled: '识别已取消', busy: '上一段识别尚未释放', 'invalid-input': '录音参数无效' }
+          if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input'].includes(result.reason)) { await stop(`人声对齐停止：${reasons[result.reason]}`); return }
+          update({ busy: false, score: result.score, rate: result.rate, message: result.decision === 'locked'
+            ? `已由人声接管歌词时钟（匹配 ${result.linesMatched} 行，识别耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；已补偿计算耗时）。`
+            : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，等待另一段独立人声确认。暂不校正。`
+            : `暂不校正：${reasons[result.reason] ?? result.reason}。继续采样。` })
+          return
+        }
         const result = await work('query', event.data.pcm, event.data.sampleRate) as AcousticMatch
         if (token !== generation) return
         const decision = await window.syllable.audioSync.observation({ ...result, trackId: observedTrack, capturedAtMs, captureDurationMs })
@@ -124,8 +147,11 @@ async function start() {
           : decision === 'confirming' ? '已找到位置，等待第二段声音确认（约 12 秒）。'
           : `暂不校正：${reasons[result.reason]}。继续采样。` })
       } catch (error) { if (token === generation) await stop(`音频校准停止：${error instanceof Error ? error.message : String(error)}`) }
+      finally { processing = false }
     }
-    update({ running: true, busy: false, message: '正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。' })
+    update({ running: true, busy: false, message: mode === 'vocal'
+      ? '正在本地识别人声。首次锁定至少需要两段 12 秒录音加识别时间；识别不可靠就不校正。'
+      : '正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。' })
   } catch (error) { if (token === generation) await stop(error instanceof Error ? error.message : String(error)) }
 }
 
@@ -136,10 +162,14 @@ function connect() {
   unsubscribe = useAppStore.subscribe((next, previous) => {
     if (next.playback?.track?.id !== previous.playback?.track?.id) {
       if (state.trackId) {
-        void stop('歌曲已切换，请为当前歌曲导入参考音频。')
+        void stop('歌曲已切换，校准已停止。当前歌可重新启动人声对齐，或导入新参考音频。')
         destroyWorker(); update({ referenceName: '', trackId: '' })
       }
     } else if (capturing) {
+      if (state.mode === 'vocal' && next.lyrics !== previous.lyrics) {
+        const originals = (value: typeof next.lyrics) => value?.tracks.filter(track => track.kind === 'original').map(track => [track.language, track.lines.map(line => [line.startMs, line.text])])
+        if (JSON.stringify(originals(next.lyrics)) !== JSON.stringify(originals(previous.lyrics))) { void stop('原文歌词已更新，请重新启动人声对齐。'); return }
+      }
       const current = next.playback, prior = previous.playback
       if (!current?.isPlaying) void stop('播放已暂停，音频校准已停止。恢复播放后可重新启动。')
       else if (prior && Math.abs(current.positionMs - prior.positionMs - Math.max(0, current.observedAtMs - prior.observedAtMs)) > 2000) {
@@ -152,5 +182,5 @@ function connect() {
 
 export const acousticController = {
   subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
-  snapshot: () => state, connect, loadReference, start, stop
+  snapshot: () => state, connect, loadReference, start: () => start('reference'), startVocal: () => start('vocal'), stop
 }

@@ -9,12 +9,13 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
   const documents = Object.values(library).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
 
   if (mode === 'sources') return <div className="content-page">
-    <div className="content-page-header"><span>SOURCE PIPELINE</span><h1>歌词源与处理器</h1><p>自动匹配会依次经过精确查询、候选搜索、可信度评分与本地缓存。</p></div>
+    <div className="content-page-header"><span>SOURCE PIPELINE</span><h1>歌词源与处理器</h1><p>先核对歌曲与语言版本，再比较歌词内容和完整度。元数据匹配分数不是歌词准确率，原文相符也不代表时间同步。</p></div>
     <div className="source-card-grid">
-      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>LRCLIB Exact</strong><span>远程 · 第一优先级</span></div><em><CheckCircle2 size={13} />已启用</em><p>按歌曲、艺人、专辑和时长进行精确匹配。</p></article>
+      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>Spotify / Musixmatch</strong><span>远程 · 原文对照</span></div><em>需实际取得数据</em><p>已有授权能够取得原文时，用于核对内容与顺序。本机播放连接不等于歌词访问权限；不把 Spotify 时间轴当作人声同步真值。</p></article>
+      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>LRCLIB Exact</strong><span>远程 · 元数据查询</span></div><em><CheckCircle2 size={13} />已启用</em><p>按歌曲、艺人、专辑和时长查询。元数据一致仍可能是错误原文或翻译，必须继续核对内容。</p></article>
       <article><i className="source-icon search"><Search size={19} /></i><div><strong>LRCLIB Search</strong><span>远程 · 自动回退</span></div><em><CheckCircle2 size={13} />已启用</em><p>以标题和艺人身份为主，结合专辑、版本时长与同步格式评分。</p></article>
-      <article><i className="source-icon cloud"><Languages size={19} /></i><div><strong>网易云多语言</strong><span>远程 · 翻译与罗马音补全</span></div><em><CheckCircle2 size={13} />已启用</em><p>在独立时间轴中补齐中文翻译和人工罗马音，单源失败不会阻断显示。</p></article>
-      <article><i className="source-icon search"><Search size={19} /></i><div><strong>酷狗同步歌词</strong><span>远程 · 完整度回退</span></div><em><CheckCircle2 size={13} />已启用</em><p>现有结果缺段时补充候选，并按版本时长、有效行数和尾部覆盖率择优。</p></article>
+      <article><i className="source-icon cloud"><Languages size={19} /></i><div><strong>网易云多语言</strong><span>远程 · 原文与翻译补全</span></div><em><CheckCircle2 size={13} />已启用</em><p>提供原文和人工罗马音；中文翻译优先采用网易云，在确认对应关系后对齐原文。</p></article>
+      <article><i className="source-icon search"><Search size={19} /></i><div><strong>酷狗同步歌词</strong><span>远程 · 补充候选</span></div><em><CheckCircle2 size={13} />已启用</em><p>下载后再次检查文件中的语言与录音版本，拒绝英文版等错配。候选仍需内容核对，不显示虚假的准确率。</p></article>
       <article><i className="source-icon local"><Database size={19} /></i><div><strong>Local Library</strong><span>本机 · 最高优先级</span></div><em><CheckCircle2 size={13} />{documents.length} 首</em><p>用户校对和导入的数据不会被远程结果覆盖。</p></article>
       <article><i className="source-icon roman"><Sparkles size={19} /></i><div><strong>Kuromoji Romanizer</strong><span>本机 · 日文处理</span></div><em><CheckCircle2 size={13} />已启用</em><p>先分析汉字读音，再以 Hepburn 规则生成罗马音。</p></article>
     </div>

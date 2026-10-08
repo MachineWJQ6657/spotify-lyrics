@@ -733,6 +733,8 @@ strong, h1, h2, h3, .brand, .eyebrow, .setting-label, .track-mini strong { font-
    balanced wrapping changes only line selection; glyph width, font size and
    the synchronized lyric clock remain untouched. */
 .lyric-primary, .overlay-primary { text-wrap: balance; }
+.untimed-lyrics { mask-image: none; padding-top: 20px; }
+.untimed-lyrics .lyric-group { opacity: 1; transform: none; }
 
 .lyric-primary { font-weight: 600; }
 .lyric-secondary, .overlay-secondary { font-weight: 500; }

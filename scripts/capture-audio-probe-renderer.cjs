@@ -35,7 +35,9 @@ async function verifyBundledWorker(pcm, sampleRate) {
     stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 16, height: 16, frameRate: 1 } })
     stream.getVideoTracks().forEach(track => track.stop())
     if (!stream.getAudioTracks().length) throw new Error('No loopback audio track')
-    context = new AudioContext({ sampleRate: 8000 })
+    // Preserve vocal detail for offline ASR diagnostics. The product's compact
+    // fingerprint capture is independent of this explicit diagnostic utility.
+    context = new AudioContext({ sampleRate: 48000 })
     await context.resume()
     await context.audioWorklet.addModule(new URL('../public/audio-sync-worklet.js', document.baseURI).href)
     const source = context.createMediaStreamSource(stream)

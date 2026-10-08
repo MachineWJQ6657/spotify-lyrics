@@ -2,7 +2,10 @@ import type { AppSettings, LyricsCandidate, PlaybackSnapshot, TrackInfo } from '
 
 interface SyllableApi {
   audioSync: {
-    prepare(): Promise<boolean>
+    prepare(mode?: 'reference' | 'vocal'): Promise<boolean>
+    engineStatus(): Promise<import('../electron/audio-sync/local-asr').AsrStatus>
+    configureEngine(): Promise<import('../electron/audio-sync/local-asr').AsrStatus | null>
+    vocal(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('./lib/vocal-sync-types').VocalResult>
     clear(): Promise<boolean>
     observation(value: import('../electron/audio-sync/acoustic-clock').AcousticObservation): Promise<'locked' | 'confirming' | 'rejected'>
   }
@@ -21,6 +24,7 @@ interface SyllableApi {
   lyrics: {
     fetch(track: TrackInfo, options?: { bypassCache?: boolean }): Promise<{
       syncedLyrics: string | null; plainLyrics: string | null; source: string; confidence?: number; matchedDurationMs?: number; transient?: boolean
+      textReference?: import('./types').LyricsDocument['textReference']
       additionalTracks?: Array<{ language: string; label: string; kind: 'translation' | 'romanization'; syncedLyrics: string; source: string }>
     } | null>
     search(query: { track: string; artist: string; album?: string; durationMs?: number }): Promise<LyricsCandidate[]>

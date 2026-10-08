@@ -4,6 +4,9 @@ export interface LyricWord { text: string; startMs: number; endMs?: number }
 export interface LyricLine { startMs: number; endMs?: number; text: string; words?: LyricWord[] }
 export interface LyricTrack { id: string; language: LanguageCode; label: string; kind: 'original' | 'translation' | 'romanization'; lines: LyricLine[]; source: string }
 export interface LyricsDocument {
+  /** Actual original words without trusted timing; never drive active-line playback. */
+  untimedOriginal?: { text: string; language: string; source: string }
+  textReference?: { referenceSource: string; status: 'consistent' | 'partial' | 'conflict'; matchedLines: number; referenceLines: number }
   trackId: string
   track?: TrackInfo
   tracks: LyricTrack[]

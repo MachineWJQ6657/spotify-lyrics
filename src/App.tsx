@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type DragEvent } from 'react'
+import { sourceLabel } from './lib/source-label'
 import { Cloud, Languages, PencilLine, Radio, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
@@ -93,7 +94,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="已识别 Spotify 自定义转场；歌词以 Spotify 传输进度为基准，只应用有效的速度曲线"><Sparkles size={13} />{mixLabel}</span>}<span><Cloud size={13} />{activeLyrics?.tracks[0]?.source ?? 'Searching'}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="已识别 Spotify 自定义转场；歌词以 Spotify 传输进度为基准，只应用有效的速度曲线"><Sparkles size={13} />{mixLabel}</span>}<span title="来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验"><Cloud size={13} />{sourceLabel(activeLyrics?.tracks[0]?.source ?? 'Searching')}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
         </div>
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />

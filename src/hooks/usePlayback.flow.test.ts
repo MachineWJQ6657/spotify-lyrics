@@ -63,6 +63,7 @@ it('keeps visible and persisted lyrics when provider IPC fails and cancels the p
 })
 import { useAppStore } from '../store/useAppStore'
 import { usePlaybackConnection } from './usePlayback'
+import { visibleTracks } from '../lib/lyrics'
 
 const initial = useAppStore.getState()
 let cleanup: void | (() => void)
@@ -71,6 +72,30 @@ afterEach(() => {
   effects.length = 0
   useAppStore.setState(initial)
   vi.useRealTimers(); vi.unstubAllGlobals()
+})
+
+it.each([false, true])('replaces rejected automatic lyrics with untimed Spotify words, even when transient=%s', async transient => {
+  vi.useFakeTimers()
+  const track = { id: `flow-conflict-${transient}`, name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }
+  const baseline: LyricsDocument = { trackId: track.id, tracks: [
+    { id: `${track.id}-original`, kind: 'original', language: 'en', label: 'English', source: 'wrong', lines: [{ startMs: 1000, text: 'wrong version' }] },
+    { id: 'local-zh', kind: 'translation', language: 'zh-Hans', label: '中文', source: 'User', lines: [{ startMs: 1000, text: '保留用户翻译' }] }
+  ], userEditedTrackIds: ['local-zh'] }
+  vi.stubGlobal('window', { setTimeout, clearTimeout, syllable: { lyrics: { fetch: vi.fn().mockResolvedValue({
+    syncedLyrics: null, plainLyrics: 'テストの原文です', source: 'Spotify · Musixmatch', transient,
+    textReference: { referenceSource: 'Spotify · Musixmatch', status: 'conflict', matchedLines: 0, referenceLines: 12 }
+  }) } } })
+  useAppStore.setState({ demoMode: false, connected: false, lyrics: baseline, library: { [track.id]: baseline },
+    playback: { track, positionMs: 0, observedAtMs: 0, isPlaying: false } })
+  usePlaybackConnection(); cleanup = effects[2]()
+  await vi.advanceTimersByTimeAsync(320)
+  const result = useAppStore.getState().lyrics!
+  expect(result.untimedOriginal?.text).toBe('テストの原文です')
+  expect(result.tracks.map(track => track.id)).toEqual(['local-zh'])
+  expect(visibleTracks(result, ['zh-Hans'], true)).toEqual([])
+  expect(result.providerRevision).toBeUndefined()
+  expect(result.textReference?.status).toBe('conflict')
+  expect(useAppStore.getState().library[track.id].untimedOriginal).toEqual(result.untimedOriginal)
 })
 
 // Runs the actual provider effect against the real store; not a React DOM test.

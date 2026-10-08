@@ -18,6 +18,9 @@ import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
 import { isOverOverlayRegion } from './overlay-hover'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
+import { LocalAsr } from './audio-sync/local-asr'
+import { VocalSync } from './audio-sync/vocal-sync'
+import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
 // process removes most of the per-window Chromium overhead while preserving GPU
@@ -28,6 +31,9 @@ if (process.platform === 'win32') app.setAppUserModelId('studio.syllable.desktop
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const spotify = new SpotifyService()
 const acousticClock = new AcousticClock()
+const vocalSync = new VocalSync(new LocalAsr(path.join(app.getPath('userData'), 'local-asr.json'),
+  path.join(app.getPath('temp'), 'syllable-local-asr'), [path.join(process.resourcesPath, 'audio-sync'),
+    path.resolve(app.getAppPath(), '.tools/audio-sync'), path.resolve(app.getAppPath(), '../../../../.tools/audio-sync')]))
 let audioCaptureGrantUntil = 0
 let localSpotify: LocalSpotifyService | null = null
 let mainWindow: BrowserWindow | null = null
@@ -498,6 +504,7 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
   void mainWindow.loadURL(rendererUrl())
+  mainWindow.webContents.on('render-process-gone', () => { audioCaptureGrantUntil = 0; acousticClock.clear(); vocalSync.clear() })
   mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
     // A short, one-use grant from the visible main renderer. Auxiliary windows
     // cannot start capture. This prototype reads system output, never a mic.
@@ -642,9 +649,9 @@ function createWindows() {
           const buttons = panel?.querySelectorAll('button');
           const rect = panel?.getBoundingClientRect();
           const viewport = document.querySelector('.content-page')?.getBoundingClientRect();
-          return { panel: Boolean(panel?.textContent.includes('当前阶段不支持无参照校准')),
+          return { panel: Boolean(panel?.textContent.includes('本地人声对齐')),
             off: Boolean(panel?.querySelector('[role="status"]')?.textContent.includes('未启用')),
-            controls: buttons?.length === 3 && buttons[1].disabled && buttons[2].disabled,
+            controls: buttons?.length === 5 && buttons[2].disabled && buttons[4].disabled,
             visible: Boolean(rect && viewport && rect.top >= viewport.top && rect.bottom <= viewport.bottom + 1) };
         })()`)
         for (const name of ['panel', 'off', 'controls', 'visible']) checks.record(name, result?.[name] === true)
@@ -1021,7 +1028,8 @@ function withoutEmbeddedCover(value: typeof lastPlayback) {
 function broadcast(value: unknown) {
   if (value === null || (value && typeof value === 'object' && 'track' in value)) {
     acousticClock.observePlayback(value as typeof lastPlayback)
-    value = acousticClock.decorate(value as typeof lastPlayback)
+    vocalSync.observePlayback(value as typeof lastPlayback)
+    value = vocalSync.clock.decorate(acousticClock.decorate(value as typeof lastPlayback))
   }
   let mainPayload = value
   let overlayPayload = value
@@ -1100,6 +1108,8 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
       return { accepted: false, action: null, pending: true }
     }
     try {
+      acousticClock.clear()
+      vocalSync.clear()
       if (decision.action === 'seek-to-zero') await service.seek(0)
       else await service.control(decision.action)
     } catch (error) {
@@ -1167,13 +1177,16 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); playbackDiagnostics.clear(); return { connected: false } })
   ipcMain.handle('playback:current', async event => {
     if (!lastPlayback) await refreshPlayback()
-    const playback = acousticClock.decorate(lastPlayback)
+    const playback = vocalSync.clock.decorate(acousticClock.decorate(lastPlayback))
     const auxiliary = event.sender === overlayWindow?.webContents || event.sender === overlayControlsWindow?.webContents
     return auxiliary ? withoutEmbeddedCover(playback) : playback
   })
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
-  ipcMain.handle('audio-sync:prepare', event => {
+  ipcMain.handle('audio-sync:prepare', (event, mode?: string) => {
     if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error('请先播放歌曲')
+    vocalSync.clear()
+    acousticClock.clear()
+    if (mode === 'vocal' && lastPlayback.track) vocalSync.start(lastPlayback.track.id)
     audioCaptureGrantUntil = Date.now() + 10000
     return true
   })
@@ -1181,6 +1194,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     if (event.sender !== mainWindow?.webContents) return false
     audioCaptureGrantUntil = 0
     acousticClock.clear()
+    vocalSync.clear()
     broadcast(lastPlayback)
     return true
   })
@@ -1189,6 +1203,24 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     const result = acousticClock.accept(observation)
     broadcast(lastPlayback)
     qaLog(`acoustic sync: ${result}; score=${Number(observation?.score).toFixed(3)}; rate=${observation?.rate}`)
+    return result
+  })
+  ipcMain.handle('audio-sync:engine-status', event => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可配置识别')
+    return vocalSync.recognizer.status()
+  })
+  ipcMain.handle('audio-sync:configure-engine', async event => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return null
+    const executable = await dialog.showOpenDialog(mainWindow, { title: '选择可信的本地 whisper-cli 引擎（将运行此程序）', properties: ['openFile'], filters: [{ name: 'Whisper CLI', extensions: ['exe'] }] })
+    if (executable.canceled || !executable.filePaths[0]) return null
+    const model = await dialog.showOpenDialog(mainWindow, { title: '选择多语言 GGML Whisper 模型', properties: ['openFile'], filters: [{ name: 'GGML 模型', extensions: ['bin'] }] })
+    if (model.canceled || !model.filePaths[0]) return null
+    return vocalSync.recognizer.configure({ executable: executable.filePaths[0], model: model.filePaths[0] })
+  })
+  ipcMain.handle('audio-sync:vocal', async (event, value: VocalCapture) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可识别录音')
+    const result = await vocalSync.process(value)
+    broadcast(lastPlayback)
     return result
   })
   ipcMain.handle('playback:export-diagnostics', async (event, lyricContext: unknown) => {
@@ -1201,6 +1233,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
     acousticClock.clear()
+    vocalSync.clear()
     const result = await playbackRequests.run(async () => {
       if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
       playbackRefreshes.invalidate()
@@ -1425,6 +1458,7 @@ app.on('activate', () => { revealMainWindow() })
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', event => {
   quitting = true
+  vocalSync.clear()
   void localSpotify?.close()
   globalShortcut.unregisterAll()
   stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking()

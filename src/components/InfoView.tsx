@@ -5,6 +5,7 @@ import { lyricDurationScale, lyricSourcePosition } from '../lib/clock'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
 import { AudioSyncPanel } from './AudioSyncPanel'
+import { referenceLabel } from '../lib/source-label'
 
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
   const [exporting, setExporting] = useState(false)
@@ -58,6 +59,8 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       {(localConnected || connected) && <CheckCircle2 className="diagnostic-check" />}
     </div>
     <div className="info-note">
+      <p>{referenceLabel(activeLyrics?.textReference)}</p>
+      <p>本机媒体会话只提供歌曲与进度，不等于已读取 Spotify / Musixmatch 的歌词。取得 Spotify 原文时会用于核对内容与顺序；未取得时不会标成已核验。内容一致不代表歌词时间戳或人声同步正确。</p>
       <p>遇到歌词提前、延迟或切歌回跳时，可导出最近 180 次播放采样，以及导出时的歌词源、偏移和估算行号。记录只暂存在内存，包含歌名、艺人、播放进度与速度曲线换算后的进度；不含录音、歌词正文、账号凭据或封面，不会自动上传。估算行号不是屏幕截图，内部采样差小不代表歌词与人声同步准确。</p>
       <button className="diagnostics-export" onClick={() => void exportDiagnostics()} disabled={exporting}><Download size={14} />{exporting ? '正在保存…' : '导出同步诊断'}</button>
       {exportStatus && <p role="status">{exportStatus}</p>}

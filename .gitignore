@@ -9,6 +9,7 @@ qa-*.png
 
 # Local recordings, test profiles, extracted executables and recovery archives
 /.qa*/
+/.qa-*
 /qa-*/
 /.tools/
 /checkpoints/

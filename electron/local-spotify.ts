@@ -680,7 +680,7 @@ export class LocalSpotifyService {
       const outputEnd = profile.outputDurationMs ?? state.durationMs
       const endCorrection = Math.round(spotifySourcePosition(outputEnd, profile) - outputEnd)
       const spotifyId = trackUri.split(':').at(-1) ?? 'unknown'
-      this.statusListener?.(`Spotify Mix timeline: id=${spotifyId} output=${Math.round(outputEnd)}ms cue=${Math.round(profile.cuePointMs)}ms clockCorrection=${endCorrection}ms overlap=${Math.round(profile.overlapMs ?? 0)}ms${speed}`)
+      this.statusListener?.(`Spotify Mix recipe (diagnostic only): id=${spotifyId} output=${Math.round(outputEnd)}ms cue=${Math.round(profile.cuePointMs)}ms hypotheticalCorrection=${endCorrection}ms overlap=${Math.round(profile.overlapMs ?? 0)}ms${speed}`)
     } else if (!matched && !wasResolved) {
       this.statusListener?.('Spotify transition metadata timeout: using the native 1:1 transport timeline')
     }

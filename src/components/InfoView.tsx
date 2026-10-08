@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Captions, CheckCircle2, CircleHelp, Clock3, Download, ExternalLink, Keyboard, MonitorUp, Settings2, Wifi } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { lyricDurationScale, lyricSourcePosition } from '../lib/clock'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
 import { AudioSyncPanel } from './AudioSyncPanel'
@@ -24,11 +23,9 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
   const { connected, localConnected, demoMode, playback, lyrics, settings, patchSettings, setLyricsOffset } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const offsetMs = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
-  const durationScale = lyricDurationScale(playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition)
-  const mixCorrectionMs = playback ? Math.round(lyricSourcePosition(playback.positionMs, playback.track?.durationMs, activeLyrics?.sourceDurationMs, playback.transition) - playback.positionMs) : 0
   const audioActive = playback?.isPlaying && playback.acousticAnchor?.trackId === playback.track?.id
     && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs
-  const clockMode = audioActive ? '声音校准（实验）' : playback?.transition ? 'Spotify Mix 自动时轴' : durationScale !== 1 ? `Spotify 时长校准 ${durationScale.toFixed(3)}×` : 'Spotify 1:1'
+  const clockMode = audioActive ? '声音校准（实验）' : '媒体时间回退（未验证听感）'
   const trackContext = [playback?.track?.name ?? '', playback?.track?.artist ?? '', playback?.track?.album ?? ''].find(hasKana) ?? ''
   const originalLanguage = activeLyrics?.tracks.find(track => track.kind === 'original')?.language
   const trackNamePresentation = scriptPresentation(playback?.track?.name ?? '', trackContext, originalLanguage)
@@ -61,12 +58,12 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     <div className="info-note">
       <p>{referenceLabel(activeLyrics?.textReference)}</p>
       <p>本机媒体会话只提供歌曲与进度，不等于已读取 Spotify / Musixmatch 的歌词。取得 Spotify 原文时会用于核对内容与顺序；未取得时不会标成已核验。内容一致不代表歌词时间戳或人声同步正确。</p>
-      <p>遇到歌词提前、延迟或切歌回跳时，可导出最近 180 次播放采样，以及导出时的歌词源、偏移和估算行号。记录只暂存在内存，包含歌名、艺人、播放进度与速度曲线换算后的进度；不含录音、歌词正文、账号凭据或封面，不会自动上传。估算行号不是屏幕截图，内部采样差小不代表歌词与人声同步准确。</p>
+      <p>遇到歌词提前、延迟或切歌回跳时，可导出最近 180 次播放采样，以及导出时的歌词源、偏移和估算行号。记录只暂存在内存，区分媒体进度、当前歌词时钟与未启用的转场曲线推算；不含录音、歌词正文、账号凭据或封面，不会自动上传。估算行号不是屏幕截图，内部采样差小不代表歌词与人声同步准确。</p>
       <button className="diagnostics-export" onClick={() => void exportDiagnostics()} disabled={exporting}><Download size={14} />{exporting ? '正在保存…' : '导出同步诊断'}</button>
       {exportStatus && <p role="status">{exportStatus}</p>}
     </div>
-    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms（仅诊断），重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}，速度曲线时钟修正 {mixCorrectionMs > 0 ? '+' : ''}{mixCorrectionMs} ms。</div>}
-    {!playback?.transition && durationScale !== 1 && <div className="info-note">Spotify 的混合播放时长与高置信度发行版歌词不同；仅将歌词时钟按 {durationScale.toFixed(4)}× 映射到 Spotify 实时进度，播放本身不会被修改。</div>}
+    <div className="info-note">Spotify 自带歌词也可能提前或延后。与它保持一致只代表跟随了媒体时间，不代表已对齐实际人声；独立声音证据不足时不会宣称同步成功。</div>
+    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms，重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}。曲线仅供诊断，不自动换算歌词进度，以免重复加速和元数据晚到造成跳句。</div>}
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>

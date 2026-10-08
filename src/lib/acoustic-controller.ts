@@ -1,7 +1,12 @@
 import { useAppStore } from '../store/useAppStore'
 import type { AcousticMatch } from '../../electron/audio-sync/fingerprint'
 
-export interface AcousticUiState { mode: 'reference' | 'vocal'; referenceName: string; trackId: string; running: boolean; busy: boolean; message: string; score?: number; rate?: number }
+export interface AcousticUiState {
+  mode: 'reference' | 'vocal'; referenceName: string; trackId: string; running: boolean; busy: boolean
+  message: string; score?: number; rate?: number
+  // Summary only; never retain audio, transcript or lyric text in UI history.
+  lastResult?: { message: string; elapsedMs: number; decision: 'locked' | 'confirming' | 'rejected' }
+}
 let state: AcousticUiState = { mode: 'vocal', referenceName: '', trackId: '', running: false, busy: false, message: '未启用。可用本地人声识别匹配原文，无需整首参考音频。' }
 const listeners = new Set<() => void>()
 let worker: Worker | null = null
@@ -61,7 +66,7 @@ async function loadReference(file: File) {
   if (!owner) throw new Error('请先在 Spotify 播放歌曲')
   if (file.size > 60 * 1024 * 1024) throw new Error('实验版参考文件不能超过 60 MB')
   const token = ++generation
-  update({ busy: true, referenceName: '', trackId: owner.id, message: '正在本地解码并提取音频特征…' })
+  update({ busy: true, referenceName: '', trackId: owner.id, lastResult: undefined, message: '正在本地解码并提取音频特征…' })
   const decoder = new AudioContext({ sampleRate: 8000 })
   try {
     const audio = await decoder.decodeAudioData(await file.arrayBuffer())
@@ -90,7 +95,7 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
   if (mode === 'vocal' && (!original || original.lines.length < 4)) throw new Error('请等待当前歌曲的原文歌词加载完成')
   const token = ++generation
   capturing = true
-  update({ mode, trackId: playback.track.id, busy: true, message: '正在连接系统输出音频…', score: undefined, rate: undefined })
+  update({ mode, trackId: playback.track.id, busy: true, message: '正在连接系统输出音频…', score: undefined, rate: undefined, lastResult: undefined })
   try {
     if (mode === 'vocal' && !(await window.syllable.audioSync.engineStatus()).ready) throw new Error('请先配置本地人声识别引擎')
     if (token !== generation) return
@@ -131,10 +136,12 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
             'inconsistent-timing': '识别文字与歌词时间关系不一致', matched: '证据已过期或不连续', inactive: '播放或校准状态已改变',
             'lyrics-changed': '原文已更新', cancelled: '识别已取消', busy: '上一段识别尚未释放', 'invalid-input': '录音参数无效' }
           if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input'].includes(result.reason)) { await stop(`人声对齐停止：${reasons[result.reason]}`); return }
-          update({ busy: false, score: result.score, rate: result.rate, message: result.decision === 'locked'
+          const message = result.decision === 'locked'
             ? `已由人声接管歌词时钟（匹配 ${result.linesMatched} 行，识别耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；已补偿计算耗时）。`
             : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，等待另一段独立人声确认。暂不校正。`
-            : `暂不校正：${reasons[result.reason] ?? result.reason}。继续采样。` })
+            : `暂不校正：${reasons[result.reason] ?? result.reason}。继续采样。`
+          update({ busy: false, score: result.score, rate: result.rate, message,
+            lastResult: { message, elapsedMs: result.elapsedMs, decision: result.decision } })
           return
         }
         const result = await work('query', event.data.pcm, event.data.sampleRate) as AcousticMatch
@@ -163,7 +170,7 @@ function connect() {
     if (next.playback?.track?.id !== previous.playback?.track?.id) {
       if (state.trackId) {
         void stop('歌曲已切换，校准已停止。当前歌可重新启动人声对齐，或导入新参考音频。')
-        destroyWorker(); update({ referenceName: '', trackId: '' })
+        destroyWorker(); update({ referenceName: '', trackId: '', lastResult: undefined })
       }
     } else if (capturing) {
       if (state.mode === 'vocal' && next.lyrics !== previous.lyrics) {

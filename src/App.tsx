@@ -11,7 +11,6 @@ import { useAppStore } from './store/useAppStore'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { useWindowSync } from './hooks/useWindowSync'
 import { languageFromFilename, makeTrack } from './lib/lyrics'
-import { lyricDurationScale } from './lib/clock'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
 import { recordSurfaceRender } from './lib/render-probe'
@@ -25,7 +24,6 @@ export function App() {
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
-  const timelineScale = lyricDurationScale(playback?.track?.durationMs, activeLyrics?.sourceDurationMs, playback?.transition)
   const [view, setView] = useState<AppView>('now')
   const [dropMessage, setDropMessage] = useState('')
   const openEditor = useCallback(() => setEditorOpen(true), [setEditorOpen])
@@ -37,10 +35,7 @@ export function App() {
   const titlePresentation = scriptPresentation(headingTitle, japaneseContext, originalLanguage)
   const artistPresentation = scriptPresentation(headingArtist, japaneseContext, originalLanguage)
   const albumPresentation = scriptPresentation(headingAlbum, japaneseContext, originalLanguage)
-  const mixSpeed = playback?.transition?.speedAutomation[0]?.speed
-  const mixLabel = playback?.transition
-    ? `MIX 时轴${mixSpeed && Math.abs(mixSpeed - 1) > .0001 ? ` · ${mixSpeed.toFixed(3)}×` : ''}`
-    : timelineScale !== 1 ? `时长校准 · ${timelineScale.toFixed(3)}×` : ''
+  const mixLabel = playback?.transition ? 'MIX · 未套用推算' : ''
 
   const importDroppedLyrics = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -94,7 +89,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="已识别 Spotify 自定义转场；歌词以 Spotify 传输进度为基准，只应用有效的速度曲线"><Sparkles size={13} />{mixLabel}</span>}<span title="来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验"><Cloud size={13} />{sourceLabel(activeLyrics?.tracks[0]?.source ?? 'Searching')}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="检测到转场元数据，但其时间坐标未经声音验证；不据此加速或平移歌词。Spotify 自带歌词也可能与人声不同步。"><Sparkles size={13} />{mixLabel}</span>}<span title="来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验"><Cloud size={13} />{sourceLabel(activeLyrics?.tracks[0]?.source ?? 'Searching')}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
         </div>
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />

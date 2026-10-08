@@ -16,8 +16,8 @@ const playback: PlaybackSnapshot = { track: null, positionMs: 10_000, observedAt
 describe('isolated playback surfaces', () => {
   it('keeps main lyrics and editor on the same calibrated recording clock', () => {
     const props = { playback, document: null, offsetMs: 500 }
-    expect(renderToStaticMarkup(<ClockedLyricsStage {...props} enabled={['ja']} romanization />)).toBe('<output>9000</output>')
-    expect(renderToStaticMarkup(<ClockedLyricsEditor {...props} />)).toBe('<output>9000</output>')
+    expect(renderToStaticMarkup(<ClockedLyricsStage {...props} enabled={['ja']} romanization />)).toBe('<output>9500</output>')
+    expect(renderToStaticMarkup(<ClockedLyricsEditor {...props} />)).toBe('<output>9500</output>')
     expect(usePosition).toHaveBeenCalledTimes(2)
     expect(usePosition).toHaveBeenCalledWith(playback, 160)
   })

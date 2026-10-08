@@ -11,14 +11,14 @@ describe('bounded local playback diagnostics', () => {
     diagnostics.clear()
     expect(diagnostics.report().samples).toEqual([])
   })
-  it('retains transport and mapped clocks without retaining artwork or identifiers', () => {
+  it('separates the actual fallback clock from unverified recipe calculations without retaining private data', () => {
     const snapshot: PlaybackSnapshot = { positionMs: 10_000, observedAtMs: 1000, isPlaying: true, playbackSource: 'local',
       track: { id: 'private-id', name: 'song', artist: 'artist', album: 'album', durationMs: 100_000, coverUrl: 'data:image/secret' },
       transition: { kind: 'spotify-mix', title: 'song', cuePointMs: 0, speedAutomation: [{ fromPositionMs: 0, speed: .95 }] } }
     const diagnostics = new PlaybackDiagnostics()
     diagnostics.record(snapshot, 1100)
     const report = diagnostics.report()
-    expect(report.samples[0]).toMatchObject({ positionMs: 10000, recordingPositionMs: 9500, observedAtMs: 1000, receivedAtMs: 1100 })
+    expect(report.samples[0]).toMatchObject({ positionMs: 10000, recordingPositionMs: 10000, hypotheticalRecipePositionMs: 9500, observedAtMs: 1000, receivedAtMs: 1100 })
     expect(JSON.stringify(report)).not.toMatch(/private-id|data:image/)
     report.samples[0].title = 'mutated'
     expect(diagnostics.report().samples[0].title).toBe('song')

@@ -34,6 +34,7 @@ export function AudioSyncPanel() {
     </div>
     {state.referenceName && <p>当前参照：{state.referenceName}</p>}
     <p role="status">{error || state.message}</p>
+    {state.lastResult && (state.busy || !state.running) && <p className="audio-sync-last-result">上次分析（{(state.lastResult.elapsedMs / 1000).toFixed(1)} 秒）：{state.lastResult.message} 此为历史结果，不表示当前校准仍有效。</p>}
     {state.score != null && <p>相似度 {state.score.toFixed(3)} · 估计速度 {state.rate?.toFixed(3)}×（实验判据，不代表准确率）</p>}
     <p>连续两段独立录音、至少四行完整原文吻合才接管人声同步；计算耗时不计入歌词偏移。重复副歌、伴奏、强混音、缺失或错误原文可能无法锁定，失败或过期回退媒体时钟。暂停、跳转、切歌会停止捕获。</p>
   </section>

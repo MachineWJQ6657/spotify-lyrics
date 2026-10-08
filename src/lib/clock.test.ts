@@ -151,13 +151,13 @@ describe('TransportClock', () => {
     expect(lyricSourcePosition(60_000, 242_182, 242_233)).toBe(60_000)
   })
 
-  it('does not double-scale an explicit Spotify speed curve', () => {
+  it('does not assume a private speed curve establishes media-clock coordinates', () => {
     const transition = {
       kind: 'spotify-mix' as const, title: 'mix', cuePointMs: 0, outputDurationMs: 233_081,
       speedAutomation: [{ fromPositionMs: 0, speed: .91 }]
     }
     expect(lyricDurationScale(233_081, 212_000, transition)).toBe(1)
-    expect(lyricSourcePosition(100_000, 233_081, 212_000, transition)).toBe(91_000)
+    expect(lyricSourcePosition(100_000, 233_081, 212_000, transition)).toBe(100_000)
   })
 
 })

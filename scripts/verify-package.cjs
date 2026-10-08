@@ -25,6 +25,8 @@ const checks = {
   timelineLabel: renderer.includes('SPOTIFY TIMELINE'),
   noUnsupportedAccuracyClaim: !renderer.includes('FRAME-ACCURATE CLOCK'),
   honestSourceEvidence: renderer.includes('尚未取得 Spotify 原文对照') && renderer.includes('元数据匹配') && main.includes('referencePool'),
+  unprovenRecipeNotApplied: renderer.includes('MIX · 未套用推算') && renderer.includes('媒体时间回退（未验证听感）') && main.includes('hypotheticalRecipePositionMs'),
+  retainedVocalResult: renderer.includes('此为历史结果，不表示当前校准仍有效') && renderer.includes('lastResult'),
   untimedOriginalFallback: renderer.includes('暂无可信时间轴') && main.includes('comparableLength'),
   translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
   providerRevision36: renderer.includes('LYRICS_PROVIDER_REVISION = 36'),

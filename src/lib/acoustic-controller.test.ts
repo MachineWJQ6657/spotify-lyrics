@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = vi.hoisted(() => ({ playback: null as any, listeners: new Set<(next: any, prior: any) => void>() }))
+const store = vi.hoisted(() => ({ playback: null as any, lyrics: null as any, listeners: new Set<(next: any, prior: any) => void>() }))
 vi.mock('../store/useAppStore', () => ({ useAppStore: {
-  getState: () => ({ playback: store.playback }),
+  getState: () => ({ playback: store.playback, lyrics: store.lyrics }),
   subscribe: (listener: any) => { store.listeners.add(listener); return () => store.listeners.delete(listener) },
 } }))
 function publish(playback: any) {
@@ -14,6 +14,7 @@ let cleanup: (() => void) | undefined
 
 beforeEach(() => {
   vi.resetModules(); store.listeners.clear()
+  store.lyrics = null
   store.playback = { track: { id: 'song', name: 'Song' }, isPlaying: true, positionMs: 0, observedAtMs: 1000 }
   vi.stubGlobal('Worker', class {
     onmessage: any
@@ -36,6 +37,35 @@ beforeEach(() => {
 afterEach(async () => { cleanup?.(); cleanup = undefined; await Promise.resolve(); vi.unstubAllGlobals() })
 
 describe('audio capture lifecycle', () => {
+  it('keeps a text-free prior analysis summary visible during inference and stop, but clears it on track change', async () => {
+    store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:
+      Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] }
+    let port: any
+    vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null }; constructor() { port = this.port } connect() {} disconnect() {} })
+    const audioTrack = { stop: vi.fn(), onended: null }
+    vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia: async () => ({
+      getTracks: () => [audioTrack], getAudioTracks: () => [audioTrack], getVideoTracks: () => [],
+    }) } })
+    Object.assign(window.syllable.audioSync, { engineStatus: vi.fn(async () => ({ ready: true })),
+      vocal: vi.fn(async () => ({ decision: 'rejected', reason: 'insufficient-words', linesMatched: 0, elapsedMs: 2000, score: 0, rate: 1 })) })
+    const { acousticController: controller } = await import('./acoustic-controller')
+    cleanup = controller.connect()
+    await controller.startVocal()
+    const block = { data: { pcm: new Float32Array(192000), sampleRate: 16000, endContextTime: 0 } }
+    await port.onmessage(block)
+    expect(controller.snapshot().lastResult).toMatchObject({ decision: 'rejected', elapsedMs: 2000 })
+    let complete!: (value: any) => void
+    vi.mocked(window.syllable.audioSync.vocal).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    const pending = port.onmessage(block)
+    expect(controller.snapshot().busy).toBe(true)
+    expect(controller.snapshot().lastResult?.message).toContain('未识别到足够可靠')
+    await controller.stop()
+    expect(controller.snapshot().lastResult?.decision).toBe('rejected')
+    complete({ decision: 'locked', reason: 'matched' }); await pending
+    expect(controller.snapshot().lastResult?.decision).toBe('rejected')
+    publish({ ...store.playback, track: { id: 'other', name: 'Other' } })
+    expect(controller.snapshot().lastResult).toBeUndefined()
+  })
   it('cancels pending capture on pause without recursively clearing on its own broadcast', async () => {
     let resolveCapture!: (value: any) => void
     const capture = new Promise(resolve => { resolveCapture = resolve })

@@ -50,11 +50,10 @@ export function formatTime(milliseconds: number) {
 }
 
 /**
- * Map Spotify's media-session position to the recording clock used by LRC.
- * Automix cue points describe where two songs should align during a transition;
- * they are not a hidden trim at the beginning of every song. Only Spotify's
- * explicit speed curve changes elapsed recording time, so the curve is
- * integrated from the native zero-based SMTC position.
+ * Diagnostic integration of a private Spotify recipe under the HYPOTHESIS
+ * that its input is output elapsed time. SMTC/Web positions have not been
+ * established to use those coordinates. Never use this hypothetical result
+ * as the default lyric clock: doing so can apply a speed change twice.
  */
 export function spotifySourcePosition(positionMs: number, transition?: SpotifyTransitionProfile) {
   if (!transition || transition.kind !== 'spotify-mix') return Math.max(0, positionMs)
@@ -81,15 +80,17 @@ export function spotifySourcePosition(positionMs: number, transition?: SpotifyTr
  * Duration differences do not establish playback speed: fades, silence and
  * alternate edits can all change an endpoint without changing sung timing.
  * Never infer a global tempo ratio from two durations. Retained as an API
- * compatibility helper; only explicit speed automation maps recording time.
+ * compatibility helper. Even an explicit recipe lacks proven coordinates.
  */
 export function lyricDurationScale(_transportDurationMs?: number, _sourceDurationMs?: number, _transition?: SpotifyTransitionProfile) {
   return 1
 }
 
-export function lyricSourcePosition(positionMs: number, transportDurationMs?: number, sourceDurationMs?: number, transition?: SpotifyTransitionProfile) {
-  const explicitPosition = spotifySourcePosition(positionMs, transition)
-  return Math.max(0, explicitPosition * lyricDurationScale(transportDurationMs, sourceDurationMs, transition))
+export function lyricSourcePosition(positionMs: number, _transportDurationMs?: number, _sourceDurationMs?: number, _transition?: SpotifyTransitionProfile) {
+  // Media time is only a fallback, NOT proof of audible alignment. Metadata
+  // arriving late must not jump the active line. Independent audio anchors
+  // are applied separately below and never derive from private curve guesses.
+  return Math.max(0, positionMs)
 }
 
 /** Positive calibration delays lyrics; Spotify transport itself remains untouched. */

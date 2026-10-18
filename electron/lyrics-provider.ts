@@ -880,7 +880,8 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide : topTier
   const undominated = plausible.filter(item => !isProvenIncomplete(item, plausible))
   const complete = undominated.length ? undominated : plausible
-  const viable = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0))
+  const viable = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0
+    || searchTimelineVersionDominated(item, other, durationMs)))
   // A provider-side translation can masquerade as the original and win the
   // numeric score simply by splitting each sung line into two shorter rows.
   // LRCLIB /get has matched the requested title + artist directly, so retain a
@@ -913,6 +914,27 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
     const bDistance = durationMs && b.matchedDurationMs ? Math.abs(b.matchedDurationMs - durationMs) : Number.MAX_SAFE_INTEGER
     return aDistance - bDistance
   })[0] ?? null
+}
+
+/** A denser search result is not a better recording version. Only prefer the
+ * near-duration candidate when the SAME ordered words establish a stable,
+ * large timeline disagreement. This selects an existing timeline unchanged;
+ * it never derives a tempo or offset from a duration. Exact/Spotify originals
+ * retain their separate content/consensus checks. */
+function searchTimelineVersionDominated(subject: LyricsResult, reference: LyricsResult, durationMs: number) {
+  if (subject === reference || !durationMs || subject.source.startsWith('Spotify')
+    || subject.source.startsWith('LRCLIB · 精确匹配') || !subject.matchedDurationMs || !reference.matchedDurationMs
+    || reference.confidence < subject.confidence - 2 || reference.confidence < 85
+    || Math.abs(reference.matchedDurationMs - durationMs) > 750
+    || Math.abs(subject.matchedDurationMs - durationMs) < 3000) return false
+  const subjectText = parseTimedRows(subject.syncedLyrics).map(row => row.normalizedText).join('')
+  const referenceText = parseTimedRows(reference.syncedLyrics).map(row => row.normalizedText).join('')
+  if (normalizedTextSimilarity(subjectText, referenceText) < .94) return false
+  const relation = timelineRelation(subject, reference)
+  if (!relation || relation.anchors.length < 8 || relation.madMs > 600 || Math.abs(relation.medianDeltaMs) < 2500
+    || relation.anchors.length / Math.min(relation.subjectRows.length, relation.referenceRows.length) < .6) return false
+  const stats = timedLyricsStats(reference.syncedLyrics, durationMs)
+  return stats.continuity >= .85 && stats.tailCoverage >= .7
 }
 
 export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs = 0, preferredScript?: 'ja' | 'han' | 'latin'): LyricsResult | null {

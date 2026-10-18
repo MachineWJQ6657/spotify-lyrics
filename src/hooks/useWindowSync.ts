@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings, LyricsDocument } from '../types'
+import type { AppSettings, LyricsDocument, SessionCalibration } from '../types'
 import { useAppStore } from '../store/useAppStore'
 import { receiveWindowDocument, snapshotOwnsTrack } from '../lib/window-document'
 
@@ -9,7 +9,8 @@ type SyncMessage =
   | { source: string; type: 'library-remove'; trackId: string }
   | { source: string; type: 'lyrics-view'; trackId: string | null; document: LyricsDocument | null }
   | { source: string; type: 'hello'; wantsLibrary: boolean }
-  | { source: string; target: string; type: 'snapshot'; trackId: string | null; settings: AppSettings; document?: LyricsDocument | null }
+  | { source: string; type: 'session-calibration'; trackId: string | null; calibration: SessionCalibration | null }
+  | { source: string; target: string; type: 'snapshot'; trackId: string | null; settings: AppSettings; document?: LyricsDocument | null; calibration?: SessionCalibration | null }
 
 const instanceId = crypto.randomUUID()
 const isPrimaryWindow = window.location.hash !== '#/overlay' && window.location.hash !== '#/overlay-controls'
@@ -56,6 +57,7 @@ export function useWindowSync(syncLibrary = true) {
           type: 'snapshot',
           trackId: state.playback?.track?.id ?? null,
           settings: state.settings,
+          calibration: state.sessionCalibration,
           document: message.wantsLibrary ? state.lyrics : undefined
         } satisfies SyncMessage)
         return
@@ -70,6 +72,7 @@ export function useWindowSync(syncLibrary = true) {
         applyingRemote = true
         useAppStore.setState(state => ({
           settings: message.settings,
+          ...(!isPrimaryWindow && message.trackId === currentTrackId ? { sessionCalibration: message.calibration ?? null } : {}),
           ...(syncLibrary && documentMatches ? {
             library: isPrimaryWindow ? (message.document ? { ...state.library, [message.document.trackId]: message.document } : state.library) : {},
             lyrics: message.document ?? null
@@ -83,6 +86,14 @@ export function useWindowSync(syncLibrary = true) {
         return
       }
       if (!syncLibrary && message.type !== 'settings') return
+      if (message.type === 'session-calibration') {
+        if (!isPrimaryWindow && message.trackId === (useAppStore.getState().playback?.track?.id ?? null)) {
+          applyingRemote = true
+          useAppStore.setState({ sessionCalibration: message.calibration })
+          applyingRemote = false
+        }
+        return
+      }
       applyingRemote = true
       if (message.type === 'settings') useAppStore.setState({ settings: message.settings })
       else if (message.type === 'lyrics-view') {
@@ -113,6 +124,9 @@ export function useWindowSync(syncLibrary = true) {
     }
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (applyingRemote) return
+      if (isPrimaryWindow && state.sessionCalibration !== previous.sessionCalibration) channel.postMessage({
+        source: instanceId, type: 'session-calibration', trackId: state.playback?.track?.id ?? null, calibration: state.sessionCalibration
+      } satisfies SyncMessage)
       if (receivedSettings && state.settings !== previous.settings) channel.postMessage({ source: instanceId, type: 'settings', settings: state.settings } satisfies SyncMessage)
       if (!isPrimaryWindow && syncLibrary && state.playback?.track?.id !== previous.playback?.track?.id) {
         acknowledgedTrackId = undefined

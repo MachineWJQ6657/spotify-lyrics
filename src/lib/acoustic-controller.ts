@@ -100,6 +100,8 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
     if (mode === 'vocal' && !(await window.syllable.audioSync.engineStatus()).ready) throw new Error('请先配置本地人声识别引擎')
     if (token !== generation) return
     await window.syllable.audioSync.prepare(mode)
+    if (token !== generation) return
+    useAppStore.getState().clearSessionCalibration?.()
     const captured = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 16, height: 16, frameRate: 1 } })
     if (token !== generation) { captured.getTracks().forEach(track => track.stop()); return }
     stream = captured
@@ -115,8 +117,41 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
     audio.createMediaStreamSource(captured).connect(processor)
     processor.connect(audio.destination) // Worklet outputs silence, not the captured sound.
     let processing = false
+    let resetting = false
+    let captureEpoch = 0
+    const resetCapture = async () => {
+      if (token !== generation || resetting) return
+      resetting = true; captureEpoch++
+      processor?.port.postMessage({ type: 'reset' })
+      update({ busy: true, score: undefined, rate: undefined, message: '声音采集中断，已撤销旧校准；正在重新收集连续声音…' })
+      try {
+        await window.syllable.audioSync.clear()
+        if (token !== generation) return
+        await window.syllable.audioSync.prepare(mode)
+        if (token !== generation) return
+        // Only evidence captured after backend invalidation may confirm anew.
+        processor?.port.postMessage({ type: 'reset' })
+        update({ busy: false })
+      } catch (error) {
+        if (token === generation) await stop(`声音采集恢复失败：${error instanceof Error ? error.message : String(error)}`)
+      } finally { resetting = false }
+    }
+    captured.getAudioTracks()[0].onmute = () => { void resetCapture() }
+    captured.getAudioTracks()[0].onunmute = () => { void resetCapture() }
+    audio.onstatechange = () => { if (token === generation) void resetCapture() }
     processor.port.onmessage = async event => {
-      if (token !== generation || requestPending || processing) return
+      if (token !== generation) return
+      // Handle gaps even while inference is busy; its eventual result is stale.
+      if (event.data?.type === 'gap') { await resetCapture(); return }
+      if (resetting || requestPending || processing) return
+      const block = event.data
+      if (!(block?.pcm instanceof Float32Array) || !Number.isFinite(block.sampleRate) || block.sampleRate < 8000
+        || !Number.isFinite(block.startContextTime) || !Number.isFinite(block.endContextTime)
+        || Math.abs((block.endContextTime - block.startContextTime) * block.sampleRate - block.pcm.length) > 2
+        || audio.currentTime - block.endContextTime > 1.5 || block.endContextTime > audio.currentTime + .2) {
+        await resetCapture(); return
+      }
+      const epoch = captureEpoch
       // Match completion time is NOT capture time. Preserve the block's end
       // timestamp so slow analysis never shifts lyrics backwards.
       const capturedAtMs = Date.now() - Math.max(0, audio.currentTime - event.data.endContextTime) * 1000
@@ -131,7 +166,7 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
             sampleRate: event.data.sampleRate, pcm: event.data.pcm,
             language: original!.language === 'ja' ? 'ja' : original!.language === 'en' ? 'en' : original!.language.startsWith('zh') ? 'zh' : 'auto',
             lines: original!.lines.map(line => ({ text: line.text, startMs: line.startMs })) })
-          if (token !== generation) return
+          if (token !== generation || epoch !== captureEpoch) return
           const reasons: Record<string, string> = { 'insufficient-words': '未识别到足够可靠的完整歌词', ambiguous: '重复段落无法唯一定位',
             'inconsistent-timing': '识别文字与歌词时间关系不一致', matched: '证据已过期或不连续', inactive: '播放或校准状态已改变',
             'lyrics-changed': '原文已更新', cancelled: '识别已取消', busy: '上一段识别尚未释放', 'invalid-input': '录音参数无效' }
@@ -145,15 +180,15 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
           return
         }
         const result = await work('query', event.data.pcm, event.data.sampleRate) as AcousticMatch
-        if (token !== generation) return
+        if (token !== generation || epoch !== captureEpoch) return
         const decision = await window.syllable.audioSync.observation({ ...result, trackId: observedTrack, capturedAtMs, captureDurationMs })
-        if (token !== generation) return
+        if (token !== generation || epoch !== captureEpoch) return
         const reasons = { silence: '声音太弱', 'too-short': '音频长度不足', 'low-score': '声音与参照不够相似', ambiguous: '多个段落相似', 'unconfirmed-end': '最近声音已无法确认，可能正在转场或跳转', matched: '本次证据未通过时钟检查' }
         update({ busy: false, score: result.score, rate: result.rate, message: decision === 'locked'
           ? '声音对齐已接管歌词；每 12 秒复核，匹配失败或校准过期则恢复媒体时钟。'
           : decision === 'confirming' ? '已找到位置，等待第二段声音确认（约 12 秒）。'
           : `暂不校正：${reasons[result.reason]}。继续采样。` })
-      } catch (error) { if (token === generation) await stop(`音频校准停止：${error instanceof Error ? error.message : String(error)}`) }
+      } catch (error) { if (token === generation && epoch === captureEpoch) await stop(`音频校准停止：${error instanceof Error ? error.message : String(error)}`) }
       finally { processing = false }
     }
     update({ running: true, busy: false, message: mode === 'vocal'

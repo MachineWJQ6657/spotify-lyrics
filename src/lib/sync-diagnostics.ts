@@ -1,5 +1,6 @@
-import type { LyricsDocument, PlaybackSnapshot } from '../types'
-import { calibratedPosition, lyricPlaybackPosition, TransportClock } from './clock'
+import type { LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
+import { TransportClock } from './clock'
+import { currentSessionCalibration, displayedLyricPosition } from './session-calibration'
 import { activeLineIndex } from './lyrics'
 
 export interface LyricDiagnosticContext {
@@ -9,19 +10,21 @@ export interface LyricDiagnosticContext {
   sourceDurationMs: number | null
   providerRevision: number | null
   estimatedLyricPositionMs: number
+  sessionCalibrated?: boolean
   tracks: Array<{ language: string; kind: string; source: string; lineCount: number; firstMs: number | null; lastMs: number | null; estimatedActiveIndex: number }>
 }
 
 /** Export timing/selection evidence, never text, IDs, artwork or the library. */
-export function lyricDiagnosticContext(playback: PlaybackSnapshot | null, lyrics: LyricsDocument | null, fallbackOffsetMs = 0, now = Date.now()): LyricDiagnosticContext {
+export function lyricDiagnosticContext(playback: PlaybackSnapshot | null, lyrics: LyricsDocument | null, fallbackOffsetMs = 0, now = Date.now(), session?: SessionCalibration | null): LyricDiagnosticContext {
   const matchesPlayback = Boolean(playback?.track && lyrics?.trackId === playback.track.id)
   const document = matchesPlayback ? lyrics : null
   const clock = new TransportClock()
   clock.update(playback)
-  const offsetMs = document?.offsetMs ?? fallbackOffsetMs
-  const position = calibratedPosition(lyricPlaybackPosition(clock.position(now), playback, document?.sourceDurationMs, now), offsetMs)
+  const manual = currentSessionCalibration(session, playback, document)
+  const offsetMs = manual?.offsetMs ?? document?.offsetMs ?? fallbackOffsetMs
+  const position = displayedLyricPosition(clock.position(now), playback, document, offsetMs, manual, now)
   return { capturedAtMs: now, matchesPlayback, offsetMs, sourceDurationMs: document?.sourceDurationMs ?? null,
-    providerRevision: document?.providerRevision ?? null, estimatedLyricPositionMs: position,
+    providerRevision: document?.providerRevision ?? null, estimatedLyricPositionMs: position, sessionCalibrated: Boolean(manual),
     tracks: (document?.tracks ?? []).slice(0, 16).map(track => ({ language: track.language.slice(0, 40), kind: track.kind,
       source: track.source.slice(0, 200), lineCount: track.lines.length, firstMs: track.lines[0]?.startMs ?? null,
       lastMs: track.lines.at(-1)?.startMs ?? null, estimatedActiveIndex: activeLineIndex(track.lines, position) })) }
@@ -36,7 +39,7 @@ export function sanitizeLyricDiagnosticContext(input: unknown): LyricDiagnosticC
   const text = (item: unknown, size: number) => typeof item === 'string' ? item.slice(0, size) : ''
   return { capturedAtMs: number(value.capturedAtMs), matchesPlayback: value.matchesPlayback === true,
     offsetMs: number(value.offsetMs), sourceDurationMs: optionalNumber(value.sourceDurationMs), providerRevision: optionalNumber(value.providerRevision),
-    estimatedLyricPositionMs: number(value.estimatedLyricPositionMs),
+    estimatedLyricPositionMs: number(value.estimatedLyricPositionMs), sessionCalibrated: value.sessionCalibrated === true,
     tracks: (Array.isArray(value.tracks) ? value.tracks : []).slice(0, 16).flatMap(item => {
       if (!item || typeof item !== 'object') return []
       return [{ language: text(item.language, 40), kind: text(item.kind, 40), source: text(item.source, 200),

@@ -1,7 +1,7 @@
 import type { AcousticAnchor, PlaybackSnapshot } from '../../src/types'
 import type { LyricMatch } from './lyric-aligner'
 
-export interface HeardObservation extends LyricMatch { trackId: string; capturedAtMs: number; captureDurationMs: number }
+export interface HeardObservation extends LyricMatch { trackId: string; capturedAtMs: number; captureDurationMs: number; lyricTimingKey?: string }
 
 /** Independent, short-lived lyric clock. Recognition completion time never
  * becomes the audio timestamp. Spotify's absolute position is never an anchor. */
@@ -36,13 +36,14 @@ export class LyricClock {
     this.candidate = value
     // Non-overlapping independent samples, four or more distinct complete
     // lines, matching speed and predicted location; no single-sentence lock.
-    if (!before || elapsed < value.captureDurationMs - 50 || elapsed > 36000
+    if (!before || before.lyricTimingKey !== value.lyricTimingKey || elapsed < value.captureDurationMs - 50 || elapsed > 36000
       || before.lineIndices.at(-1)! >= value.lineIndices[0] || Math.abs(before.rate - value.rate) > .04
       || Math.abs(value.sourceEndMs - before.sourceEndMs - elapsed * (value.rate + before.rate) / 2) > 550) {
       this.anchor = null
       return 'confirming'
     }
     this.anchor = { trackId: value.trackId, sourcePositionMs: value.sourceEndMs, observedAtMs: value.capturedAtMs,
+      ...(value.lyricTimingKey ? { coordinate: 'lyrics' as const, lyricTimingKey: value.lyricTimingKey } : {}),
       expiresAtMs: value.capturedAtMs + 28000, rate: (value.rate + before.rate) / 2, score: Math.min(value.score, before.score) }
     return 'locked'
   }

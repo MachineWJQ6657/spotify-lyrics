@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { lyricTimingKey } from '../../src/lib/lyric-timing-key'
 import type { PlaybackSnapshot } from '../../src/types'
 import type { VocalCapture, VocalResult } from '../../src/lib/vocal-sync-types'
 import { alignHeardLyrics } from './lyric-aligner'
@@ -35,7 +35,7 @@ export class VocalSync {
         || !Number.isFinite(line.startMs) || line.startMs < 0 || line.startMs > 600000
         || (index > 0 && line.startMs < value.lines[index - 1].startMs))
       || value.lines.reduce((sum, line) => sum + line.text.length, 0) > 16000) return rejected('invalid-input')
-    const key = createHash('sha256').update(JSON.stringify(value.lines.map(line => [line.startMs, line.text]))).digest('hex')
+    const key = lyricTimingKey(value.lines)
     if (this.lyricKey && this.lyricKey !== key) { this.clear(); return rejected('lyrics-changed') }
     this.lyricKey = key; this.lastCapture = value.capturedAtMs
     this.pending = true
@@ -44,7 +44,7 @@ export class VocalSync {
       const tokens = await this.recognizer.recognize(value.pcm, value.language)
       if (revision !== this.clock.revision || value.trackId !== this.owner) return rejected('cancelled')
       const match = alignHeardLyrics(tokens, value.lines, value.captureDurationMs)
-      const decision = this.clock.accept({ ...match, trackId: value.trackId, capturedAtMs: value.capturedAtMs, captureDurationMs: value.captureDurationMs })
+      const decision = this.clock.accept({ ...match, lyricTimingKey: key, trackId: value.trackId, capturedAtMs: value.capturedAtMs, captureDurationMs: value.captureDurationMs })
       return { decision, reason: match.reason, linesMatched: match.lineIndices.length, elapsedMs: Date.now() - started, score: match.score, rate: match.rate }
     } catch (error) {
       if (revision === this.clock.revision) this.clear()

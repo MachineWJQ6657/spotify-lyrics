@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { lyricDiagnosticContext, sanitizeLyricDiagnosticContext } from './sync-diagnostics'
+import { createSessionCalibration } from './session-calibration'
 
 const playback: PlaybackSnapshot = { track: { id: 'current', name: 'song', artist: 'artist', album: 'album', coverUrl: '', durationMs: 100_000 },
   positionMs: 10_000, observedAtMs: 1000, isPlaying: true,
@@ -10,6 +11,12 @@ const lyrics: LyricsDocument = { trackId: 'current', offsetMs: 500, sourceDurati
     { startMs: 1000, text: 'secret lyric' }, { startMs: 9400, text: 'secret second lyric' }, { startMs: 20_000, text: 'secret third lyric' }] }] }
 
 describe('lyric diagnostics without lyric bodies', () => {
+  it('reports the manual session position but never exports its text-bearing identity key', () => {
+    const manual = createSessionCalibration(playback, lyrics, 'private-track-id', 1, 2000)
+    const report = lyricDiagnosticContext(playback, lyrics, 0, 2000, manual)
+    expect(report).toMatchObject({ sessionCalibrated: true, estimatedLyricPositionMs: 9400, offsetMs: 1600 })
+    expect(JSON.stringify(sanitizeLyricDiagnosticContext(report))).not.toMatch(/secret|originalKey|private-track-id/)
+  })
   it('records calibrated projected timing and source metadata', () => {
     const report = lyricDiagnosticContext(playback, lyrics, 2000, 2000)
     expect(report).toMatchObject({ capturedAtMs: 2000, matchesPlayback: true, offsetMs: 500, estimatedLyricPositionMs: 10500,

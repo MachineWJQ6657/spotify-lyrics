@@ -22,13 +22,13 @@ beforeEach(() => {
     terminate() {}
   })
   vi.stubGlobal('AudioContext', class {
-    sampleRate = 8000; currentTime = 0; destination = {}
+    sampleRate = 8000; currentTime = 12; destination = {}
     audioWorklet = { addModule: async () => {} }
     async decodeAudioData() { return { duration: 12, length: 96000, sampleRate: 8000, numberOfChannels: 1, getChannelData: () => new Float32Array(96000) } }
     async close() {} async resume() {}
     createMediaStreamSource() { return { connect() {} } }
   })
-  vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null }; connect() {} disconnect() {} })
+  vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null, postMessage: vi.fn() }; connect() {} disconnect() {} })
   vi.stubGlobal('document', { baseURI: 'https://localhost/' })
   vi.stubGlobal('window', { setTimeout, clearTimeout, syllable: { audioSync: {
     prepare: vi.fn(async () => true), clear: vi.fn(async () => true), observation: vi.fn(),
@@ -41,7 +41,7 @@ describe('audio capture lifecycle', () => {
     store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:
       Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] }
     let port: any
-    vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null }; constructor() { port = this.port } connect() {} disconnect() {} })
+    vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null, postMessage: vi.fn() }; constructor() { port = this.port } connect() {} disconnect() {} })
     const audioTrack = { stop: vi.fn(), onended: null }
     vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia: async () => ({
       getTracks: () => [audioTrack], getAudioTracks: () => [audioTrack], getVideoTracks: () => [],
@@ -51,7 +51,7 @@ describe('audio capture lifecycle', () => {
     const { acousticController: controller } = await import('./acoustic-controller')
     cleanup = controller.connect()
     await controller.startVocal()
-    const block = { data: { pcm: new Float32Array(192000), sampleRate: 16000, endContextTime: 0 } }
+    const block = { data: { pcm: new Float32Array(192000), sampleRate: 16000, startContextTime: 0, endContextTime: 12 } }
     await port.onmessage(block)
     expect(controller.snapshot().lastResult).toMatchObject({ decision: 'rejected', elapsedMs: 2000 })
     let complete!: (value: any) => void
@@ -65,6 +65,34 @@ describe('audio capture lifecycle', () => {
     expect(controller.snapshot().lastResult?.decision).toBe('rejected')
     publish({ ...store.playback, track: { id: 'other', name: 'Other' } })
     expect(controller.snapshot().lastResult).toBeUndefined()
+  })
+  it('invalidates a gap during inference, ignores its old result and resumes fresh sampling', async () => {
+    store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:
+      Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] }
+    let port: any
+    vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null, postMessage: vi.fn() }; constructor() { port = this.port } connect() {} disconnect() {} })
+    const audioTrack = { stop: vi.fn(), onended: null }
+    vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia: async () => ({ getTracks: () => [audioTrack], getAudioTracks: () => [audioTrack], getVideoTracks: () => [] }) } })
+    let complete!: (value: any) => void
+    Object.assign(window.syllable.audioSync, { engineStatus: vi.fn(async () => ({ ready: true })), vocal: vi.fn(() => new Promise(resolve => { complete = resolve })) })
+    const { acousticController: controller } = await import('./acoustic-controller')
+    cleanup = controller.connect(); await controller.startVocal()
+    const block = { data: { pcm: new Float32Array(192000), sampleRate: 16000, startContextTime: 0, endContextTime: 12 } }
+    const pending = port.onmessage(block)
+    await port.onmessage({ data: { type: 'gap', continuityId: 1 } })
+    expect(window.syllable.audioSync.clear).toHaveBeenCalledOnce()
+    expect(window.syllable.audioSync.prepare).toHaveBeenCalledTimes(2)
+    expect(port.postMessage).toHaveBeenCalledWith({ type: 'reset' })
+    complete({ decision: 'locked', reason: 'matched', linesMatched: 3, score: .99, rate: 1 }); await pending
+    expect(controller.snapshot().lastResult).toBeUndefined()
+    expect(controller.snapshot().running).toBe(true)
+    expect(audioTrack.stop).not.toHaveBeenCalled()
+    vi.mocked(window.syllable.audioSync.vocal).mockResolvedValue({ decision: 'confirming', reason: 'matched', linesMatched: 3, elapsedMs: 20, score: .99, rate: 1 })
+    await port.onmessage(block)
+    expect(controller.snapshot().lastResult?.decision).toBe('confirming')
+    await port.onmessage({ data: { ...block.data, startContextTime: -5 } })
+    expect(window.syllable.audioSync.vocal).toHaveBeenCalledTimes(2)
+    expect(window.syllable.audioSync.clear).toHaveBeenCalledTimes(2)
   })
   it('cancels pending capture on pause without recursively clearing on its own broadcast', async () => {
     let resolveCapture!: (value: any) => void

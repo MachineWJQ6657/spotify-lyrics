@@ -8,6 +8,20 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('does not choose a shifted recording search hit merely for its extra line breaks', () => {
+    const rows = Array.from({ length: 16 }, (_, i) => `original complete phrase ${i} with unique ending ${i}`)
+    const stamp = (seconds: number) => `[${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}.00]`
+    const correct: LyricsResult = { source: 'near-duration search', confidence: 100, matchedDurationMs: 239114, plainLyrics: null,
+      syncedLyrics: rows.map((row, i) => `${stamp(4 + i * 14)}${row}`).join('\n') }
+    const shifted: LyricsResult = { source: 'LRCLIB · 搜索候选', confidence: 99, matchedDurationMs: 244000, plainLyrics: null,
+      syncedLyrics: rows.flatMap((row, i) => i % 4 === 0 ? [`${stamp(10 + i * 14)}original complete phrase ${i}`, `${stamp(13 + i * 14)}with unique ending ${i}`] : [`${stamp(10 + i * 14)}${row}`]).join('\n') }
+    for (const order of [[shifted, correct], [correct, shifted]]) expect(mergeProviderSet(order, 239120)?.source).toBe(correct.source)
+    // Unknown/mixed endpoint alone is not proof that every shorter version wins.
+    expect(mergeProviderSet([shifted, correct], 0)?.source).toBe(shifted.source)
+    expect(mergeProviderSet([shifted, correct], 230000)?.source).toBe(shifted.source)
+    expect(mergeProviderSet([{ ...shifted, source: 'LRCLIB · 精确匹配' }, correct], 239120)?.source).toBe('LRCLIB · 精确匹配')
+    expect(mergeProviderSet([shifted, { ...correct, syncedLyrics: correct.syncedLyrics!.replaceAll('original complete phrase', 'unrelated other words') }], 239120)?.source).toBe(shifted.source)
+  })
   it('rejects foreign-language recording editions even with identical artist and duration', () => {
     for (const version of ['English ver.', 'English Version', 'Korean ver.', '英文版']) {
       expect(weightedScore(`雲外憧憬 (${version})`, 'FantasticYouth', 228721,

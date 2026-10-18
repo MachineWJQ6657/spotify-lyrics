@@ -1188,6 +1188,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     acousticClock.clear()
     if (mode === 'vocal' && lastPlayback.track) vocalSync.start(lastPlayback.track.id)
     audioCaptureGrantUntil = Date.now() + 10000
+    broadcast(lastPlayback)
     return true
   })
   ipcMain.handle('audio-sync:clear', event => {

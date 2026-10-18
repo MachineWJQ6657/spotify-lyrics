@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseWhisperTokens, type HeardToken } from './lyric-aligner'
+import { captureQuality } from './capture-quality'
 
 export interface AsrConfig { executable: string; model: string }
 export interface AsrStatus { ready: boolean; modelName: string; message: string }
@@ -67,12 +68,14 @@ export class LocalAsr {
     let directory: string | undefined
     try {
       const wav = encodePcmWav(pcm)
+      const quality = captureQuality(pcm)
+      // Missing/quiet signal is a rejected observation, not an engine failure.
+      // Keep sampling; a later continuous phrase may recover without a restart.
+      if (quality !== 'usable') return []
       if (!(await this.status()).ready) throw new Error('请先配置本地识别引擎')
       if (token !== this.generation) throw new Error('识别已取消')
       // Silence never starts a heavyweight model. Non-silent accompaniment is
       // rejected later by lexical matching, not incorrectly labelled speech.
-      const rms = Math.sqrt(pcm.reduce((sum, sample) => sum + sample * sample, 0) / pcm.length)
-      if (rms < .003) return []
       await mkdir(this.tempRoot, { recursive: true })
       directory = await mkdtemp(path.join(this.tempRoot, 'syllable-asr-'))
       const input = path.join(directory, 'input.wav'), output = path.join(directory, 'result')

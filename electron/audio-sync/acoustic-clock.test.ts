@@ -30,6 +30,27 @@ describe('acoustic clock safety', () => {
     expect(clock.decorate(snapshot(), 124100)?.acousticAnchor).toBeDefined()
     expect(clock.accept(observation(130000, { trackId: 'other', accepted: false, reason: 'silence' }), 130100)).toBe('rejected')
     expect(clock.decorate(snapshot(), 130100)?.acousticAnchor).toBeDefined()
+    expect(clock.accept(observation(136000), 136100)).toBe('locked')
+    expect(clock.decorate(snapshot(), 136100)?.acousticAnchor?.sourcePositionMs).toBe(68000)
+  })
+  it.each([true, false])('ignores an out-of-order recent result (accepted=%s) without replacing confirmation evidence', accepted => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(observation(122000, { accepted, reason: accepted ? 'matched' : 'silence' }), 125000)).toBe('rejected')
+    expect(clock.accept(observation(136000), 136100)).toBe('locked')
+  })
+  it('does not let a duplicated locked block refresh or revoke its anchor', () => {
+    const clock = setup(); lock(clock)
+    const anchor = clock.decorate(snapshot(), 124100)?.acousticAnchor
+    expect(clock.accept(observation(124000), 125000)).toBe('locked')
+    expect(clock.accept(observation(124000, { accepted: false, reason: 'silence' }), 125000)).toBe('rejected')
+    expect(clock.decorate(snapshot(), 125000)?.acousticAnchor).toEqual(anchor)
+    expect(clock.accept(observation(136000), 136100)).toBe('locked')
+  })
+  it('retains its capture watermark after a fresh rejection', () => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(observation(136000, { accepted: false, reason: 'silence' }), 136100)).toBe('rejected')
+    expect(clock.accept(observation(134000), 136100)).toBe('rejected')
+    expect(clock.accept(observation(148000), 148100)).toBe('confirming')
   })
   it('requires two independent blocks and does not use Spotify position as truth', () => {
     const clock = setup()

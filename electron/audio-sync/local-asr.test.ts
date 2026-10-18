@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { encodePcmWav } from './local-asr'
+import { encodePcmWav, LocalAsr } from './local-asr'
 describe('bounded local ASR PCM encoding', () => {
+  it('rejects broken captures before looking for a model or starting a process', async () => {
+    const recognizer = new LocalAsr('not-used/config.json', 'not-used/temp')
+    const gaps = new Float32Array(192000); gaps.fill(.2, 0, 32000)
+    await expect(recognizer.recognize(gaps, 'ja')).resolves.toEqual([])
+    await expect(recognizer.recognize(new Float32Array(192000), 'ja')).resolves.toEqual([])
+  })
   it('writes a valid mono 16 kHz WAV without ffmpeg or shell interpolation', () => {
     const pcm = new Float32Array(192000); pcm[0] = -.5; pcm[1] = 2
     const wav = encodePcmWav(pcm)

@@ -54,12 +54,23 @@ export interface PlaybackSnapshot {
 }
 
 export interface AcousticAnchor {
+  /** Vocal matching already targets LRC coordinates; reference matching targets recording time. */
+  coordinate?: 'recording' | 'lyrics'
+  lyricTimingKey?: string
   trackId: string
   sourcePositionMs: number
   observedAtMs: number
   expiresAtMs: number
   rate: number
   score: number
+}
+
+/** Explicit user onset, scoped to this uninterrupted playback, never persisted. */
+export interface SessionCalibration {
+  trackId: string
+  originalKey: string
+  offsetMs: number
+  createdAtMs: number
 }
 
 export interface LyricsCandidate {

@@ -102,13 +102,19 @@ export function calibratedPosition(positionMs: number, offsetMs: number) {
  * Spotify Mix speed automation to it a second time. Transport controls retain
  * their original media-session clock; this helper is for lyric surfaces only.
  */
-export function lyricPlaybackPosition(positionMs: number, playback: PlaybackSnapshot | null, sourceDurationMs?: number, now = Date.now()) {
+export function activeAcousticAnchor(playback: PlaybackSnapshot | null, now = Date.now()) {
   const anchor = playback?.acousticAnchor
   if (anchor && playback?.isPlaying && anchor.trackId === playback.track?.id
     && [anchor.sourcePositionMs, anchor.observedAtMs, anchor.expiresAtMs, anchor.rate, anchor.score].every(Number.isFinite)
     && anchor.rate >= .8 && anchor.rate <= 1.2 && anchor.score >= .8
     && now >= anchor.observedAtMs && now < anchor.expiresAtMs) {
-    return Math.max(0, anchor.sourcePositionMs + (now - anchor.observedAtMs) * anchor.rate)
+    return anchor
   }
+  return null
+}
+
+export function lyricPlaybackPosition(positionMs: number, playback: PlaybackSnapshot | null, sourceDurationMs?: number, now = Date.now()) {
+  const anchor = activeAcousticAnchor(playback, now)
+  if (anchor) return Math.max(0, anchor.sourcePositionMs + (now - anchor.observedAtMs) * anchor.rate)
   return lyricSourcePosition(positionMs, playback?.track?.durationMs, sourceDurationMs, playback?.transition)
 }

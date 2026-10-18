@@ -65,6 +65,18 @@ async function start() {
 }
 
 describe('cross-window message and timer integration', () => {
+  it('delivers the current manual session to the overlay without accepting other-song corrections or echoing', async () => {
+    const { channel, target } = await start()
+    const calibration = { trackId: 'new', offsetMs: 2500, originalKey: 'fixture', createdAtMs: 1000 }
+    channel.deliver({ type: 'snapshot', target, trackId: 'new', settings: {}, document: doc('new'), calibration })
+    expect(harness.state.sessionCalibration).toEqual(calibration)
+    channel.postMessage.mockClear()
+    channel.deliver({ type: 'session-calibration', trackId: 'old', calibration: null })
+    expect(harness.state.sessionCalibration).toEqual(calibration)
+    channel.deliver({ type: 'session-calibration', trackId: 'new', calibration: null })
+    expect(harness.state.sessionCalibration).toBeNull()
+    expect(channel.postMessage).not.toHaveBeenCalled()
+  })
   it('does not broadcast auxiliary defaults when native restoration arrives before its snapshot', async () => {
     harness.state.patchSettings = vi.fn()
     const { channel } = await start()

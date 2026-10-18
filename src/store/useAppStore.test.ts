@@ -3,6 +3,22 @@ import { createReferenceDeduplicatingStorage, useAppStore } from './useAppStore'
 import type { LyricsDocument } from '../types'
 
 describe('application-state persistence', () => {
+  it('keeps heard-line correction out of the library and clears it after a seek', () => {
+    const before = useAppStore.getState()
+    const lyrics: LyricsDocument = { trackId: 'heard-test', offsetMs: 500, tracks: [{ id: 'original', language: 'ja', kind: 'original', source: 'fixture', label: '', lines: [{ text: 'test', startMs: 10000 }] }] }
+    const playback = { track: { id: 'heard-test', name: '', artist: '', album: '', coverUrl: '', durationMs: 200000 }, positionMs: 13000, observedAtMs: 100000, isPlaying: true }
+    try {
+      useAppStore.setState({ lyrics, playback, sessionCalibration: null })
+      useAppStore.getState().calibrateHeardLine('original', 0, 100500)
+      expect(useAppStore.getState().sessionCalibration?.offsetMs).toBe(3500)
+      expect(useAppStore.getState().library).toBe(before.library)
+      expect(useAppStore.getState().lyrics).toBe(lyrics)
+      useAppStore.getState().setPlayback({ ...playback, positionMs: 15000, observedAtMs: 102000 })
+      expect(useAppStore.getState().sessionCalibration?.offsetMs).toBe(3500)
+      useAppStore.getState().setPlayback({ ...playback, positionMs: 55000, observedAtMs: 103000 })
+      expect(useAppStore.getState().sessionCalibration).toBeNull()
+    } finally { useAppStore.setState(before) }
+  })
   it('replaces the original across languages without erasing translations or retaining stale verification', () => {
     const before = useAppStore.getState()
     const document: LyricsDocument = { trackId: 'switch-original', tracks: [

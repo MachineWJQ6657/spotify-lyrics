@@ -20,10 +20,12 @@ app.whenReady().then(async () => {
   const result = await window.webContents.executeJavaScript(`(() => {
     const saved = JSON.parse(localStorage.getItem('syllable-preferences') || 'null');
     return { version: saved?.version, defaultOffsetMs: saved?.state?.settings?.offsetMs,
+      requestedTitle: ${JSON.stringify(title)}, availableTitles: Object.values(saved?.state?.library || {}).map(doc => doc.track?.name).filter(Boolean).slice(-12),
       documents: Object.values(saved?.state?.library || {}).filter(doc => doc.track?.name === ${JSON.stringify(title)}) };
   })()`)
   fs.writeFileSync(path.join(target, 'song.json'), JSON.stringify(result, null, 2))
   console.log(JSON.stringify({ snapshot: path.join(target, 'song.json'), version: result.version, defaultOffsetMs: result.defaultOffsetMs,
+    requestedTitle: result.requestedTitle, availableTitles: result.documents.length ? undefined : result.availableTitles,
     documents: result.documents.map(doc => ({ trackId: doc.trackId, track: doc.track, offsetMs: doc.offsetMs, sourceDurationMs: doc.sourceDurationMs,
       providerRevision: doc.providerRevision, updatedAt: doc.updatedAt,
       tracks: doc.tracks.map(track => ({ id: track.id, source: track.source, kind: track.kind, language: track.language,

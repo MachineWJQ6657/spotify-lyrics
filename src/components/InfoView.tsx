@@ -5,6 +5,7 @@ import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
 import { AudioSyncPanel } from './AudioSyncPanel'
 import { referenceLabel } from '../lib/source-label'
+import { currentSessionCalibration } from '../lib/session-calibration'
 
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
   const [exporting, setExporting] = useState(false)
@@ -14,18 +15,19 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     setExporting(true)
     try {
       const current = useAppStore.getState()
-      const context = lyricDiagnosticContext(current.playback, current.lyrics, current.demoMode ? current.settings.offsetMs : 0)
+      const context = lyricDiagnosticContext(current.playback, current.lyrics, current.demoMode ? current.settings.offsetMs : 0, Date.now(), current.sessionCalibration)
       const saved = await window.syllable.playback.exportDiagnostics(context)
       setExportStatus(saved ? '诊断已保存在你选择的位置，未上传。' : '已取消保存。')
     } catch (error) { setExportStatus(`保存失败：${error instanceof Error ? error.message : String(error)}`) }
     finally { setExporting(false) }
   }
-  const { connected, localConnected, demoMode, playback, lyrics, settings, patchSettings, setLyricsOffset } = useAppStore()
+  const { connected, localConnected, demoMode, playback, lyrics, settings, patchSettings, setLyricsOffset, sessionCalibration, clearSessionCalibration } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
-  const offsetMs = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
+  const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
+  const offsetMs = manual?.offsetMs ?? activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
   const audioActive = playback?.isPlaying && playback.acousticAnchor?.trackId === playback.track?.id
     && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs
-  const clockMode = audioActive ? '声音校准（实验）' : '媒体时间回退（未验证听感）'
+  const clockMode = manual ? '本次听感校准（不保存到歌曲）' : audioActive ? '声音校准（实验）' : '媒体时间回退（未验证听感）'
   const trackContext = [playback?.track?.name ?? '', playback?.track?.artist ?? '', playback?.track?.album ?? ''].find(hasKana) ?? ''
   const originalLanguage = activeLyrics?.tracks.find(track => track.kind === 'original')?.language
   const trackNamePresentation = scriptPresentation(playback?.track?.name ?? '', trackContext, originalLanguage)
@@ -39,7 +41,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     <div className="content-page-header"><span>PREFERENCES</span><h1>偏好设置</h1><p>常用选项集中在右侧面板；这里提供状态总览和快捷操作。</p></div>
     <div className="status-grid">
       <article><MonitorUp /><div><strong>桌面歌词</strong><span>{settings.overlayVisible ? '正在显示' : '当前隐藏'}</span></div><button onClick={() => void toggleOverlay()}>{settings.overlayVisible ? '隐藏' : '显示'}</button></article>
-      <article><Clock3 /><div><strong>本曲时间校准</strong><span>{offsetMs > 0 ? '+' : ''}{offsetMs} ms · {clockMode}</span></div><button onClick={() => activeLyrics ? setLyricsOffset(0) : patchSettings({ offsetMs: 0 })}>归零</button></article>
+      <article><Clock3 /><div><strong>本曲时间校准</strong><span>{offsetMs > 0 ? '+' : ''}{offsetMs} ms · {clockMode}</span></div><button onClick={() => manual ? clearSessionCalibration() : activeLyrics ? setLyricsOffset(0) : patchSettings({ offsetMs: 0 })}>{manual ? '撤销本次' : '归零'}</button></article>
       <article><Captions /><div><strong>歌词字号</strong><span>{settings.fontSize}px</span></div><button onClick={() => patchSettings({ fontSize: 56 })}>设为 56px</button></article>
       <article><Settings2 /><div><strong>逐行编辑</strong><span>搜索、改词与取当前时间</span></div><button onClick={openEditor}>打开</button></article>
     </div>

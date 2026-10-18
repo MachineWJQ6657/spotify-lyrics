@@ -7,6 +7,14 @@ const observation = (end: number, first: number): HeardObservation => ({ trackId
   accepted: true, reason: 'matched', sourceEndMs: end - 60000, rate: 1, score: .95, residualMs: 100, lineIndices: [first, first + 1, first + 2] })
 
 describe('independent lyric clock', () => {
+  it('binds vocal evidence to one original timeline and keeps recording anchors backward compatible', () => {
+    const clock = setup()
+    clock.accept({ ...observation(112000, 0), lyricTimingKey: 'original-a' }, 112100)
+    expect(clock.accept({ ...observation(124000, 3), lyricTimingKey: 'original-b' }, 124100)).toBe('confirming')
+    expect(clock.decorate(snapshot, 124100)?.acousticAnchor).toBeUndefined()
+    expect(clock.accept({ ...observation(136000, 6), lyricTimingKey: 'original-b' }, 136100)).toBe('locked')
+    expect(clock.decorate(snapshot, 136100)?.acousticAnchor).toMatchObject({ coordinate: 'lyrics', lyricTimingKey: 'original-b' })
+  })
   it('requires two independent blocks and compensates recognition latency', () => {
     const clock = setup()
     expect(clock.accept(observation(112000, 0), 122000)).toBe('confirming')

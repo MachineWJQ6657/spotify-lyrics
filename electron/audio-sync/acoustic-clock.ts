@@ -11,8 +11,9 @@ export class AcousticClock {
   private candidate: AcousticObservation | null = null
   private anchor: AcousticAnchor | null = null
   private invalidatedAtMs = 0
+  private latestCaptureMs = 0
 
-  clear(now = Date.now()) { this.candidate = null; this.anchor = null; this.invalidatedAtMs = now }
+  clear(now = Date.now()) { this.candidate = null; this.anchor = null; this.invalidatedAtMs = now; this.latestCaptureMs = 0 }
 
   observePlayback(snapshot: PlaybackSnapshot | null, now = Date.now()) {
     const previous = this.previousPlayback
@@ -26,6 +27,20 @@ export class AcousticClock {
   }
 
   accept(value: AcousticObservation, now = Date.now()): 'locked' | 'confirming' | 'rejected' {
+    // Replies outside the current capture history cannot mutate its evidence.
+    // Keeping only the anchor is insufficient: clearing its candidate would
+    // make the next fresh match revoke an otherwise continuous lock.
+    if (!value || !this.previousPlayback?.isPlaying || value.trackId !== this.previousPlayback.track?.id
+      || !Number.isFinite(value.capturedAtMs) || value.capturedAtMs < this.latestCaptureMs
+      || now - value.capturedAtMs > 5000 || value.capturedAtMs > now + 200
+      || (Number.isFinite(value.captureDurationMs) && value.capturedAtMs - value.captureDurationMs < this.invalidatedAtMs)) return 'rejected'
+    if (value.capturedAtMs === this.latestCaptureMs) {
+      // Preserve the existing response for a repeated accepted candidate,
+      // without treating it as a second sample or extending an anchor's TTL.
+      return value.accepted && value.reason === 'matched' && this.candidate?.capturedAtMs === value.capturedAtMs
+        ? this.anchor ? 'locked' : 'confirming' : 'rejected'
+    }
+    this.latestCaptureMs = value.capturedAtMs
     const numbers = [value?.sourceEndMs, value?.sourceStartMs, value?.rate, value?.score, value?.margin, value?.capturedAtMs, value?.captureDurationMs]
     if (!value || numbers.some(number => !Number.isFinite(number)) || !value.accepted
       || value.reason !== 'matched' || value.score < .8 || value.margin < .075
@@ -38,10 +53,7 @@ export class AcousticClock {
       this.candidate = null
       // A fresh rejected block no longer supports the old path. Do not continue
       // that rate for the remaining TTL while the UI says calibration failed.
-      // An old result / other track must not revoke a newer valid anchor.
-      if (this.anchor && value?.trackId === this.anchor.trackId && Number.isFinite(value.capturedAtMs)
-        && value.capturedAtMs > this.anchor.observedAtMs && value.capturedAtMs <= now + 200
-        && now - value.capturedAtMs <= 5000) this.anchor = null
+      this.anchor = null
       return 'rejected'
     }
     const previous = this.candidate

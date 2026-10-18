@@ -203,7 +203,7 @@ export class LocalSpotifyService {
   private requests = new Map<number, { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
   private requestId = 0
   private restartTimer: NodeJS.Timeout | null = null
-  private transportStatusGuard: { trackIdentity: string; statusName: 'PLAYING' | 'PAUSED'; until: number } | null = null
+  private transportStatusGuard: { trackIdentity: string; statusName: 'PLAYING' | 'PAUSED'; until: number; projection: LocalState } | null = null
   private closed = false
   private coverTrackId = ''
   private coverUrl = ''
@@ -264,18 +264,20 @@ export class LocalSpotifyService {
   async control(command: Command) {
     if (!this.worker || !this.state?.title) throw new Error('尚未检测到 Spotify 桌面端媒体会话')
     const projected = command === 'play' || command === 'pause' ? projectTransportState(this.state, command) : null
-    if (projected) this.transportStatusGuard = { trackIdentity: localTrackIdentity(projected), statusName: projected.statusName as 'PLAYING' | 'PAUSED', until: Date.now() + 800 }
+    const guard = projected ? { trackIdentity: localTrackIdentity(projected), statusName: projected.statusName as 'PLAYING' | 'PAUSED', until: projected.sampledAtMs + 800, projection: projected } : null
+    if (guard) this.transportStatusGuard = guard
     try { await this.request({ type: 'control', command }) }
-    catch (error) { if (projected) this.transportStatusGuard = null; throw error }
-    if (projected && this.state && localTrackIdentity(projected) === localTrackIdentity(this.state)) {
-      // stateChanged may arrive before the command response with the old raw
-      // SMTC position. Keep the position projected at click time so pausing
-      // cannot visibly rewind the lyrics, then let later accurate samples win.
+    catch (error) { if (guard && this.transportStatusGuard === guard) this.transportStatusGuard = null; throw error }
+    if (guard && this.transportStatusGuard === guard && this.state && guard.trackIdentity === localTrackIdentity(this.state)) {
+      // A native confirmation clears this guard and owns the clock, including
+      // backward pause corrections. Otherwise project the command-time anchor
+      // to the response time before assigning that timestamp to its position.
+      const acknowledged = projectTransportState(guard.projection, guard.statusName === 'PLAYING' ? 'play' : 'pause')
       this.state = {
         ...this.state,
-        positionMs: command === 'pause' ? Math.max(projected.positionMs, this.state.positionMs) : this.state.positionMs,
-        statusName: projected.statusName,
-        sampledAtMs: Date.now()
+        positionMs: acknowledged.positionMs,
+        statusName: acknowledged.statusName,
+        sampledAtMs: acknowledged.sampledAtMs
       }
       this.listener?.(this.current())
     }
@@ -541,7 +543,14 @@ export class LocalSpotifyService {
       const guard = this.transportStatusGuard
       if (incoming && guard) {
         if (localTrackIdentity(incoming) !== guard.trackIdentity || Date.now() >= guard.until) this.transportStatusGuard = null
-        else if (incoming.statusName !== guard.statusName) incoming = { ...incoming, statusName: guard.statusName }
+        else if (incoming.sampledAtMs >= guard.projection.sampledAtMs && incoming.statusName === guard.statusName) {
+          this.transportStatusGuard = null
+        } else {
+          // Queued pre-command snapshots and old-status callbacks cannot
+          // confirm the command or re-anchor its clock with a stale position.
+          const projected = projectTransportState(guard.projection, guard.statusName === 'PLAYING' ? 'play' : 'pause')
+          incoming = { ...incoming, positionMs: projected.positionMs, statusName: projected.statusName, sampledAtMs: projected.sampledAtMs }
+        }
       }
       const incomingIdentity = incoming ? localTrackIdentity(incoming) : ''
       let transitionDurationAuthoritative = false

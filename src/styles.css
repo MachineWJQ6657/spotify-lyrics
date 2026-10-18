@@ -735,6 +735,16 @@ strong, h1, h2, h3, .brand, .eyebrow, .setting-label, .track-mini strong { font-
 .lyric-primary, .overlay-primary { text-wrap: balance; }
 .untimed-lyrics { mask-image: none; padding-top: 20px; }
 .untimed-lyrics .lyric-group { opacity: 1; transform: none; }
+.lyrics-calibration-bar { position: absolute; top: 10px; left: 16px; right: 16px; z-index: 9; pointer-events: none; }
+.lyrics-calibration-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: #c3dacb; }
+.lyrics-calibration-actions button, .lyric-heard-button { pointer-events: auto; border: 1px solid #424a45; border-radius: 16px; padding: 7px 12px; color: #e6eee9; background: #202622; font-size: 12px; cursor: pointer; }
+.lyrics-calibration-actions button:disabled { opacity: .5; cursor: default; }
+.lyrics-calibration-actions button:hover:not(:disabled), .lyric-heard-button:hover { border-color: #1ed760; color: #fff; }
+.lyrics-calibration-actions button:focus-visible, .lyric-heard-button:focus-visible { outline: 2px solid #1ed760; outline-offset: 3px; }
+.lyrics-calibration-bar p { max-width: 650px; margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: #18201bf2; color: #d6ddd8; font-size: 12px; line-height: 1.6; }
+.is-calibrating .lyric-group, .is-calibrating .lyric-group.past { opacity: .85; }
+.is-calibrating .lyric-group.active { opacity: 1; }
+.lyric-heard-button { align-self: flex-start; margin: 10px 0 16px; }
 
 .lyric-primary { font-weight: 600; }
 .lyric-secondary, .overlay-secondary { font-weight: 500; }

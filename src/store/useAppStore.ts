@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
-import type { AppSettings, LyricLine, LyricTrack, LyricsDocument, PlaybackSnapshot } from '../types'
+import type { AppSettings, LyricLine, LyricTrack, LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
+import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
 import { retimeLines } from '../lib/lyrics'
 
@@ -14,6 +15,9 @@ interface AppState {
   settings: AppSettings
   editorOpen: boolean
   lyricsRetryToken: number
+  sessionCalibration: SessionCalibration | null
+  calibrateHeardLine(originalTrackId: string, lineIndex: number, now?: number): void
+  clearSessionCalibration(): void
   setConnected(value: boolean): void
   setLocalConnected(value: boolean): void
   setDemoMode(value: boolean): void
@@ -118,14 +122,19 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   demoMode: !isAuxiliaryWindow,
   playback: isAuxiliaryWindow ? null : createDemoPlayback(),
   lyrics: isAuxiliaryWindow ? null : demoDocument,
-  library: {}, settings: defaults, editorOpen: false, lyricsRetryToken: 0,
+  library: {}, settings: defaults, editorOpen: false, lyricsRetryToken: 0, sessionCalibration: null,
+  calibrateHeardLine: (originalTrackId, lineIndex, now = Date.now()) => set(state => ({
+    sessionCalibration: createSessionCalibration(state.playback, state.lyrics, originalTrackId, lineIndex, now)
+  })),
+  clearSessionCalibration: () => set(state => state.sessionCalibration ? { sessionCalibration: null } : state),
   setConnected: connected => set(state => state.connected === connected ? state : { connected }),
   setLocalConnected: localConnected => set(state => state.localConnected === localConnected ? state : { localConnected }),
   setDemoMode: demoMode => set(state => state.demoMode === demoMode ? state : { demoMode }),
   setPlayback: playback => set(state => {
     if (playback && state.playback && playback.observedAtMs < state.playback.observedAtMs && playback.track?.id === state.playback.track?.id) return state
+    const sessionCalibration = continuesCalibration(state.playback, playback) ? state.sessionCalibration : null
     if (playback?.track && state.playback?.track?.id === playback.track.id) {
-      return { playback: { ...playback, track: {
+      return { sessionCalibration, playback: { ...playback, track: {
         ...playback.track,
         coverUrl: playback.track.coverUrl || state.playback.track.coverUrl,
         // A resolved local transition deliberately replaces Spotify's brief
@@ -136,18 +145,19 @@ export const useAppStore = create<AppState>()(persist((set) => ({
           : Math.max(playback.track.durationMs, state.playback.track.durationMs)
       } } }
     }
-    return { playback }
+    return { playback, sessionCalibration }
   }),
   setLyrics: lyrics => set(state => {
     const compacted = lyrics ? compactDocument(lyrics) : null
     return {
       lyrics: compacted,
+      sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, compacted),
       library: compacted && compacted.trackId !== demoDocument.trackId ? putLibraryDocument(state.library, compacted) : state.library
     }
   }),
   setTransientLyrics: lyrics => set(state => {
     const compacted = lyrics ? compactDocument(lyrics) : null
-    return state.lyrics === compacted ? state : { lyrics: compacted }
+    return state.lyrics === compacted ? state : { lyrics: compacted, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, compacted) }
   }),
   addLyricTrack: track => set(state => {
     if (!state.lyrics) return state
@@ -160,13 +170,13 @@ export const useAppStore = create<AppState>()(persist((set) => ({
       userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), track.id])],
       updatedAt: Date.now()
     }
-    return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   removeLyricTrack: trackId => set(state => {
     if (!state.lyrics) return state
     const document = { ...state.lyrics, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
       tracks: state.lyrics.tracks.filter(track => track.id !== trackId), updatedAt: Date.now() }
-    return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   updateLyricLine: (trackId, lineIndex, patch) => set(state => {
     if (!state.lyrics) return state
@@ -177,7 +187,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     })
     const document = { ...state.lyrics, tracks, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
       userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])], updatedAt: Date.now() }
-    return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   shiftLyricTrack: (trackId, deltaMs) => set(state => {
     if (!state.lyrics) return state
@@ -187,12 +197,12 @@ export const useAppStore = create<AppState>()(persist((set) => ({
       userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])],
       updatedAt: Date.now()
     }
-    return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   setLyricsOffset: offsetMs => set(state => {
     if (!state.lyrics) return state
     const document = { ...state.lyrics, offsetMs: Math.max(-30_000, Math.min(30_000, Math.round(offsetMs))), updatedAt: Date.now() }
-    return { lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    return { sessionCalibration: null, lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   deleteLibraryDocument: trackId => set(state => {
     const library = { ...state.library }

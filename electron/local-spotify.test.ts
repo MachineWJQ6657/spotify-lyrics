@@ -1,5 +1,113 @@
-import { describe, expect, it } from 'vitest'
-import { adoptQueuedTrackDuration, advanceStartupClockGate, gateSameTrackDurationChange, localTrackIdentity, projectTransportState, retainPendingLocalState, shouldResetTrackClock, stabilizeLocalState } from './local-spotify'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { adoptQueuedTrackDuration, advanceStartupClockGate, gateSameTrackDurationChange, LocalSpotifyService, localTrackIdentity, projectTransportState, retainPendingLocalState, shouldResetTrackClock, stabilizeLocalState, type LocalState } from './local-spotify'
+
+afterEach(() => { vi.useRealTimers() })
+
+// Exercise command acknowledgements and native delivery ordering without a
+// Worker, Spotify session, or any live playback mutation.
+function controlFixture(statusName = 'PLAYING') {
+  vi.useFakeTimers()
+  vi.setSystemTime(2_000)
+  const state: LocalState = { title: 'Song', artist: 'Artist', album: 'Album', albumArtBase64: '',
+    positionMs: 10_000, durationMs: 200_000, statusName, sampledAtMs: 1_000 }
+  const service = new LocalSpotifyService()
+  const internals = service as unknown as {
+    state: LocalState | null; worker: object; request: () => Promise<void>;
+    refreshTransitionProfile: () => Promise<void>;
+    handleMessage(message: { type: 'state'; state: LocalState | null }): void
+  }
+  let finish!: () => void
+  const response = new Promise<void>(resolve => { finish = resolve })
+  Object.assign(internals, { state, worker: {}, request: () => response, refreshTransitionProfile: async () => {} })
+  const receive = (patch: Partial<LocalState>) => internals.handleMessage({ type: 'state', state: { ...state, ...patch } })
+  return { service, internals, receive, finish }
+}
+
+describe('local Spotify command clock ownership', () => {
+  it('keeps elapsed playback when an already-playing command receives no native callback', async () => {
+    const { service, finish } = controlFixture()
+    expect(service.current()?.positionMs).toBe(11_000)
+    const pending = service.control('play')
+    vi.setSystemTime(2_250)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 11_250, observedAtMs: 2_250, isPlaying: true })
+  })
+
+  it('advances a resumed clock from the command-time projection through its response', async () => {
+    const { service, finish } = controlFixture('PAUSED')
+    const pending = service.control('play')
+    vi.setSystemTime(2_300)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 10_300, isPlaying: true })
+  })
+
+  it('preserves an authoritative backward pause correction received before the response', async () => {
+    const { service, receive, finish } = controlFixture()
+    const pending = service.control('pause')
+    vi.setSystemTime(2_100)
+    receive({ statusName: 'PAUSED', positionMs: 10_100, sampledAtMs: 2_100 })
+    vi.setSystemTime(2_300)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 10_100, isPlaying: false })
+  })
+
+  it('preserves elapsed time after a native play confirmation received before the response', async () => {
+    const { service, receive, finish } = controlFixture('PAUSED')
+    const pending = service.control('play')
+    vi.setSystemTime(2_100)
+    receive({ statusName: 'PLAYING', positionMs: 10_400, sampledAtMs: 2_100 })
+    vi.setSystemTime(2_400)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 10_700, isPlaying: true })
+  })
+
+  it('holds the pause projection through an old-status callback and accepts the later native pause', async () => {
+    const { service, receive, finish } = controlFixture()
+    const pending = service.control('pause')
+    vi.setSystemTime(2_050)
+    receive({ positionMs: 10_000, sampledAtMs: 2_050 })
+    expect(service.current()).toMatchObject({ positionMs: 11_000, isPlaying: false })
+    vi.setSystemTime(2_200)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 11_000, isPlaying: false })
+    vi.setSystemTime(2_300)
+    receive({ statusName: 'PAUSED', positionMs: 10_100, sampledAtMs: 2_300 })
+    expect(service.current()).toMatchObject({ positionMs: 10_100, isPlaying: false })
+  })
+
+  it('does not let a queued pre-command sample confirm or rewind an already-playing command', async () => {
+    const { service, receive, finish } = controlFixture()
+    const pending = service.control('play')
+    vi.setSystemTime(2_050)
+    receive({ positionMs: 10_200, sampledAtMs: 1_200 })
+    expect(service.current()?.positionMs).toBe(11_050)
+    vi.setSystemTime(2_200)
+    finish(); await pending
+    expect(service.current()?.positionMs).toBe(11_200)
+  })
+
+  it('does not apply the old response after playback changes track and returns', async () => {
+    const { service, receive, finish } = controlFixture()
+    const pending = service.control('pause')
+    vi.setSystemTime(2_100)
+    receive({ title: 'Other song', positionMs: 500, sampledAtMs: 2_100 })
+    vi.setSystemTime(2_200)
+    receive({ positionMs: 50_000, sampledAtMs: 2_200 })
+    vi.setSystemTime(2_300)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 50_100, isPlaying: true })
+  })
+
+  it('respects a native status change after the optimistic guard expires', async () => {
+    const { service, receive, finish } = controlFixture()
+    const pending = service.control('pause')
+    vi.setSystemTime(2_900)
+    receive({ positionMs: 11_800, sampledAtMs: 2_900 })
+    vi.setSystemTime(3_000)
+    finish(); await pending
+    expect(service.current()).toMatchObject({ positionMs: 11_900, isPlaying: true })
+  })
+})
 
 describe('local Spotify track identity', () => {
   it('stays stable when SMTC reports a different duration for the same song', () => {

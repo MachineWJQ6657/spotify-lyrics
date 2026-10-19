@@ -79,6 +79,8 @@ export interface LyricsCandidate {
 }
 
 export interface AppSettings {
+  /** Remember the one-time system-output capture opt-in across tracks and launches. */
+  automaticAudioSync?: boolean
   enabledLanguages: string[]
   romanization: boolean
   offsetMs: number

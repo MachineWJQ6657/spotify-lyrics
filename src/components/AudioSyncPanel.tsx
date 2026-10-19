@@ -15,13 +15,13 @@ export function AudioSyncPanel() {
   }
   return <section className="info-note audio-sync-panel" aria-label="声音同步实验">
     <h2>声音同步 <small>实验功能</small></h2>
-    <p>本地人声对齐：识别听到的文字，搜索整首原文，建立独立于 Spotify 进度的歌词时钟。无需整首参考音频；准确性仍在验证中，默认关闭。</p>
-    <p>读取系统输出（包括其他应用声音），不使用麦克风、不上传。人声识别临时保存 12 秒 WAV，任务结束后删除；只运行一个识别进程，4 线程、15 秒限时。异常退出可能留下临时文件。</p>
+    <p>本地人声对齐会自动识别歌声、定位歌词并校正播放速度。开启一次后记住设置，自动跟随换歌、暂停恢复和跳转，无需逐句操作。</p>
+    <p>读取系统输出（包括其他应用声音），不使用麦克风、不上传。每次分析新增 12 秒声音，较快的引擎会保留上一段作为上下文；临时 WAV 最长 30 秒，任务结束后删除。只运行一个识别进程，4 线程、15 秒限时。异常退出可能留下临时文件。</p>
     <p>{engine?.message ?? '正在检查本地识别引擎…'} {engine?.ready ? engine.modelName : ''}</p>
     <div className="audio-sync-actions">
       <button disabled={state.busy || state.running} onClick={() => void run(async () => { const value = await window.syllable.audioSync.configureEngine(); if (value) setEngine(value) })}>配置本地引擎</button>
-      <button disabled={!engine?.ready || !playback?.isPlaying || state.busy || state.running} onClick={() => void run(acousticController.startVocal)}>开始人声对齐</button>
-      <button disabled={!state.running && !state.busy} onClick={() => void run(() => acousticController.stop())}>停止</button>
+      <button disabled={!engine?.ready || state.automatic || state.busy || state.running} onClick={() => void run(acousticController.startVocal)}>开启自动声音同步</button>
+      <button disabled={!state.automatic && !state.running && !state.busy} onClick={() => void run(() => acousticController.stop())}>关闭声音同步</button>
     </div>
     <input ref={input} type="file" accept="audio/*,.flac,.wav,.mp3,.m4a,.ogg" hidden onChange={event => {
       const file = event.target.files?.[0]
@@ -35,7 +35,7 @@ export function AudioSyncPanel() {
     {state.referenceName && <p>当前参照：{state.referenceName}</p>}
     <p role="status">{error || state.message}</p>
     {state.lastResult && (state.busy || !state.running) && <p className="audio-sync-last-result">上次分析（{(state.lastResult.elapsedMs / 1000).toFixed(1)} 秒）：{state.lastResult.message} 此为历史结果，不表示当前校准仍有效。</p>}
-    {state.score != null && <p>相似度 {state.score.toFixed(3)} · 估计速度 {state.rate?.toFixed(3)}×（实验判据，不代表准确率）</p>}
-    <p>连续两段独立录音、至少四行完整原文吻合才接管人声同步；计算耗时不计入歌词偏移。重复副歌、伴奏、强混音、缺失或错误原文可能无法锁定，失败或过期回退媒体时钟。暂停、跳转、切歌会停止捕获。</p>
+    {state.score != null && <p>相似度 {state.score.toFixed(3)}{state.rate != null && <> · 估计速度 {state.rate.toFixed(3)}×</>}（实验判据，不代表准确率）</p>}
+    <p>自动累计至少三段独立声音、跨越至少 20 秒的可靠行首，确认位置和速度后接管同步。重复副歌、伴奏或错误原文可能暂时无法定位，期间会继续尝试并显示媒体进度。暂停会释放声音采集，恢复播放后自动重新定位。</p>
   </section>
 }

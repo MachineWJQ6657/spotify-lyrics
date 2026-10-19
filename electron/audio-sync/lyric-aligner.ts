@@ -1,6 +1,11 @@
 import type { LyricLine } from '../../src/types'
 
-export interface HeardToken { text: string; startMs: number; endMs: number; probability: number }
+export interface HeardToken {
+  text: string; startMs: number; endMs: number; probability: number
+  /** DTW localizes tokens approximately. Its next point only bounds the end. */
+  timing?: 'dtw'
+  endIsUpperBound?: true
+}
 export interface LyricMatch {
   accepted: boolean
   reason: 'matched' | 'insufficient-words' | 'ambiguous' | 'inconsistent-timing'
@@ -18,23 +23,46 @@ const reject = (reason: LyricMatch['reason']): LyricMatch => ({ accepted: false,
 /** Whisper token timestamps are estimates, not ground truth. Never spread a
  * segment uniformly into words, and never prompt ASR with the expected lyrics.
  * Bad/segment-only timing must abstain instead of fabricating an audio anchor. */
-export function parseWhisperTokens(value: unknown, durationMs: number): HeardToken[] {
-  const document = value as { transcription?: Array<{ tokens?: Array<{ text?: string; p?: number; offsets?: { from?: number; to?: number } }> }> }
-  if (!Array.isArray(document?.transcription) || document.transcription.length > 200) return []
+export function parseWhisperTokens(value: unknown, durationMs: number, options: { timing?: 'offsets' | 'dtw' } = {}): HeardToken[] {
+  const document = value as { transcription?: Array<{ tokens?: Array<{ text?: string; p?: number; t_dtw?: number; offsets?: { from?: number; to?: number } }> }> }
+  if (!Number.isFinite(durationMs) || durationMs <= 0 || !Array.isArray(document?.transcription) || document.transcription.length > 200) return []
   const result: HeardToken[] = []
-  let last = -1
+  let last = -1, count = 0
   for (const segment of document.transcription) {
     if (!Array.isArray(segment.tokens)) continue
     for (const token of segment.tokens) {
       if (typeof token?.text !== 'string' || token.text.startsWith('[_') || !normalize(token.text)) continue
+      if (++count > 600) return []
+      if (options.timing === 'dtw') {
+        // whisper.cpp serializes t_dtw in 10 ms ticks, unlike offsets in ms.
+        // These attention-derived points are approximate token localizations;
+        // ordinary offsets can distribute text uniformly over long silence.
+        const ticks = token.t_dtw, probability = token.p
+        if (!Number.isInteger(ticks) || ticks! < 0 || !Number.isFinite(probability) || probability! < 0 || probability! > 1) return []
+        const startMs = ticks! * 10
+        if (startMs < last || startMs >= durationMs) return []
+        const previous = result.at(-1)
+        if (previous && startMs === previous.startMs) {
+          // Subword tokens can share an audio frame. Keep their characters and
+          // weakest confidence together; never invent distinct onset times.
+          previous.text += token.text
+          previous.probability = Math.min(previous.probability, probability!)
+        } else {
+          if (previous) previous.endMs = startMs
+          result.push({ text: token.text, startMs, endMs: durationMs, probability: probability!, timing: 'dtw', endIsUpperBound: true })
+        }
+        last = startMs
+        continue
+      }
       const startMs = token.offsets?.from, endMs = token.offsets?.to, probability = token.p
       if (![startMs, endMs, probability].every(Number.isFinite) || startMs! < last || startMs! < 0
         || endMs! <= startMs! || endMs! > durationMs + 100 || probability! < 0 || probability! > 1) return []
       result.push({ text: token.text, startMs: startMs!, endMs: endMs!, probability: probability! })
       last = startMs!
-      if (result.length > 600) return []
     }
   }
+  // A constant/near-constant path contains no independent timing evidence.
+  if (options.timing === 'dtw' && (result.length < 2 || result.at(-1)!.startMs - result[0].startMs < 100)) return []
   return result
 }
 
@@ -61,6 +89,25 @@ function locate(needle: string, haystack: string) {
 
 interface Point { index: number; heardMs: number; sourceMs: number; weight: number; score: number; start: number; end: number }
 
+function hasCompleteTiming(
+  matched: Array<{ token: HeardToken; offset: number }>, expected: string, heardText: string, durationMs: number,
+): boolean {
+  const first = matched[0].token, last = matched.at(-1)!.token
+  if (first.startMs < 150) return false
+  if (!matched.some(item => item.token.timing === 'dtw')) {
+    return last.endMs <= durationMs - 150 && first.endMs - first.startMs <= 1200
+  }
+  // A DTW next-point bound includes pauses and may equal the recording end.
+  // It is not a measured word duration. Judge actual token localizations and
+  // complete text instead, retaining extra room at the unobserved audio edge.
+  if (matched.some(item => item.token.timing !== 'dtw' || !item.token.endIsUpperBound)
+    || last.startMs > durationMs - 350
+    || heardText.slice(-2) !== expected.slice(-2)
+    || matched.at(-1)!.offset !== normalize(last.text).length - 1) return false
+  const distinct = new Set(matched.map(item => item.token.startMs))
+  return distinct.size >= 3 && last.startMs - first.startMs >= 500
+}
+
 /** Search the WHOLE original lyric, never a window around Spotify's position.
  * Two or more complete lines must agree in text AND timing. Equal-strength
  * repeated choruses are explicitly ambiguous, regardless of Spotify's clock. */
@@ -79,11 +126,12 @@ export function alignHeardLyrics(tokens: HeardToken[], lines: LyricLine[], durat
     const line = lines[index], text = normalize(line.text)
     if (!Number.isFinite(line.startMs) || line.startMs < 0 || line.startMs > 600000 || text.length < 8 || text.length > 160) continue
     const hit = locate(text, heard), first = characters[hit.start]?.token, last = characters[hit.end - 1]?.token
-    // A clipped first word or a long token cannot establish a reliable onset.
+    // A clipped first word cannot establish a reliable onset. DTW bounds and
+    // measured token durations require different completeness checks.
     if (hit.score < .88 || !first || !last || characters[hit.start].offset !== 0
-      || heard.slice(hit.start, hit.start + 2) !== text.slice(0, 2)
-      || first.startMs < 150 || last.endMs > durationMs - 150 || first.endMs - first.startMs > 1200) continue
+      || heard.slice(hit.start, hit.start + 2) !== text.slice(0, 2)) continue
     const matched = characters.slice(hit.start, hit.end)
+    if (!hasCompleteTiming(matched, text, heard.slice(hit.start, hit.end), durationMs)) continue
     const confidence = matched.reduce((sum, item) => sum + item.token.probability, 0) / matched.length
     if (confidence < .65 || first.probability < .5) continue
     points.push({ index, heardMs: first.startMs, sourceMs: line.startMs, weight: text.length,

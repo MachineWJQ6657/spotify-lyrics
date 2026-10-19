@@ -1,6 +1,6 @@
 // Explicit, bounded, LOCAL-ONLY ASR evaluation; never imported by the app.
 // node scripts/evaluate-local-asr.mjs --cli=path --model=path input.wav ...
-// Optional --language=ja --timeout=90000 --seconds=20 --beam=5 --flash=off.
+// Optional --language=ja --timeout=90000 --seconds=20 --beam=5 --flash=off --dtw=large.v3.turbo.
 // No lyric prompt is used. GPU availability does not establish accuracy.
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -12,11 +12,13 @@ const cli = option('cli'), model = option('model'), language = option('language'
 const timeoutMs = Number(option('timeout', '90000')), seconds = Number(option('seconds', '20'))
 const beam = Number(option('beam', '1'))
 const flash = option('flash', 'default')
+const dtw = option('dtw', '')
 const files = args.filter(value => !value.startsWith('--'))
 if (!cli || !model || !files.length) throw new Error('Provide --cli, --model, and local audio input(s)')
 if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000 || !Number.isFinite(seconds) || seconds < 5 || seconds > 30) throw new Error('Invalid resource limits')
 if (!Number.isInteger(beam) || beam < 1 || beam > 5) throw new Error('Beam must be between 1 and 5')
 if (!['default', 'off', 'on'].includes(flash)) throw new Error('Invalid flash attention choice')
+if (dtw && !['tiny', 'tiny.en', 'base', 'base.en', 'small', 'small.en', 'medium', 'medium.en', 'large.v1', 'large.v2', 'large.v3', 'large.v3.turbo'].includes(dtw)) throw new Error('Invalid DTW model preset')
 const root = path.resolve('.qa-asr')
 mkdirSync(root, { recursive: true })
 const runDirectory = mkdtempSync(path.join(root, 'run-'))
@@ -42,7 +44,7 @@ for (let index = 0; index < files.length; index++) {
   if (conversion.code !== 0) throw new Error(`Audio conversion failed: ${conversion.failure || conversion.stderr}`)
   const result = await run(path.resolve(cli), ['-m', path.resolve(model), '-f', converted, '-l', language,
     '-t', '4', '-p', '1', '-bs', String(beam), '-bo', String(beam), '-nf',
-    ...(flash === 'off' ? ['-nfa'] : flash === 'on' ? ['-fa'] : []), '-ojf', '-of', output], timeoutMs)
+    ...(flash === 'off' ? ['-nfa'] : flash === 'on' ? ['-fa'] : []), ...(dtw ? ['-dtw', dtw] : []), '-ojf', '-of', output], timeoutMs)
   writeFileSync(`${output}.stderr.log`, result.stderr)
   let transcript, parseError
   if (result.code === 0) {
@@ -51,7 +53,7 @@ for (let index = 0; index < files.length; index++) {
   const segments = transcript?.transcription ?? []
   const text = segments.map(segment => segment.text ?? '').join(' ')
   const cleaned = text.replace(/\([^)]*\)|\[[^\]]*\]|（[^）]*）|♪|♫/gu, '').replace(/\s+/gu, '')
-  const row = { index, model: path.basename(model), language, beam, flash, code: result.code, timedOut: result.timedOut,
+  const row = { index, model: path.basename(model), language, beam, flash, dtw, code: result.code, timedOut: result.timedOut,
     failure: result.failure || parseError, elapsedMs: result.elapsedMs, segmentCount: segments.length,
     lexicalCharacters: [...cleaned].length, onlyNonSpeechLabels: Boolean(text.trim()) && !cleaned,
     transcriptFile: `${output}.json`, logFile: `${output}.stderr.log` }

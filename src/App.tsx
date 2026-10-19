@@ -22,15 +22,10 @@ export function App() {
   usePlaybackConnection()
   useWindowSync()
   useEffect(() => acousticController.connect(), [])
-  const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, sessionCalibration, calibrateHeardLine, clearSessionCalibration } = useAppStore()
+  const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, sessionCalibration } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
   const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
-  const markHeardLine = useCallback((trackId: string, lineIndex: number) => {
-    // Capture the user's onset before any async teardown. Never seek Spotify.
-    calibrateHeardLine(trackId, lineIndex, Date.now())
-    void acousticController.stop('已采用本次听感校准，自动声音分析已停止。')
-  }, [calibrateHeardLine])
   const [view, setView] = useState<AppView>('now')
   const [dropMessage, setDropMessage] = useState('')
   const openEditor = useCallback(() => setEditorOpen(true), [setEditorOpen])
@@ -101,9 +96,7 @@ export function App() {
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />
           <div className="card-watermark"><Sparkles size={14} /> {manual ? '本次听感校准' : playback?.isPlaying && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs ? 'AUDIO ALIGNMENT · EXPERIMENTAL' : 'SPOTIFY TIMELINE'}</div>
-        <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics}
-          onHeardLine={markHeardLine} onClearCalibration={clearSessionCalibration}
-          calibrationLabel={manual ? `本次${manual.offsetMs >= 0 ? '延后' : '提前'} ${(Math.abs(manual.offsetMs) / 1000).toFixed(2)} 秒` : undefined} />
+        <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics} />
         </div>
         </>}
       </main>

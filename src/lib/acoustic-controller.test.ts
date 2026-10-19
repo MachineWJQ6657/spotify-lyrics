@@ -1,20 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = vi.hoisted(() => ({ playback: null as any, lyrics: null as any, listeners: new Set<(next: any, prior: any) => void>() }))
+const store = vi.hoisted(() => ({ playback: null as any, lyrics: null as any, settings: { automaticAudioSync: false }, listeners: new Set<(next: any, prior: any) => void>() }))
 vi.mock('../store/useAppStore', () => ({ useAppStore: {
-  getState: () => ({ playback: store.playback, lyrics: store.lyrics }),
+  getState: () => ({ playback: store.playback, lyrics: store.lyrics, settings: store.settings,
+    patchSettings: (patch: any) => {
+      const prior = { playback: store.playback, lyrics: store.lyrics, settings: store.settings }
+      store.settings = { ...store.settings, ...patch }
+      for (const listener of store.listeners) listener({ ...prior, settings: store.settings }, prior)
+    } }),
   subscribe: (listener: any) => { store.listeners.add(listener); return () => store.listeners.delete(listener) },
 } }))
 function publish(playback: any) {
-  const prior = { playback: store.playback }; store.playback = playback
-  for (const listener of store.listeners) listener({ playback }, prior)
+  const prior = { playback: store.playback, lyrics: store.lyrics, settings: store.settings }; store.playback = playback
+  for (const listener of store.listeners) listener({ ...prior, playback }, prior)
 }
+function publishLyrics(lyrics: any) {
+  const prior = { playback: store.playback, lyrics: store.lyrics, settings: store.settings }; store.lyrics = lyrics
+  for (const listener of store.listeners) listener({ ...prior, lyrics }, prior)
+}
+const original = (trackId = 'song') => ({ trackId, tracks: [{ id: 'original', kind: 'original', language: 'ja', lines:
+  Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] })
 const file = { name: 'reference.wav', size: 100, arrayBuffer: async () => new ArrayBuffer(8) } as File
 let cleanup: (() => void) | undefined
 
 beforeEach(() => {
   vi.resetModules(); store.listeners.clear()
   store.lyrics = null
+  store.settings = { automaticAudioSync: false }
   store.playback = { track: { id: 'song', name: 'Song' }, isPlaying: true, positionMs: 0, observedAtMs: 1000 }
   vi.stubGlobal('Worker', class {
     onmessage: any
@@ -34,9 +46,110 @@ beforeEach(() => {
     prepare: vi.fn(async () => true), clear: vi.fn(async () => true), observation: vi.fn(),
   } } })
 })
-afterEach(async () => { cleanup?.(); cleanup = undefined; await Promise.resolve(); vi.unstubAllGlobals() })
+afterEach(async () => { cleanup?.(); cleanup = undefined; await Promise.resolve(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('audio capture lifecycle', () => {
+  async function automaticHarness() {
+    vi.useFakeTimers()
+    window.setTimeout = setTimeout as unknown as typeof window.setTimeout
+    window.clearTimeout = clearTimeout
+    store.settings = { automaticAudioSync: true }; store.lyrics = original()
+    const captures: any[] = []
+    const getDisplayMedia = vi.fn(async () => {
+      const track = { stop: vi.fn(), onended: null }
+      captures.push(track)
+      return { getTracks: () => [track], getAudioTracks: () => [track], getVideoTracks: () => [] }
+    })
+    vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia } })
+    Object.assign(window.syllable.audioSync, { engineStatus: vi.fn(async () => ({ ready: true })), vocal: vi.fn() })
+    const { acousticController: controller } = await import('./acoustic-controller')
+    cleanup = controller.connect()
+    await vi.advanceTimersByTimeAsync(401)
+    return { controller, captures, getDisplayMedia }
+  }
+  it('restores automatic intent and reacquires after pause, resume and seek with no per-song clicks', async () => {
+    const { controller, captures, getDisplayMedia } = await automaticHarness()
+    expect(controller.snapshot()).toMatchObject({ automatic: true, running: true })
+    publish({ ...store.playback, isPlaying: false })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(captures[0].stop).toHaveBeenCalledOnce()
+    expect(controller.snapshot()).toMatchObject({ automatic: true, running: false, busy: false })
+    expect(getDisplayMedia).toHaveBeenCalledOnce()
+    publish({ ...store.playback, isPlaying: true })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    publish({ ...store.playback, positionMs: 70000, observedAtMs: 2000 })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(captures[1].stop).toHaveBeenCalledOnce()
+    expect(getDisplayMedia).toHaveBeenCalledTimes(3)
+    expect(controller.snapshot().running).toBe(true)
+  })
+  it('waits for new-song lyrics and ignores translation-only refreshes', async () => {
+    const { controller, getDisplayMedia } = await automaticHarness()
+    publish({ ...store.playback, track: { id: 'other' } })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledOnce()
+    expect(controller.snapshot().running).toBe(false)
+    publishLyrics(original('other'))
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    publishLyrics({ ...store.lyrics, tracks: [...store.lyrics.tracks, { kind: 'translation', lines: [] }] })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    publishLyrics({ ...store.lyrics, tracks: [{ ...store.lyrics.tracks[0], lines: store.lyrics.tracks[0].lines.map((line: any) => ({ ...line, startMs: line.startMs + 1000 })) }] })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(3)
+  })
+  it('rebuilds a suspended context instead of waiting forever for blocks from it', async () => {
+    const contexts: any[] = []
+    vi.stubGlobal('AudioContext', class {
+      state = 'running'; sampleRate = 16000; currentTime = 12; destination = {}; onstatechange: any
+      audioWorklet = { addModule: async () => {} }
+      close = vi.fn(async () => { this.state = 'closed'; this.onstatechange?.() })
+      async resume() {}
+      createMediaStreamSource() { return { connect() {} } }
+      constructor() { contexts.push(this) }
+    })
+    const { controller, captures, getDisplayMedia } = await automaticHarness()
+    contexts[0].state = 'suspended'; contexts[0].onstatechange()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(captures[0].stop).toHaveBeenCalledOnce()
+    expect(contexts[0].close).toHaveBeenCalledOnce()
+    expect(controller.snapshot()).toMatchObject({ automatic: true, running: false, busy: false })
+    publish(store.playback); await vi.advanceTimersByTimeAsync(4998)
+    expect(getDisplayMedia).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    expect(controller.snapshot().running).toBe(true)
+    contexts[0].onstatechange()
+    expect(controller.snapshot().running).toBe(true)
+  })
+  it('manual stop disables saved intent and does not resurrect it on playback updates', async () => {
+    const { controller, getDisplayMedia } = await automaticHarness()
+    const clear = vi.mocked(window.syllable.audioSync.clear); clear.mockClear()
+    await controller.stop()
+    expect(clear).toHaveBeenCalledOnce()
+    expect(store.settings.automaticAudioSync).toBe(false)
+    publish({ ...store.playback, isPlaying: false }); publish({ ...store.playback, isPlaying: true })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(getDisplayMedia).toHaveBeenCalledOnce()
+    expect(controller.snapshot()).toMatchObject({ automatic: false, running: false })
+  })
+  it('backs off capture errors and does not reopen a denied capture on every playback update', async () => {
+    const { controller, getDisplayMedia } = await automaticHarness()
+    getDisplayMedia.mockRejectedValueOnce(new Error('output device busy'))
+    publish({ ...store.playback, positionMs: 70000, observedAtMs: 2000 })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    for (let i = 0; i < 5; i++) { publish(store.playback); await vi.advanceTimersByTimeAsync(1000) }
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+    getDisplayMedia.mockRejectedValueOnce(Object.assign(new Error('capture denied'), { name: 'NotAllowedError' }))
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(3)
+    publish(store.playback); await vi.advanceTimersByTimeAsync(60_000)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(3)
+    expect(controller.snapshot().running).toBe(false)
+  })
   it('keeps a text-free prior analysis summary visible during inference and stop, but clears it on track change', async () => {
     store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:
       Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] }

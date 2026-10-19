@@ -16,4 +16,5 @@ export interface VocalResult {
   elapsedMs: number
   score: number
   rate: number
+  calibration?: { state: 'updated' | 'holding'; positionMs: number; expiresAtMs: number }
 }

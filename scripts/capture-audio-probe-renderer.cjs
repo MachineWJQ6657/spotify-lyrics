@@ -42,15 +42,21 @@ async function verifyBundledWorker(pcm, sampleRate) {
     await context.audioWorklet.addModule(new URL('../public/audio-sync-worklet.js', document.baseURI).href)
     const source = context.createMediaStreamSource(stream)
     node = new AudioWorkletNode(context, 'syllable-audio-capture')
-    const startedAtMs = Date.now()
+    const attachedAtMs = Date.now()
     const block = await new Promise(resolve => {
-      node.port.onmessage = event => { node.port.onmessage = null; resolve(event.data) }
+      node.port.onmessage = event => {
+        if (event.data?.type === 'gap' || !(event.data?.pcm instanceof Float32Array)) return
+        node.port.onmessage = null; resolve(event.data)
+      }
       source.connect(node); node.connect(context.destination)
     })
     const endedAtMs = Date.now() - Math.max(0, context.currentTime - block.endContextTime) * 1000
+    if (!Number.isFinite(endedAtMs) || !Number.isFinite(block.startContextTime)
+      || Math.abs((block.endContextTime - block.startContextTime) * context.sampleRate - block.pcm.length) > 2) throw new Error('Discontinuous audio block')
+    const startedAtMs = endedAtMs - block.pcm.length / context.sampleRate * 1000
     node.disconnect(); stream.getTracks().forEach(track => track.stop())
     const acousticSmoke = await verifyBundledWorker(block.pcm, context.sampleRate)
-    ipcRenderer.send('probe-result', { pcm: block.pcm.buffer, sampleRate: context.sampleRate, startedAtMs, endedAtMs, acousticSmoke })
+    ipcRenderer.send('probe-result', { pcm: block.pcm.buffer, sampleRate: context.sampleRate, attachedAtMs, startedAtMs, endedAtMs, acousticSmoke })
   } catch (error) { ipcRenderer.send('probe-result', { error: String(error) }) }
   finally { node?.disconnect(); stream?.getTracks().forEach(track => track.stop()); await context?.close() }
 })()

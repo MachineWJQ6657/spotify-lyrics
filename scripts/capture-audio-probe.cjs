@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
       fs.writeFileSync(`${base}.f32`, Buffer.from(result.pcm))
       const values = new Float32Array(result.pcm)
       const rms = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length)
-      const metadata = { startedAtMs: result.startedAtMs, endedAtMs: result.endedAtMs, sampleRate: result.sampleRate,
+      const metadata = { attachedAtMs: result.attachedAtMs, startedAtMs: result.startedAtMs, endedAtMs: result.endedAtMs, sampleRate: result.sampleRate,
         durationMs: values.length / result.sampleRate * 1000, rms, allFinite: values.every(Number.isFinite),
         acousticSmoke: result.acousticSmoke, audioPath: `${base}.f32` }
       fs.writeFileSync(`${base}.json`, JSON.stringify(metadata, null, 2))

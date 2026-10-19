@@ -1,13 +1,15 @@
 import { useAppStore } from '../store/useAppStore'
 import type { AcousticMatch } from '../../electron/audio-sync/fingerprint'
+import { originalTimingKey } from './session-calibration'
 
 export interface AcousticUiState {
   mode: 'reference' | 'vocal'; referenceName: string; trackId: string; running: boolean; busy: boolean
+  automatic: boolean
   message: string; score?: number; rate?: number
   // Summary only; never retain audio, transcript or lyric text in UI history.
   lastResult?: { message: string; elapsedMs: number; decision: 'locked' | 'confirming' | 'rejected' }
 }
-let state: AcousticUiState = { mode: 'vocal', referenceName: '', trackId: '', running: false, busy: false, message: '未启用。可用本地人声识别匹配原文，无需整首参考音频。' }
+let state: AcousticUiState = { mode: 'vocal', automatic: false, referenceName: '', trackId: '', running: false, busy: false, message: '未启用。开启后自动跟随歌曲校准声音。' }
 const listeners = new Set<() => void>()
 let worker: Worker | null = null
 let sequence = 0
@@ -17,6 +19,9 @@ let stream: MediaStream | null = null
 let context: AudioContext | null = null
 let processor: AudioWorkletNode | null = null
 let unsubscribe: (() => void) | null = null
+let automaticTimer: number | null = null
+let retryNotBefore = 0
+let automaticBlocked = false
 let requestPending: { id: number; resolve(value: unknown): void; reject(error: Error): void; timer: number } | null = null
 const update = (patch: Partial<AcousticUiState>) => { state = { ...state, ...patch }; listeners.forEach(listener => listener()) }
 
@@ -46,7 +51,35 @@ function destroyWorker() {
   if (requestPending) { window.clearTimeout(requestPending.timer); requestPending.reject(new Error('音频分析已取消')); requestPending = null }
 }
 
-async function stop(message = '已停止音频校准，恢复媒体时间轴。') {
+function cancelAutomaticTimer() {
+  if (automaticTimer !== null) window.clearTimeout(automaticTimer)
+  automaticTimer = null
+}
+
+function scheduleAutomatic(delay = 400) {
+  if (!state.automatic || automaticBlocked || automaticTimer !== null || capturing || state.busy) return
+  automaticTimer = window.setTimeout(() => {
+    automaticTimer = null
+    void reconcileAutomatic()
+  }, Math.max(delay, retryNotBefore - Date.now()))
+}
+
+async function reconcileAutomatic() {
+  if (!state.automatic || automaticBlocked || capturing || state.busy) return
+  const store = useAppStore.getState()
+  if (!store.playback?.isPlaying || !store.playback.track || store.demoMode) {
+    update({ message: '自动声音同步已开启，等待 Spotify 播放。' }); return
+  }
+  const document = store.lyrics
+  const original = document?.tracks.find(track => track.kind === 'original')
+  if (document?.trackId !== store.playback.track.id || document.untimedOriginal || !original || original.lines.length < 4) {
+    update({ message: '自动声音同步已开启，等待当前歌曲的原文时间轴。' }); return
+  }
+  await start('vocal')
+}
+
+async function stopCapture(message = '已停止音频校准，恢复媒体时间轴。') {
+  cancelAutomaticTimer()
   const token = ++generation
   capturing = false
   processor?.disconnect(); processor = null
@@ -57,6 +90,25 @@ async function stop(message = '已停止音频校准，恢复媒体时间轴。'
   update({ running: false, busy: true, message })
   await Promise.all([old?.close().catch(() => {}), clear])
   if (token === generation) update({ running: false, busy: false, message, score: undefined, rate: undefined })
+}
+
+async function stop(message?: string) {
+  update({ automatic: false })
+  useAppStore.getState().patchSettings?.({ automaticAudioSync: false })
+  await stopCapture(message)
+}
+
+async function enableAutomatic() {
+  automaticBlocked = false; retryNotBefore = 0
+  update({ automatic: true })
+  useAppStore.getState().patchSettings?.({ automaticAudioSync: true })
+  cancelAutomaticTimer()
+  await reconcileAutomatic()
+}
+
+async function recoverCapture(message: string, delay = 400) {
+  await stopCapture(message)
+  scheduleAutomatic(delay)
 }
 
 async function loadReference(file: File) {
@@ -107,7 +159,7 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
     stream = captured
     captured.getVideoTracks().forEach(track => track.stop())
     if (!captured.getAudioTracks().length) throw new Error('系统没有返回输出音频')
-    captured.getAudioTracks()[0].onended = () => { if (token === generation) void stop('音频捕获已结束。') }
+    captured.getAudioTracks()[0].onended = () => { if (token === generation) void recoverCapture('声音连接已断开，正在自动重新连接…', 2000) }
     const audio = new AudioContext({ sampleRate: mode === 'vocal' ? 16000 : 8000 })
     context = audio
     await audio.audioWorklet.addModule(new URL('audio-sync-worklet.js', document.baseURI).href)
@@ -133,12 +185,20 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
         processor?.port.postMessage({ type: 'reset' })
         update({ busy: false })
       } catch (error) {
-        if (token === generation) await stop(`声音采集恢复失败：${error instanceof Error ? error.message : String(error)}`)
+        if (token === generation) { retryNotBefore = Date.now() + 30_000; await recoverCapture(`声音采集恢复失败，将稍后自动重试：${error instanceof Error ? error.message : String(error)}`) }
       } finally { resetting = false }
     }
     captured.getAudioTracks()[0].onmute = () => { void resetCapture() }
     captured.getAudioTracks()[0].onunmute = () => { void resetCapture() }
-    audio.onstatechange = () => { if (token === generation) void resetCapture() }
+    audio.onstatechange = () => {
+      if (token !== generation) return
+      if (audio.state === 'running') { void resetCapture(); return }
+      // A suspended/closed context produces no more blocks. Resetting only the
+      // backend leaves capturing=true forever and prevents automatic recovery.
+      // Rebuild the stream/context, with backoff to avoid a device-error loop.
+      retryNotBefore = Date.now() + 5000
+      void recoverCapture('声音设备已挂起，正在自动重新连接；旧校准已撤销。', 5000)
+    }
     processor.port.onmessage = async event => {
       if (token !== generation) return
       // Handle gaps even while inference is busy; its eventual result is stale.
@@ -167,15 +227,20 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
             language: original!.language === 'ja' ? 'ja' : original!.language === 'en' ? 'en' : original!.language.startsWith('zh') ? 'zh' : 'auto',
             lines: original!.lines.map(line => ({ text: line.text, startMs: line.startMs })) })
           if (token !== generation || epoch !== captureEpoch) return
-          const reasons: Record<string, string> = { 'insufficient-words': '未识别到足够可靠的完整歌词', ambiguous: '重复段落无法唯一定位',
+          const reasons: Record<string, string> = { 'insufficient-words': '未识别到足够可靠的歌词行首', ambiguous: '重复段落无法唯一定位',
             'inconsistent-timing': '识别文字与歌词时间关系不一致', matched: '证据已过期或不连续', inactive: '播放或校准状态已改变',
             'lyrics-changed': '原文已更新', cancelled: '识别已取消', busy: '上一段识别尚未释放', 'invalid-input': '录音参数无效' }
-          if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input'].includes(result.reason)) { await stop(`人声对齐停止：${reasons[result.reason]}`); return }
-          const message = result.decision === 'locked'
+          if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input'].includes(result.reason)) {
+            if (result.reason === 'invalid-input') retryNotBefore = Date.now() + 30_000
+            await recoverCapture(`正在重新定位：${reasons[result.reason]}`); return
+          }
+          const message = result.calibration?.state === 'holding'
+            ? '这段声音不足以重新定位，暂时沿用最近确认的歌词时钟；到期或出现矛盾证据即撤销。'
+            : result.decision === 'locked'
             ? `已由人声接管歌词时钟（匹配 ${result.linesMatched} 行，识别耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；已补偿计算耗时）。`
-            : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，等待另一段独立人声确认。暂不校正。`
+            : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，正在累计多段声音以确认位置和速度。`
             : `暂不校正：${reasons[result.reason] ?? result.reason}。继续采样。`
-          update({ busy: false, score: result.score, rate: result.rate, message,
+          update({ busy: false, score: result.score, rate: result.calibration ? result.rate : undefined, message,
             lastResult: { message, elapsedMs: result.elapsedMs, decision: result.decision } })
           return
         }
@@ -188,41 +253,58 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
           ? '声音对齐已接管歌词；每 12 秒复核，匹配失败或校准过期则恢复媒体时钟。'
           : decision === 'confirming' ? '已找到位置，等待第二段声音确认（约 12 秒）。'
           : `暂不校正：${reasons[result.reason]}。继续采样。` })
-      } catch (error) { if (token === generation && epoch === captureEpoch) await stop(`音频校准停止：${error instanceof Error ? error.message : String(error)}`) }
+      } catch (error) { if (token === generation && epoch === captureEpoch) {
+        retryNotBefore = Date.now() + 30_000
+        await recoverCapture(`声音分析暂时失败，稍后自动重试：${error instanceof Error ? error.message : String(error)}`)
+      } }
       finally { processing = false }
     }
     update({ running: true, busy: false, message: mode === 'vocal'
-      ? '正在本地识别人声。首次锁定至少需要两段 12 秒录音加识别时间；识别不可靠就不校正。'
+      ? '正在自动识别人声，累计至少三段独立声音确认歌词位置和速度。'
       : '正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。' })
-  } catch (error) { if (token === generation) await stop(error instanceof Error ? error.message : String(error)) }
+  } catch (error) { if (token === generation) {
+    automaticBlocked = error instanceof Error && (error.name === 'NotAllowedError' || error.message.includes('配置本地'))
+    retryNotBefore = Date.now() + 30_000
+    await recoverCapture(error instanceof Error ? error.message : String(error))
+  } }
 }
 
 /** Own the session above page navigation. A pause/seek invalidates capture;
  * changing songs releases the reference so it cannot leak into another track. */
 function connect() {
   unsubscribe?.()
+  update({ automatic: useAppStore.getState().settings?.automaticAudioSync === true })
   unsubscribe = useAppStore.subscribe((next, previous) => {
+    if (next.settings?.automaticAudioSync !== previous.settings?.automaticAudioSync) {
+      const automatic = next.settings?.automaticAudioSync === true
+      if (automatic !== state.automatic) {
+        update({ automatic })
+        if (automatic) { automaticBlocked = false; retryNotBefore = 0; scheduleAutomatic() }
+        else { void stopCapture(); return }
+      }
+    }
     if (next.playback?.track?.id !== previous.playback?.track?.id) {
       if (state.trackId) {
-        void stop('歌曲已切换，校准已停止。当前歌可重新启动人声对齐，或导入新参考音频。')
+        void recoverCapture(state.automatic ? '歌曲已切换，正在自动定位新歌…' : '歌曲已切换，参考音频已清除。')
         destroyWorker(); update({ referenceName: '', trackId: '', lastResult: undefined })
       }
     } else if (capturing) {
       if (state.mode === 'vocal' && next.lyrics !== previous.lyrics) {
-        const originals = (value: typeof next.lyrics) => value?.tracks.filter(track => track.kind === 'original').map(track => [track.language, track.lines.map(line => [line.startMs, line.text])])
-        if (JSON.stringify(originals(next.lyrics)) !== JSON.stringify(originals(previous.lyrics))) { void stop('原文歌词已更新，请重新启动人声对齐。'); return }
+        if (originalTimingKey(next.lyrics) !== originalTimingKey(previous.lyrics)) { void recoverCapture('原文歌词已更新，正在自动重新定位…'); return }
       }
       const current = next.playback, prior = previous.playback
-      if (!current?.isPlaying) void stop('播放已暂停，音频校准已停止。恢复播放后可重新启动。')
+      if (!current?.isPlaying) void recoverCapture(state.automatic ? '已暂停声音采集，恢复播放后自动定位。' : '播放已暂停，音频校准已停止。')
       else if (prior && Math.abs(current.positionMs - prior.positionMs - Math.max(0, current.observedAtMs - prior.observedAtMs)) > 2000) {
-        void stop('检测到跳转或媒体时间轴突变，已丢弃跨越跳转的录音。可重新启动校准。')
+        void recoverCapture('播放位置已改变，正在自动重新定位…')
       }
     }
+    scheduleAutomatic()
   })
-  return () => { unsubscribe?.(); unsubscribe = null; void stop(); destroyWorker() }
+  scheduleAutomatic()
+  return () => { unsubscribe?.(); unsubscribe = null; update({ automatic: false }); void stopCapture(); destroyWorker() }
 }
 
 export const acousticController = {
   subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
-  snapshot: () => state, connect, loadReference, start: () => start('reference'), startVocal: () => start('vocal'), stop
+  snapshot: () => state, connect, loadReference, start: () => start('reference'), startVocal: enableAutomatic, stop
 }

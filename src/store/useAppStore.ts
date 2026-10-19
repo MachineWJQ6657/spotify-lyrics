@@ -40,6 +40,7 @@ interface AppState {
 }
 
 const defaults: AppSettings = {
+  automaticAudioSync: false,
   enabledLanguages: ['ja', 'romaji', 'zh-Hans'], romanization: true, offsetMs: 0,
   fontSize: 52, alignment: 'left', overlayVisible: false, clickThrough: false, blur: 18,
   overlayWidth: 820, overlayHeight: 220, backgroundEnabled: false, backgroundOpacity: 78,

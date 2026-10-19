@@ -89,6 +89,8 @@ const forceOverlayForQa = process.argv.includes('--syllable-force-overlay')
 const secondaryMonitorQa = process.argv.includes('--syllable-secondary-test') || process.env.SYLLABLE_SECONDARY_TEST === '1'
 const disableOverlayShapeForQa = process.argv.includes('--syllable-disable-overlay-shape')
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
+let qaVocalCaptures = 0
+let qaVocalAnalyses = 0
 const loggedToolWindowStyles = new Set<string>()
 
 function formatHexStyle(style: number | undefined) {
@@ -533,7 +535,7 @@ function createWindows() {
       qaLog(`qa watchdog forced exit: view=${qaView ?? 'main'}`)
       quitting = true
       app.exit(2)
-    }, qaView === 'overlay-click-through-physical' ? 180_000 : 20_000)
+    }, qaView === 'overlay-click-through-physical' ? 180_000 : qaView === 'audio-sync-live' ? 100_000 : 20_000)
     setTimeout(async () => {
       if (!mainWindow) return
       if (qaView === 'overlay-click-through-physical' && overlayWindow) {
@@ -576,6 +578,7 @@ function createWindows() {
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
         : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible']
+        : qaView === 'audio-sync-live' ? ['enabled', 'captures', 'analyses', 'stopped']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
         : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds'] : [])
@@ -656,6 +659,34 @@ function createWindows() {
         })()`)
         for (const name of ['panel', 'off', 'controls', 'visible']) checks.record(name, result?.[name] === true)
         qaLog(`audio sync UI: ${JSON.stringify(result)}`)
+      }
+      if (qaView === 'audio-sync-live') {
+        // Explicit diagnostic only, on an isolated test profile. Exercise the
+        // real visible controls and PCM -> IPC -> local model path. A passing
+        // liveness check does not assert a correct audible lyric lock.
+        const enabled = await mainWindow.webContents.executeJavaScript(`(async () => {
+          [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
+          await new Promise(resolve => setTimeout(resolve, 600));
+          const panel = document.querySelector('.audio-sync-panel');
+          panel?.scrollIntoView({ block: 'end' });
+          const start = [...(panel?.querySelectorAll('button') ?? [])].find(item => item.textContent === '开启自动声音同步');
+          if (!start || start.disabled) return false;
+          start.click();
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return start.disabled;
+        })()`)
+        checks.record('enabled', enabled === true)
+        await new Promise(resolve => setTimeout(resolve, 65_000))
+        checks.record('captures', qaVocalCaptures >= 3)
+        checks.record('analyses', qaVocalAnalyses >= 2)
+        const stopped = await mainWindow.webContents.executeJavaScript(`(async () => {
+          const stop = [...document.querySelectorAll('.audio-sync-panel button')].find(item => item.textContent === '关闭声音同步');
+          stop?.click();
+          await new Promise(resolve => setTimeout(resolve, 400));
+          return Boolean(stop?.disabled);
+        })()`)
+        checks.record('stopped', stopped === true)
+        qaLog(`audio sync live: ${JSON.stringify({ enabled, captures: qaVocalCaptures, analyses: qaVocalAnalyses, stopped })}`)
       }
       if (qaView === 'render-isolation') {
         const playingAtStart = Boolean(lastPlayback?.isPlaying)
@@ -903,7 +934,7 @@ function createWindows() {
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
       } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'audio-sync-live' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -1220,7 +1251,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('audio-sync:vocal', async (event, value: VocalCapture) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可识别录音')
+    if (qaView === 'audio-sync-live') qaVocalCaptures++
     const result = await vocalSync.process(value)
+    if (qaView === 'audio-sync-live' && result.elapsedMs >= 250) qaVocalAnalyses++
+    qaLog(`vocal sync: ${result.decision}; reason=${result.reason}; lines=${result.linesMatched}; rate=${result.rate}; elapsedMs=${result.elapsedMs}; capturedAtMs=${value.capturedAtMs}; mediaPositionMs=${lastPlayback?.positionMs ?? 'none'}; mediaObservedAtMs=${lastPlayback?.observedAtMs ?? 'none'}; calibration=${JSON.stringify(result.calibration ?? null)}`)
     broadcast(lastPlayback)
     return result
   })

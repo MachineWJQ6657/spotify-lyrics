@@ -7,9 +7,19 @@ import { captureQuality } from './capture-quality'
 export interface AsrConfig { executable: string; model: string }
 export interface AsrStatus { ready: boolean; modelName: string; message: string }
 
+/** whisper.cpp's attention-head presets are model-specific, not file paths. */
+export function dtwModelPreset(model: string): string | undefined {
+  const name = path.basename(model).toLowerCase()
+  const match = /^ggml-(tiny|base|small|medium|large-v1|large-v2|large-v3|large-v3-turbo)(\.en)?(?:-q[\w_]+)?\.bin$/.exec(name)
+  if (!match || (match[2] && match[1].startsWith('large'))) return undefined
+  return match[1].replaceAll('-', '.') + (match[2] ?? '')
+}
+
 /** PCM16 WAV without ffmpeg, network access or arbitrary shell arguments. */
 export function encodePcmWav(pcm: Float32Array): Buffer {
-  if (!(pcm instanceof Float32Array) || pcm.length < 96000 || pcm.length > 240000) throw new Error('录音长度必须为 6–15 秒（16 kHz）')
+  // The IPC still accepts only a fresh 6–15 s capture. Internally a fast
+  // recognizer may receive that capture plus real preceding audio context.
+  if (!(pcm instanceof Float32Array) || pcm.length < 96000 || pcm.length > 480000) throw new Error('本地识别音频长度必须为 6–30 秒（16 kHz）')
   const buffer = Buffer.alloc(44 + pcm.length * 2)
   buffer.write('RIFF'); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write('WAVEfmt ', 8)
   buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22)
@@ -41,8 +51,11 @@ export class LocalAsr {
       const saved = await readFile(this.configFile, 'utf8').then(JSON.parse).catch(() => null)
       if (await this.valid(saved)) this.config = saved
       else for (const root of this.searchRoots) {
-        const candidate = { executable: path.join(root, 'whisper-1.9.2/cpu/Release/whisper-cli.exe'), model: path.join(root, 'ggml-large-v3-turbo-q5_0.bin') }
-        if (await this.valid(candidate)) { this.config = candidate; break }
+        for (const backend of ['cuda12', 'cpu']) {
+          const candidate = { executable: path.join(root, `whisper-1.9.2/${backend}/Release/whisper-cli.exe`), model: path.join(root, 'ggml-large-v3-turbo-q5_0.bin') }
+          if (await this.valid(candidate)) { this.config = candidate; break }
+        }
+        if (this.config) break
       }
     }
     const ready = Boolean(this.config && await this.valid(this.config))
@@ -82,13 +95,17 @@ export class LocalAsr {
       await writeFile(input, wav)
       if (token !== this.generation) throw new Error('识别已取消')
       const config = this.config!
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(config.executable, ['-m', config.model, '-f', input, '-l', language,
-          '-t', '4', '-p', '1', '-bs', '5', '-bo', '5', '-nf', '-ojf', '-of', output],
+      const dtw = dtwModelPreset(config.model)
+      const deadline = Date.now() + 15000
+      const run = (executable: string) => new Promise<void>((resolve, reject) => {
+        if (deadline - Date.now() < 500 || token !== this.generation) { reject(new Error('识别预算已用尽或任务已取消')); return }
+        const child = spawn(executable, ['-m', config.model, '-f', input, '-l', language,
+          '-t', '4', '-p', '1', '-bs', '5', '-bo', '5', '-nf', '-nfa',
+          ...(dtw ? ['-dtw', dtw] : []), '-ojf', '-of', output],
         { windowsHide: true, shell: false, stdio: ['ignore', 'ignore', 'pipe'] })
         this.child = child
         let timedOut = false, stderr = ''
-        const timeout = setTimeout(() => { timedOut = true; child.kill() }, 15000)
+        const timeout = setTimeout(() => { timedOut = true; child.kill() }, Math.max(1, deadline - Date.now()))
         child.stderr?.on('data', data => { stderr = (stderr + data.toString()).slice(-2000) })
         child.on('error', error => { clearTimeout(timeout); reject(new Error(`无法启动识别引擎：${error.message}`)) })
         child.on('close', code => {
@@ -99,10 +116,21 @@ export class LocalAsr {
           else resolve()
         })
       })
+      try { await run(config.executable) }
+      catch (error) {
+        // A bundled CUDA runtime may be present on a machine without a usable
+        // device. Fall back once, within the SAME budget and only after exit.
+        const cpuExecutable = config.executable.replace(/([\\/])cuda12([\\/])Release([\\/])/i, '$1cpu$2Release$3')
+        const fallback = { ...config, executable: cpuExecutable }
+        if (token !== this.generation || deadline - Date.now() < 500 || cpuExecutable === config.executable || !await this.valid(fallback)) throw error
+        this.config = fallback
+        await run(cpuExecutable)
+      }
       if (token !== this.generation) throw new Error('识别已取消')
       const resultFile = `${output}.json`
       if ((await stat(resultFile)).size > 2_000_000) throw new Error('识别结果超出安全大小')
-      return parseWhisperTokens(JSON.parse(await readFile(resultFile, 'utf8')), pcm.length / 16)
+      return parseWhisperTokens(JSON.parse(await readFile(resultFile, 'utf8')), pcm.length / 16,
+        dtw ? { timing: 'dtw' } : undefined)
     } finally {
       // Only ever delete a directory created by this exact invocation, under
       // the dedicated temp root. Never a model, user recording or broad path.

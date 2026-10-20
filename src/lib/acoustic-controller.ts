@@ -239,7 +239,11 @@ async function start(mode: 'reference' | 'vocal' = 'reference') {
             : result.decision === 'locked'
             ? `已由人声接管歌词时钟（匹配 ${result.linesMatched} 行，识别耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；已补偿计算耗时）。`
             : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，正在累计多段声音以确认位置和速度。`
-            : `暂不校正：${reasons[result.reason] ?? result.reason}。继续采样。`
+            : `暂不校正：${result.reason === 'matched' && result.clockReason === 'inconsistent-timing'
+              ? '可靠词点与歌词源的时间间隔不一致'
+              : result.reason === 'matched' && result.clockReason === 'expired'
+                ? '声音证据已经过期，需要重新确认'
+                : reasons[result.reason] ?? result.reason}。继续采样。`
           update({ busy: false, score: result.score, rate: result.calibration ? result.rate : undefined, message,
             lastResult: { message, elapsedMs: result.elapsedMs, decision: result.decision } })
           return

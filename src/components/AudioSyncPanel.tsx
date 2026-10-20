@@ -15,9 +15,10 @@ export function AudioSyncPanel() {
   }
   return <section className="info-note audio-sync-panel" aria-label="声音同步实验">
     <h2>声音同步 <small>实验功能</small></h2>
-    <p>本地人声对齐会自动识别歌声、定位歌词并校正播放速度。开启一次后记住设置，自动跟随换歌、暂停恢复和跳转，无需逐句操作。</p>
+    <p>本地人声对齐会自动识别歌声，校对歌词位置和推进速度。开启一次后记住设置，自动跟随换歌、暂停恢复和跳转，无需逐句操作。</p>
     <p>读取系统输出（包括其他应用声音），不使用麦克风、不上传。每次分析新增 12 秒声音，较快的引擎会保留上一段作为上下文；临时 WAV 最长 30 秒，任务结束后删除。只运行一个识别进程，4 线程、15 秒限时。异常退出可能留下临时文件。</p>
     <p>{engine?.message ?? '正在检查本地识别引擎…'} {engine?.ready ? engine.modelName : ''}</p>
+    <p>日语不同写法可通过读音补充匹配，需要时短暂加载字典并及时释放；漏字、弱起首词和重复段落仍需继续收集声音。</p>
     <div className="audio-sync-actions">
       <button disabled={state.busy || state.running} onClick={() => void run(async () => { const value = await window.syllable.audioSync.configureEngine(); if (value) setEngine(value) })}>配置本地引擎</button>
       <button disabled={!engine?.ready || state.automatic || state.busy || state.running} onClick={() => void run(acousticController.startVocal)}>开启自动声音同步</button>

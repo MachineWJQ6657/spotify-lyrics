@@ -17,4 +17,7 @@ export interface VocalResult {
   score: number
   rate: number
   calibration?: { state: 'updated' | 'holding'; positionMs: number; expiresAtMs: number }
+  matching?: 'text' | 'pronunciation' | 'combined'
+  phoneticElapsedMs?: number
+  clockReason?: string
 }

@@ -18,6 +18,88 @@ function lock(clock: OnsetClock) {
 }
 
 describe('cross-capture lyric onset clock', () => {
+  it('reports baseline collection separately from a successful lock and resets its last decision', () => {
+    const clock = setup()
+    expect(clock.decisionReason).toBe('unavailable')
+    expect(clock.accept(block(112000, 0), 126000)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+    expect(clock.accept(block(136000, 1), 150000)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+    expect(clock.accept(block(160000, 2), 174000)).toBe('locked')
+    expect(clock.decisionReason).toBe('matched')
+    clock.clear(175000)
+    expect(clock.decisionReason).toBe('unavailable')
+  })
+
+  it('distinguishes inactive playback, invalid input and stale replies without inheriting an old reason', () => {
+    const clock = new OnsetClock()
+    expect(clock.accept(block(112000, 0), 112100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('inactive')
+    clock.observePlayback(playback, 100000)
+    expect(clock.accept(block(112000, 0), NaN)).toBe('rejected')
+    expect(clock.decisionReason).toBe('invalid-input')
+    expect(clock.accept(block(112000, 0), 112100)).toBe('confirming')
+    for (const value of [block(112000, 0), { ...block(124000, 1), trackId: 'other' }, block(148000, 2)]) {
+      expect(clock.accept(value, 124100)).toBe('rejected')
+      expect(clock.decisionReason).toBe('stale-input')
+    }
+    expect(clock.accept(block(124000, 1), 124100)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+    expect(clock.accept(missing(136000), 136100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('insufficient-words')
+    expect(clock.accept({ ...block(148000, 2), captureDurationMs: NaN }, 148100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('invalid-input')
+  })
+
+  it.each(['ambiguous', 'inconsistent-timing'] as const)('preserves the extractor rejection reason %s', reason => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept({ ...missing(148000), reason }, 148100)).toBe('rejected')
+    expect(clock.decisionReason).toBe(reason)
+    expect(clock.accept(missing(160000), 160100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('insufficient-words')
+  })
+
+  it('distinguishes overlapping capture, contradictory timing and malformed point data', () => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(block(142000, 3), 142100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('overlapping-capture')
+    clock.accept(block(154000, 3), 154100)
+    const contradictory = block(166000, 4); contradictory.points[0].sourceMs += 10000
+    expect(clock.accept(contradictory, 166100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('inconsistent-timing')
+    const malformed = block(178000, 5); malformed.points[0].score = NaN
+    expect(clock.accept(malformed, 178100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('invalid-input')
+  })
+
+  it('reports a source timing change when it invalidates evidence, then collects a new baseline', () => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept({ ...missing(148000), lyricTimingKey: 'lyrics-b' }, 148100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('lyrics-changed')
+    expect(clock.accept({ ...block(160000, 3), lyricTimingKey: 'lyrics-b' }, 160100)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+  })
+
+  it('reports a genuine evidence gap without treating in-budget slow inference as a gap', () => {
+    const clock = setup()
+    clock.accept(block(112000, 0), 126000)
+    expect(clock.accept(block(160000, 1), 174000)).toBe('confirming')
+    expect(clock.decisionReason).toBe('evidence-gap')
+    expect(clock.accept(block(184000, 2), 198000)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+    expect(clock.accept(block(208000, 3), 222000)).toBe('locked')
+    expect(clock.decisionReason).toBe('matched')
+  })
+
+  it('reports an expired held anchor when an empty capture reveals expiry', () => {
+    const clock = setup(); lock(clock)
+    expect(clock.accept(missing(184000), 184100)).toBe('rejected')
+    expect(clock.decisionReason).toBe('expired')
+    expect(clock.decorate(playback, 184100)?.acousticAnchor).toBeUndefined()
+    expect(clock.accept(block(196000, 3), 196100)).toBe('confirming')
+    expect(clock.decisionReason).toBe('insufficient-baseline')
+  })
+
   it.each([.9, .96, 1, 1.04, 1.1])('fits one real onset per independent block at %.2fx without inventing block endpoints', rate => {
     const clock = setup()
     for (let index = 0; index < 3; index++) {

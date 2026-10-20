@@ -4,7 +4,7 @@ import { appendFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SpotifyRateLimitError, SpotifyService } from './spotify'
 import { fetchLyrics, searchLyrics, timedLyricsStats } from './lyrics-provider'
-import { romanizeLines } from './romanizer'
+import { romanizeLines, analyzeJapaneseLines } from './romanizer'
 import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
@@ -88,6 +88,11 @@ const qaLogPath = process.argv.find(value => value.startsWith('--syllable-qa-log
 const forceOverlayForQa = process.argv.includes('--syllable-force-overlay')
 const secondaryMonitorQa = process.argv.includes('--syllable-secondary-test') || process.env.SYLLABLE_SECONDARY_TEST === '1'
 const disableOverlayShapeForQa = process.argv.includes('--syllable-disable-overlay-shape')
+// Offscreen audio-panel checks must not interrupt the user's active desktop.
+// This mode requires explicit QA capture arguments and an isolated profile.
+const headlessAudioQa = process.argv.includes('--syllable-qa-headless') && Boolean(qaCapturePath)
+  && (qaView === 'audio-sync' || qaView === 'audio-sync-live')
+  && process.argv.some(value => value.startsWith('--user-data-dir='))
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
 let qaVocalCaptures = 0
 let qaVocalAnalyses = 0
@@ -163,6 +168,7 @@ function secondaryDisplay() {
 }
 
 function revealMainWindow(preferredDisplay: 'preserve' | 'cursor' | 'overlay' = 'preserve') {
+  if (headlessAudioQa) return false
   if (!mainWindow || mainWindow.isDestroyed()) return false
   if (preferredDisplay !== 'preserve') {
     const display = secondaryMonitorQa ? secondaryDisplay() : preferredDisplay === 'overlay' && overlayWindow && !overlayWindow.isDestroyed()
@@ -267,6 +273,7 @@ function sampleTransparentHover(cursor: Electron.Point) {
 function updateControlsVisibility() {
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
+  if (headlessAudioQa) return
   if (!overlayWindow?.isVisible() || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
   if (overlayHovered || overlayControlsHovered) {
     if (overlayPointerDrag || Date.now() < overlayControlsSuppressedUntil) return
@@ -288,6 +295,7 @@ function updateControlsVisibility() {
 }
 
 async function recoverOverlayControls() {
+  if (headlessAudioQa) return false
   await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
   if (quitting) return false
   setOverlayMovable(true)
@@ -324,6 +332,7 @@ function syncOverlayControlsBounds() {
 }
 
 async function showOverlay() {
+  if (headlessAudioQa) return
   overlayShowRequested = true
   await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
   if (!overlayShowRequested || quitting) return false
@@ -496,6 +505,7 @@ function createWindows() {
   const mainWidth = testArea ? Math.min(1120, testArea.width) : 1120
   const mainHeight = testArea ? Math.min(720, testArea.height) : 720
   mainWindow = new BrowserWindow({
+    show: !headlessAudioQa,
     width: mainWidth, height: mainHeight,
     ...(testArea ? {
       x: Math.round(testArea.x + (testArea.width - mainWidth) / 2),
@@ -503,7 +513,7 @@ function createWindows() {
     } : {}),
     minWidth: 1024, minHeight: 680, frame: false,
     backgroundColor: '#000000', titleBarStyle: 'hidden', icon: appIcon(),
-    webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
+    webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: !headlessAudioQa, offscreen: headlessAudioQa }
   })
   void mainWindow.loadURL(rendererUrl())
   mainWindow.webContents.on('render-process-gone', () => { audioCaptureGrantUntil = 0; acousticClock.clear(); vocalSync.clear() })
@@ -523,6 +533,9 @@ function createWindows() {
   mainWindow.on('close', event => {
     if (quitting) return
     event.preventDefault()
+    // Hidden diagnostic windows must never create a tray entry as a side
+    // effect of closing. Leave the renderer alive for its bounded QA checks.
+    if (headlessAudioQa) { mainWindow?.hide(); return }
     // Close dismisses the client immediately, without the minimize animation
     // or a lingering taskbar button. The tray and lyrics stay available.
     // Never strand the user in the background if tray creation failed.
@@ -577,7 +590,7 @@ function createWindows() {
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
-        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible']
+        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary'] : [])]
         : qaView === 'audio-sync-live' ? ['enabled', 'captures', 'analyses', 'stopped']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
@@ -659,6 +672,21 @@ function createWindows() {
         })()`)
         for (const name of ['panel', 'off', 'controls', 'visible']) checks.record(name, result?.[name] === true)
         qaLog(`audio sync UI: ${JSON.stringify(result)}`)
+        if (headlessAudioQa) {
+          checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
+          checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
+          checks.record('tray-absent', !tray)
+          checks.record('shortcuts-absent', ['CommandOrControl+Alt+L', 'CommandOrControl+Alt+M', 'CommandOrControl+Alt+U', 'CommandOrControl+Alt+S']
+            .every(shortcut => !globalShortcut.isRegistered(shortcut)))
+          mainWindow.close()
+          checks.record('headless-close', !mainWindow.isDestroyed() && !mainWindow.isVisible()
+            && !overlayWindow?.isVisible() && !overlayControlsWindow?.isVisible() && !tray)
+          const readings = await analyzeJapaneseLines(['思い出を届ける', '想い出を届ける'])
+          const pronounce = (words: typeof readings[number]) => words.map(word => word.pronunciation ?? word.reading ?? word.surface_form).join('')
+          const dictionary = readings.length === 2 && readings[0].length > 1 && pronounce(readings[0]) === pronounce(readings[1])
+          checks.record('dictionary', dictionary)
+          qaLog(`packaged dictionary: ${dictionary}; headless=${!mainWindow.isVisible()}`)
+        }
       }
       if (qaView === 'audio-sync-live') {
         // Explicit diagnostic only, on an isolated test profile. Exercise the
@@ -933,7 +961,11 @@ function createWindows() {
         await new Promise(resolve => setTimeout(resolve, 450))
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayWindow.webContents.capturePage()).toPNG())
-      } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage()).toPNG())
+      } else await writeFile(qaCapturePath, (await mainWindow.webContents.capturePage(undefined, headlessAudioQa ? { stayHidden: true } : undefined)).toPNG())
+      if (headlessAudioQa && qaView === 'audio-sync') {
+        checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
+        checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
+      }
       if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'audio-sync-live' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
@@ -1027,6 +1059,7 @@ function toggleOverlay() {
 }
 
 function createTray() {
+  if (headlessAudioQa) return false
   if (tray && !tray.isDestroyed()) return true
   // Give Windows the multi-resolution ICO directly (16/20/24/32/... px).
   // NativeImage's SVG fallback could be empty; a fixed 16px resize also blurred
@@ -1254,7 +1287,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     if (qaView === 'audio-sync-live') qaVocalCaptures++
     const result = await vocalSync.process(value)
     if (qaView === 'audio-sync-live' && result.elapsedMs >= 250) qaVocalAnalyses++
-    qaLog(`vocal sync: ${result.decision}; reason=${result.reason}; lines=${result.linesMatched}; rate=${result.rate}; elapsedMs=${result.elapsedMs}; capturedAtMs=${value.capturedAtMs}; mediaPositionMs=${lastPlayback?.positionMs ?? 'none'}; mediaObservedAtMs=${lastPlayback?.observedAtMs ?? 'none'}; calibration=${JSON.stringify(result.calibration ?? null)}`)
+    qaLog(`vocal sync: ${result.decision}; reason=${result.reason}; clockReason=${result.clockReason ?? 'none'}; lines=${result.linesMatched}; rate=${result.rate}; elapsedMs=${result.elapsedMs}; matching=${result.matching ?? 'none'}; phoneticElapsedMs=${result.phoneticElapsedMs ?? 0}; capturedAtMs=${value.capturedAtMs}; mediaPositionMs=${lastPlayback?.positionMs ?? 'none'}; mediaObservedAtMs=${lastPlayback?.observedAtMs ?? 'none'}; calibration=${JSON.stringify(result.calibration ?? null)}`)
     broadcast(lastPlayback)
     return result
   })
@@ -1458,7 +1491,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
   // The bridge must be ready before either renderer loads; otherwise their
   // first playback, visibility, and hit-region requests can race startup.
-  createWindows(); createTray()
+  createWindows()
+  if (!headlessAudioQa) createTray()
   if (forceOverlayForQa) setTimeout(showOverlay, 1200)
   await spotify.restore()
   void import('./local-spotify').then(({ LocalSpotifyService }) => {
@@ -1480,12 +1514,14 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       broadcast(snapshot)
     }, qaLogPath ? qaLog : undefined)
   }).catch(error => console.warn('Local Spotify module failed to load:', error))
-  globalShortcut.register('CommandOrControl+Alt+L', toggleOverlay)
-  globalShortcut.register('CommandOrControl+Alt+M', () => { if (!overlayMovable) void recoverOverlayControls(); else setOverlayClickThrough(!overlayClickThrough) })
-  const unlockRegistered = globalShortcut.register('CommandOrControl+Alt+U', () => { void recoverOverlayControls() })
-  if (!unlockRegistered) console.warn('Ctrl+Alt+U unavailable; use tray menu to unlock lyrics')
-  qaLog(`unlock shortcut registered=${unlockRegistered}`)
-  globalShortcut.register('CommandOrControl+Alt+S', () => revealMainWindow('cursor'))
+  if (!headlessAudioQa) {
+    globalShortcut.register('CommandOrControl+Alt+L', toggleOverlay)
+    globalShortcut.register('CommandOrControl+Alt+M', () => { if (!overlayMovable) void recoverOverlayControls(); else setOverlayClickThrough(!overlayClickThrough) })
+    const unlockRegistered = globalShortcut.register('CommandOrControl+Alt+U', () => { void recoverOverlayControls() })
+    if (!unlockRegistered) console.warn('Ctrl+Alt+U unavailable; use tray menu to unlock lyrics')
+    qaLog(`unlock shortcut registered=${unlockRegistered}`)
+    globalShortcut.register('CommandOrControl+Alt+S', () => revealMainWindow('cursor'))
+  }
   void poll()
 })
 

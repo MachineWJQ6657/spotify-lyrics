@@ -6,6 +6,8 @@ import { OnsetClock } from './onset-clock'
 import type { LocalAsr } from './local-asr'
 import type { HeardToken } from './lyric-aligner'
 import { captureQuality } from './capture-quality'
+import { analyzeJapaneseLines, type JapaneseWord } from '../romanizer'
+import { extractPhoneticLandmarks } from './phonetic-landmarks'
 
 interface AudioContextBlock {
   pcm: Float32Array
@@ -23,14 +25,23 @@ export class VocalSync {
   private lastCapture = 0
   private pending = false
   private context: AudioContextBlock | null = null
+  private readings: { key: string; words: JapaneseWord[][] } | null = null
+  private readingAbort: AbortController | null = null
   private playback: PlaybackSnapshot | null = null
-  constructor(readonly recognizer: LocalAsr) {}
+  constructor(readonly recognizer: LocalAsr, private analyzeJapanese = analyzeJapaneseLines) {}
   start(trackId: string) { this.clear(); this.owner = trackId }
-  clear() { this.owner = ''; this.lyricKey = ''; this.lastCapture = 0; this.context = null; this.clock.clear(); this.recognizer.cancel() }
+  clear() {
+    this.owner = ''; this.lyricKey = ''; this.lastCapture = 0; this.context = null; this.readings = null
+    this.readingAbort?.abort(); this.readingAbort = null
+    this.clock.clear(); this.recognizer.cancel()
+  }
   observePlayback(snapshot: PlaybackSnapshot | null) {
     const revision = this.clock.revision
     this.clock.observePlayback(snapshot)
-    if (revision !== this.clock.revision) { this.recognizer.cancel(); this.owner = ''; this.lyricKey = ''; this.lastCapture = 0; this.context = null }
+    if (revision !== this.clock.revision) {
+      this.recognizer.cancel(); this.owner = ''; this.lyricKey = ''; this.lastCapture = 0; this.context = null; this.readings = null
+      this.readingAbort?.abort(); this.readingAbort = null
+    }
     this.playback = snapshot
   }
   async process(value: VocalCapture): Promise<VocalResult> {
@@ -85,7 +96,63 @@ export class VocalSync {
         startMs: token.startMs - contextMs,
         endMs: Math.min(token.endMs, contextMs + value.captureDurationMs) - contextMs,
       })) : recognized
-      const match = extractLyricLandmarks(tokens, value.lines, value.captureDurationMs)
+      let match = extractLyricLandmarks(tokens, value.lines, value.captureDurationMs)
+      let matching: 'text' | 'pronunciation' | 'combined' = 'text'
+      let phoneticElapsedMs = 0
+      // Supplement a sparse literal observation; existing text evidence is
+      // never deleted simply to manufacture a successful pronunciation test.
+      // Explicit ambiguity cannot be bypassed with a different spelling.
+      const heardText = tokens.map(token => token.text).join('')
+      const supported = tokens.filter(token => token.timing === 'dtw' && token.endIsUpperBound
+        && token.probability >= .5 && token.startMs >= 150 && token.startMs <= value.captureDurationMs - 350)
+      const timingSupported = new Set(supported.map(token => token.startMs)).size >= 3
+        && supported.at(-1)!.startMs - supported[0].startMs >= 500
+      const remainingMs = 15_000 - (Date.now() - started)
+      if (value.language === 'ja' && match.reason !== 'ambiguous' && match.points.length < 2 && timingSupported
+        && /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(heardText)
+        && remainingMs >= 1000 && heardText.length <= 800 && value.lines.length < 400
+        && value.lines.reduce((sum, line) => sum + line.text.length, heardText.length) <= 16000) {
+        const phoneticStarted = Date.now(), abort = new AbortController()
+        this.readingAbort = abort
+        const timeout = setTimeout(() => abort.abort(), Math.min(6000, remainingMs - 100))
+        try {
+          const cached = this.readings?.key === key ? this.readings.words : null
+          const words = await this.analyzeJapanese(cached ? [heardText] : [heardText, ...value.lines.map(line => line.text)], { signal: abort.signal })
+          if (revision !== this.clock.revision || value.trackId !== this.owner || key !== this.lyricKey) return rejected('cancelled')
+          if (!abort.signal.aborted) {
+            const sourceWords = cached ?? words.slice(1)
+            if (sourceWords.length === value.lines.length && Array.isArray(words[0])) {
+              this.readings = { key, words: sourceWords }
+              const phonetic = extractPhoneticLandmarks(tokens, value.lines, value.captureDurationMs, words[0], sourceWords)
+              if (phonetic.reason === 'ambiguous') {
+                match = phonetic
+                matching = 'pronunciation'
+              } else if (phonetic.points.length) {
+                const byLine = new Map(match.points.map(point => [point.lineIndex, point]))
+                let conflict = false
+                for (const point of phonetic.points) {
+                  const literal = byLine.get(point.lineIndex)
+                  if (literal && Math.abs(literal.heardMs - point.heardMs) > 150) conflict = true
+                  else if (!literal) byLine.set(point.lineIndex, point)
+                }
+                const points = [...byLine.values()].sort((left, right) => left.lineIndex - right.lineIndex)
+                if (points.some((point, index) => index > 0 && (point.heardMs - points[index - 1].heardMs < 150
+                  || point.sourceMs <= points[index - 1].sourceMs))) conflict = true
+                matching = match.points.length ? 'combined' : 'pronunciation'
+                match = conflict ? { reason: 'ambiguous', points: [] } : { reason: 'matched', points }
+              }
+            }
+          }
+        } catch {
+          // Dictionary analysis is an optional bounded fallback. A failure
+          // supplies no new position; it must not terminate audio sampling.
+          if (revision !== this.clock.revision || value.trackId !== this.owner) return rejected('cancelled')
+        } finally {
+          clearTimeout(timeout)
+          if (this.readingAbort === abort) this.readingAbort = null
+          phoneticElapsedMs = Date.now() - phoneticStarted
+        }
+      }
       const decision = this.clock.accept({ ...match, lyricTimingKey: key, trackId: value.trackId, capturedAtMs: value.capturedAtMs, captureDurationMs: value.captureDurationMs })
       const now = Date.now()
       // Inspect this clock only, never an anchor carried by an input snapshot.
@@ -97,7 +164,8 @@ export class VocalSync {
           positionMs: anchor.sourcePositionMs + (now - anchor.observedAtMs) * anchor.rate, expiresAtMs: anchor.expiresAtMs } : undefined
       return { decision, reason: match.reason, linesMatched: match.points.length, elapsedMs: Date.now() - started,
         score: anchor?.score ?? (match.points.length ? Math.min(...match.points.map(point => point.score)) : 0),
-        rate: anchor?.rate ?? 1, ...(calibration ? { calibration } : {}) }
+        rate: anchor?.rate ?? 1, matching, phoneticElapsedMs, clockReason: this.clock.decisionReason,
+        ...(calibration ? { calibration } : {}) }
     } catch (error) {
       if (revision === this.clock.revision) this.clear()
       throw error

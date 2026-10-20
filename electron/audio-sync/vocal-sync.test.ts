@@ -5,16 +5,17 @@ import type { HeardToken } from './lyric-aligner'
 import type { VocalCapture } from '../../src/lib/vocal-sync-types'
 import type { PlaybackSnapshot } from '../../src/types'
 import { lyricTimingKey } from '../../src/lib/lyric-timing-key'
+import type { analyzeJapaneseLines } from '../romanizer'
 
 const lines = ['あおぞらを見ながら歩いていた', 'みどりの道をゆっくり進んだ', 'あたらしい窓を開いてみよう']
   .map((text, i) => ({ text, startMs: 61000 + i * 4000 }))
 const heard: HeardToken[] = lines.flatMap((line, i) => [...line.text].map((text, j) => ({ text, startMs: 1000 + i * 4000 + j * 120,
   endMs: 1100 + i * 4000 + j * 120, probability: .95, timing: 'dtw' as const, endIsUpperBound: true as const })))
 const playback: PlaybackSnapshot = { track: { id: 'song', name: '', artist: '', album: '', coverUrl: '', durationMs: 200000 }, isPlaying: true, positionMs: 150000, observedAtMs: 100000 }
-function setup() {
+function setup(analyzeJapanese: typeof analyzeJapaneseLines = vi.fn(async () => [])) {
   vi.useFakeTimers(); vi.setSystemTime(100000)
   const recognizer = { cancel: vi.fn(), recognize: vi.fn(async (_pcm: Float32Array, _language: string) => heard) }
-  const service = new VocalSync(recognizer as unknown as LocalAsr)
+  const service = new VocalSync(recognizer as unknown as LocalAsr, analyzeJapanese)
   service.observePlayback(playback); service.start('song')
   vi.setSystemTime(112000)
   const capture: VocalCapture = { trackId: 'song', sampleRate: 16000, pcm: new Float32Array(192000),
@@ -23,6 +24,102 @@ function setup() {
 }
 afterEach(() => vi.useRealTimers())
 describe('vocal capture IPC lifecycle', () => {
+  const surfaces = ['思い出', 'を', '抱えて', '白い', '砂浜', 'を', 'ゆっくり', '歩いた']
+  const kana = ['オモイデ', 'ヲ', 'カカエテ', 'シロイ', 'スナハマ', 'ヲ', 'ユックリ', 'アルイタ']
+  const heardWords = surfaces.map((surface_form, index) => ({ surface_form, reading: kana[index], pronunciation: kana[index] }))
+  const phoneticLines = [{ text: '想い出を抱えて白い砂浜をゆっくり歩いた', startMs: 61000 },
+    { text: 'まぶしいひかりがあたらしいまちをてらした', startMs: 120000 }]
+  const phoneticTokens: HeardToken[] = surfaces.map((text, index) => ({ text, startMs: 1000 + index * 500,
+    endMs: 1500 + index * 500, probability: .98, timing: 'dtw', endIsUpperBound: true }))
+  const wordResult = (requested: string[]) => requested.map(text => text === surfaces.join('') ? heardWords
+    : text === phoneticLines[0].text ? heardWords.map((word, index) => index === 0 ? { ...word, surface_form: '想い出' } : word)
+    : [{ surface_form: text, reading: text, pronunciation: text }])
+
+  it('tries dictionary pronunciation for spelling differences, caches only the current source, and never invents token times', async () => {
+    const analyze = vi.fn(async (requested: string[]) => wordResult(requested))
+    const { service, capture, recognizer } = setup(analyze)
+    recognizer.recognize.mockResolvedValue(phoneticTokens)
+    const accept = vi.spyOn(service.clock, 'accept')
+    const result = await service.process({ ...capture, lines: phoneticLines })
+    expect(result).toMatchObject({ decision: 'confirming', linesMatched: 1, matching: 'pronunciation' })
+    expect(accept.mock.calls[0][0].points[0]).toMatchObject({ lineIndex: 0, heardMs: 1000, sourceMs: 61000 })
+    expect(analyze.mock.calls[0][0]).toEqual([surfaces.join(''), ...phoneticLines.map(line => line.text)])
+    vi.setSystemTime(124000)
+    await service.process({ ...capture, capturedAtMs: 124000, lines: phoneticLines })
+    expect(analyze.mock.calls[1][0]).toEqual([surfaces.join('')])
+    service.clear(); service.start('song')
+    vi.setSystemTime(136000)
+    await service.process({ ...capture, capturedAtMs: 136000, lines: phoneticLines })
+    expect(analyze.mock.calls[2][0]).toHaveLength(3)
+  })
+  it('cancels an optional reading request on pause and ignores its eventual answer', async () => {
+    let finish!: (value: ReturnType<typeof wordResult>) => void
+    let signal: AbortSignal | undefined
+    const analyze: typeof analyzeJapaneseLines = vi.fn((_requested: string[], options?: { signal?: AbortSignal }) => {
+      signal = options?.signal
+      return new Promise<ReturnType<typeof wordResult>>(resolve => { finish = resolve })
+    })
+    const { service, capture, recognizer } = setup(analyze)
+    recognizer.recognize.mockResolvedValue(phoneticTokens)
+    const pending = service.process({ ...capture, lines: phoneticLines })
+    await Promise.resolve()
+    expect(signal?.aborted).toBe(false)
+    service.observePlayback({ ...playback, isPlaying: false })
+    expect(signal?.aborted).toBe(true)
+    finish(wordResult([surfaces.join(''), ...phoneticLines.map(line => line.text)]))
+    expect((await pending).reason).toBe('cancelled')
+    expect(service.clock.decorate(playback)?.acousticAnchor).toBeUndefined()
+  })
+  it('bounds queued pronunciation work and continues sampling after its timeout', async () => {
+    const analyze: typeof analyzeJapaneseLines = vi.fn((_requested: string[], options?: { signal?: AbortSignal }) => new Promise<ReturnType<typeof wordResult>>((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(new Error('analysis cancelled')), { once: true })
+    }))
+    const { service, capture, recognizer } = setup(analyze)
+    recognizer.recognize.mockResolvedValue(phoneticTokens)
+    const pending = service.process({ ...capture, lines: phoneticLines })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(await pending).toMatchObject({ decision: 'rejected', reason: 'insufficient-words', phoneticElapsedMs: 6000 })
+    vi.setSystemTime(124000)
+    recognizer.recognize.mockResolvedValue(heard)
+    expect((await service.process({ ...capture, capturedAtMs: 124000 })).reason).toBe('lyrics-changed')
+    service.start('song')
+    vi.setSystemTime(136000)
+    expect((await service.process({ ...capture, capturedAtMs: 136000 })).decision).toBe('confirming')
+  })
+  it('keeps fast literal matching free of a dictionary worker', async () => {
+    const analyze = vi.fn(async () => [])
+    const { service, capture } = setup(analyze)
+    expect((await service.process(capture)).linesMatched).toBe(3)
+    expect(analyze).not.toHaveBeenCalled()
+  })
+  it('supplements one literal line with a phonetic line without counting or moving either onset twice', async () => {
+    const literalText = 'a quiet morning opens a distant door'
+    const mixedTokens = [...phoneticTokens, ...literalText.split(' ').map((text, index) => ({
+      text: ` ${text}`, startMs: 6000 + index * 450, endMs: 6450 + index * 450,
+      probability: .98, timing: 'dtw' as const, endIsUpperBound: true as const,
+    }))]
+    const currentLines = [phoneticLines[0], { text: literalText, startMs: 66000 }]
+    const mixedRaw = mixedTokens.map(token => token.text).join('')
+    const analyze = vi.fn(async (requested: string[]) => requested.map(text => text === mixedRaw
+      ? [...heardWords, { surface_form: literalText }]
+      : text === phoneticLines[0].text ? wordResult([text])[0] : [{ surface_form: text }]))
+    const { service, capture, recognizer } = setup(analyze)
+    recognizer.recognize.mockResolvedValue(mixedTokens)
+    const accept = vi.spyOn(service.clock, 'accept')
+    expect(await service.process({ ...capture, lines: currentLines })).toMatchObject({
+      decision: 'confirming', linesMatched: 2, matching: 'combined',
+    })
+    expect(accept.mock.calls[0][0].points.map(point => [point.lineIndex, point.sourceMs, point.heardMs]))
+      .toEqual([[0, 61000, 1000], [1, 66000, 6000]])
+  })
+  it('does not allocate a pronunciation dictionary for tokens that cannot satisfy timing and confidence gates', async () => {
+    const analyze = vi.fn(async () => [])
+    const { service, capture, recognizer } = setup(analyze)
+    recognizer.recognize.mockResolvedValue(phoneticTokens.map(token => ({ ...token, probability: .3 })))
+    expect((await service.process({ ...capture, lines: phoneticLines })).linesMatched).toBe(0)
+    expect(analyze).not.toHaveBeenCalled()
+  })
   it('uses continuous preceding sound to recognize the same fresh input, counting only fresh token onsets', async () => {
     const { service, capture, recognizer } = setup()
     const firstPcm = new Float32Array(192000).fill(.04)

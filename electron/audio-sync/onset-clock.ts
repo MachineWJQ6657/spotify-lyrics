@@ -9,6 +9,9 @@ export interface OnsetObservation {
   reason: 'matched' | 'insufficient-words' | 'ambiguous' | 'inconsistent-timing'
   points: OnsetPoint[]
 }
+export type OnsetDecisionReason = 'unavailable' | 'inactive' | 'stale-input' | 'invalid-input'
+  | 'lyrics-changed' | 'overlapping-capture' | 'insufficient-words' | 'ambiguous'
+  | 'inconsistent-timing' | 'insufficient-baseline' | 'evidence-gap' | 'expired' | 'matched'
 
 interface TimedPoint extends OnsetPoint { observedAtMs: number }
 interface EvidenceBlock { capturedAtMs: number; points: TimedPoint[] }
@@ -34,13 +37,22 @@ export class OnsetClock {
   private invalidatedAt = 0
   private latestCapture = 0
   private latestCaptureEnd = 0
+  private latestDecisionReason: OnsetDecisionReason = 'unavailable'
   revision = 0
+
+  get decisionReason(): OnsetDecisionReason { return this.latestDecisionReason }
+
+  private decision<Result extends 'locked' | 'confirming' | 'rejected'>(result: Result, reason: OnsetDecisionReason): Result {
+    this.latestDecisionReason = reason
+    return result
+  }
 
   private discardEvidence() { this.history = []; this.anchor = null }
 
   clear(now = Date.now()) {
     this.discardEvidence(); this.timingKey = ''; this.invalidatedAt = now
     this.latestCapture = 0; this.latestCaptureEnd = 0; this.revision++
+    this.latestDecisionReason = 'unavailable'
   }
 
   observePlayback(snapshot: PlaybackSnapshot | null, now = Date.now()) {
@@ -54,35 +66,48 @@ export class OnsetClock {
   accept(value: OnsetObservation, now = Date.now()): 'locked' | 'confirming' | 'rejected' {
     // Late, duplicate, foreign and future replies cannot overwrite evidence
     // belonging to a newer capture. Recognition latency is not audio time.
-    if (!value || !Number.isFinite(now) || !this.previous?.isPlaying || value.trackId !== this.previous.track?.id
-      || !Number.isFinite(value.capturedAtMs) || value.capturedAtMs <= this.latestCapture
-      || value.capturedAtMs > now + 200 || now - value.capturedAtMs > 15_000) return 'rejected'
+    if (!value || !Number.isFinite(now) || !Number.isFinite(value.capturedAtMs)) return this.decision('rejected', 'invalid-input')
+    if (!this.previous?.isPlaying || !this.previous.track) return this.decision('rejected', 'inactive')
+    if (value.trackId !== this.previous.track.id || value.capturedAtMs <= this.latestCapture
+      || value.capturedAtMs > now + 200 || now - value.capturedAtMs > 15_000) return this.decision('rejected', 'stale-input')
     this.latestCapture = value.capturedAtMs
     if (!Number.isFinite(value.captureDurationMs) || value.captureDurationMs < 6000 || value.captureDurationMs > 15_000
       || typeof value.lyricTimingKey !== 'string' || !value.lyricTimingKey || value.lyricTimingKey.length > 200
       || !Array.isArray(value.points) || value.points.length > 40) {
-      this.discardEvidence(); return 'rejected'
+      this.discardEvidence(); return this.decision('rejected', 'invalid-input')
     }
     const captureStart = value.capturedAtMs - value.captureDurationMs
-    if (captureStart < this.invalidatedAt) return 'rejected'
-    if (this.timingKey && this.timingKey !== value.lyricTimingKey) this.discardEvidence()
+    if (captureStart < this.invalidatedAt) return this.decision('rejected', 'stale-input')
+    let resetReason: OnsetDecisionReason | undefined
+    if (this.timingKey && this.timingKey !== value.lyricTimingKey) {
+      this.discardEvidence(); resetReason = 'lyrics-changed'
+    }
     this.timingKey = value.lyricTimingKey
     // No confidence renewal from missing vocals; an expired sequence must
     // establish three independent blocks again instead of reviving its fit.
-    if (this.anchor && now >= this.anchor.expiresAtMs) this.discardEvidence()
+    if (this.anchor && now >= this.anchor.expiresAtMs) {
+      this.discardEvidence(); resetReason = 'expired'
+    }
     if (this.latestCaptureEnd && captureStart < this.latestCaptureEnd - 50) {
-      this.discardEvidence(); this.latestCaptureEnd = value.capturedAtMs; return 'rejected'
+      this.discardEvidence(); this.latestCaptureEnd = value.capturedAtMs
+      return this.decision('rejected', 'overlapping-capture')
     }
     this.latestCaptureEnd = value.capturedAtMs
-    if (value.reason === 'insufficient-words' && value.points.length === 0) return 'rejected'
-    if (value.reason !== 'matched' || value.points.length === 0
-      || value.points.some((point, index) => !point || ![point.lineIndex, point.heardMs, point.sourceMs, point.score].every(Number.isFinite)
+    if (value.reason === 'insufficient-words' && value.points.length === 0) return this.decision('rejected', resetReason ?? 'insufficient-words')
+    if (value.reason !== 'matched') {
+      this.discardEvidence()
+      return this.decision('rejected', value.reason === 'ambiguous' || value.reason === 'inconsistent-timing' ? value.reason : 'invalid-input')
+    }
+    if (value.points.length === 0
+      || value.points.some(point => !point || ![point.lineIndex, point.heardMs, point.sourceMs, point.score].every(Number.isFinite)
         || !Number.isInteger(point.lineIndex) || point.lineIndex < 0 || point.lineIndex >= 400
         || point.heardMs < 150 || point.heardMs > value.captureDurationMs - 150
-        || point.sourceMs < 0 || point.sourceMs > 600_000 || point.score < .88 || point.score > 1
-        || (index > 0 && (point.lineIndex <= value.points[index - 1].lineIndex
-          || point.heardMs <= value.points[index - 1].heardMs || point.sourceMs <= value.points[index - 1].sourceMs)))) {
-      this.discardEvidence(); return 'rejected'
+        || point.sourceMs < 0 || point.sourceMs > 600_000 || point.score < .88 || point.score > 1)) {
+      this.discardEvidence(); return this.decision('rejected', 'invalid-input')
+    }
+    if (value.points.some((point, index) => index > 0 && (point.lineIndex <= value.points[index - 1].lineIndex
+      || point.heardMs <= value.points[index - 1].heardMs || point.sourceMs <= value.points[index - 1].sourceMs))) {
+      this.discardEvidence(); return this.decision('rejected', 'inconsistent-timing')
     }
     const block: EvidenceBlock = { capturedAtMs: value.capturedAtMs,
       points: value.points.map(point => ({ ...point, observedAtMs: captureStart + point.heardMs })) }
@@ -95,9 +120,11 @@ export class OnsetClock {
       if (first.lineIndex <= last.lineIndex || elapsed <= 0 || sourceElapsed <= 0
         || sourceElapsed < elapsed * MIN_RATE - MAX_RESIDUAL_MS * 2
         || sourceElapsed > elapsed * MAX_RATE + MAX_RESIDUAL_MS * 2) {
-        this.discardEvidence(); return 'rejected'
+        this.discardEvidence(); return this.decision('rejected', 'inconsistent-timing')
       }
-      if (value.capturedAtMs - previousBlock.capturedAtMs > 36_000) this.discardEvidence()
+      if (value.capturedAtMs - previousBlock.capturedAtMs > 36_000) {
+        this.discardEvidence(); resetReason = 'evidence-gap'
+      }
     }
     this.history = [...this.history, block]
       .filter(item => value.capturedAtMs - item.capturedAtMs <= 72_000).slice(-7)
@@ -105,7 +132,7 @@ export class OnsetClock {
     const origin = points[0].observedAtMs, latest = points.at(-1)!
     const baseline = latest.observedAtMs - origin
     if (this.history.length < 3 || points.length < 3 || baseline < 20_000) {
-      this.anchor = null; return 'confirming'
+      this.anchor = null; return this.decision('confirming', resetReason ?? 'insufficient-baseline')
     }
 
     // Give each independent pair of blocks one slope vote, so many words in
@@ -117,18 +144,18 @@ export class OnsetClock {
     const intercept = median(this.history.map(item => median(item.points.map(point => point.sourceMs - (point.observedAtMs - origin) * rate))))
     const residual = Math.max(...points.map(point => Math.abs(point.sourceMs - intercept - (point.observedAtMs - origin) * rate)))
     if (!Number.isFinite(rate) || rate < MIN_RATE || rate > MAX_RATE || !Number.isFinite(intercept) || residual > MAX_RESIDUAL_MS) {
-      this.discardEvidence(); return 'rejected'
+      this.discardEvidence(); return this.decision('rejected', 'inconsistent-timing')
     }
     const positionUncertainty = Math.max(200, residual)
     const rateUncertainty = Math.max(.005, 2 * positionUncertainty / baseline)
     const holdoverMs = Math.min(MAX_HOLDOVER_MS,
       Math.floor((MAX_PREDICTED_UNCERTAINTY_MS - positionUncertainty) / rateUncertainty))
     const expiresAtMs = latest.observedAtMs + holdoverMs
-    if (now >= expiresAtMs) { this.discardEvidence(); return 'rejected' }
+    if (now >= expiresAtMs) { this.discardEvidence(); return this.decision('rejected', 'expired') }
     this.anchor = { trackId: value.trackId, coordinate: 'lyrics', lyricTimingKey: value.lyricTimingKey,
       sourcePositionMs: intercept + baseline * rate, observedAtMs: latest.observedAtMs,
       expiresAtMs, rate, score: Math.min(...points.map(point => point.score)) }
-    return 'locked'
+    return this.decision('locked', 'matched')
   }
 
   decorate<T extends PlaybackSnapshot>(snapshot: T | null, now = Date.now()): T | null {

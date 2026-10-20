@@ -54,6 +54,7 @@ const checks = {
   diagnosticExport: main.includes('class DiagnosticExporter') && main.includes('playback:export-diagnostics'),
   serializedRomanization: main.includes('jobs.size >= 8') && main.includes('const previous = queue')
     && main.includes('void previous.then(') && main.includes('worker.terminate().then(') && main.includes('releaseQueue()'),
+  composedRomajiReadings: main.includes('function romanizeJapaneseWords(') && main.includes('pendingClosure') && renderer.includes('generatedRomanizationRevision'),
   refreshCalibration: renderer.includes('function preserveLyricsCalibration(') && renderer.includes('const calibrated = preserveLyricsCalibration('),
   preservedRefreshBaseline: renderer.includes('providerRevision: void 0') && renderer.includes('const pending = baseline'),
   acousticWorker: entries.some(entry => /[\\/]renderer[\\/]assets[\\/]acoustic-worker-.*\.js$/.test(entry)),

@@ -14,6 +14,9 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // outro refrains; revision 23 covered translated rewrites and collaboration
 // releases whose producer credit exists only in album aliases.
 const LYRICS_PROVIDER_REVISION = 37
+// Separate from provider timing/content: repair old generated readings without
+// refetching correct originals/translations or overwriting provider romaji.
+export const ROMANIZATION_REVISION = 1
 // Maps a provider context to the retry token of its one allowed automatic
 // recovery generation. Token ownership prevents a stale async continuation
 // from clearing (or re-arming) a newer generation's guard.
@@ -79,6 +82,9 @@ const needsRomanizationRepair = (value: string) => {
 
 export function romanizationNeedsRepair(original: LyricTrack, romanization?: LyricTrack) {
   if (!romanization?.lines.length || !original.lines.length) return true
+  const generated = romanization.generatedRomanizationRevision !== undefined
+    || /Kuroshiro|Kuromoji|自动补全/i.test(romanization.source)
+  if (generated && romanization.generatedRomanizationRevision !== ROMANIZATION_REVISION) return true
   const covered = matchedSupplementalLineCount(original, romanization, 1600)
   return covered / original.lines.length < .96 || romanization.lines.some(line => needsRomanizationRepair(line.text)
     || line.words?.some(word => needsRomanizationRepair(word.text)))
@@ -141,13 +147,16 @@ export async function completeRomanization(original: ReturnType<typeof makeTrack
   const generated = await window.syllable.lyrics.romanize(original.lines.map(line => line.text))
   if (!romanization) {
     const fallback = makeRomanizedTrack(original)
-    return [...tracks, { ...fallback, source: 'Kuroshiro · Kuromoji', lines: fallback.lines.map((line, index) => ({ ...line, words: undefined, text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text })) }]
+    return [...tracks, { ...fallback, source: 'Kuroshiro · Kuromoji', generatedRomanizationRevision: ROMANIZATION_REVISION,
+      lines: fallback.lines.map((line, index) => ({ ...line, words: undefined, text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text })) }]
   }
   const repaired = original.lines.map((line, index) => ({
     ...line, words: undefined,
     text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text
   }))
-  return tracks.map(track => track.id === romanization.id ? { ...track, source: `${track.source} · 自动补全`, lines: repaired } : track)
+  return tracks.map(track => track.id === romanization.id ? { ...track,
+    source: /自动补全/.test(track.source) ? track.source : `${track.source} · 自动补全`,
+    generatedRomanizationRevision: ROMANIZATION_REVISION, lines: repaired } : track)
 }
 
 export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = true) {

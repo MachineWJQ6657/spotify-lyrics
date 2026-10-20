@@ -2,7 +2,11 @@ export type LanguageCode = 'ja' | 'romaji' | 'zh-Hans' | 'en' | string
 
 export interface LyricWord { text: string; startMs: number; endMs?: number }
 export interface LyricLine { startMs: number; endMs?: number; text: string; words?: LyricWord[] }
-export interface LyricTrack { id: string; language: LanguageCode; label: string; kind: 'original' | 'translation' | 'romanization'; lines: LyricLine[]; source: string }
+export interface LyricTrack {
+  id: string; language: LanguageCode; label: string; kind: 'original' | 'translation' | 'romanization'; lines: LyricLine[]; source: string
+  /** Generated readings only. Provider or explicitly edited romaji retain ownership. */
+  generatedRomanizationRevision?: number
+}
 export interface LyricsDocument {
   /** Actual original words without trusted timing; never drive active-line playback. */
   untimedOriginal?: { text: string; language: string; source: string }

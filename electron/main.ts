@@ -590,7 +590,7 @@ function createWindows() {
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
-        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary'] : [])]
+        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary', 'romaji'] : [])]
         : qaView === 'audio-sync-live' ? ['enabled', 'captures', 'analyses', 'stopped']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
@@ -686,6 +686,9 @@ function createWindows() {
           const dictionary = readings.length === 2 && readings[0].length > 1 && pronounce(readings[0]) === pronounce(readings[1])
           checks.record('dictionary', dictionary)
           qaLog(`packaged dictionary: ${dictionary}; headless=${!mainWindow.isVisible()}`)
+          const romaji = await romanizeLines(['待って', 'なっていく', '行った', 'ずっと'])
+          checks.record('romaji', JSON.stringify(romaji) === JSON.stringify(['matte', 'natte iku', 'itta', 'zutto']))
+          qaLog(`packaged romaji: ${JSON.stringify(romaji)}`)
         }
       }
       if (qaView === 'audio-sync-live') {

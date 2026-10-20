@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { completeRomanization, preserveLyricsCalibration } from './usePlayback'
+import { completeRomanization, preserveLyricsCalibration, ROMANIZATION_REVISION } from './usePlayback'
 import type { LyricTrack } from '../types'
 import { effectiveProviderDurationBucket, lyricsProviderContext, matchedSupplementalLineCount, mergeUserEditedTracks, preservedUserEditedTrackIds, providerDurationBucket, providerRequestMatches, romanizationNeedsRepair, shouldBypassProviderCache } from './usePlayback'
 
@@ -10,6 +10,22 @@ const original: LyricTrack = {
 
 describe('romanization completeness', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('regenerates old automatic readings once without invalidating clean provider romanization', async () => {
+    const input: LyricTrack = { ...original, lines: [{ startMs: 1000, text: '待って' }] }
+    const stale: LyricTrack = { id: 'roma', kind: 'romanization', language: 'romaji', label: 'Romaji',
+      source: 'Kuroshiro · Kuromoji', lines: [{ startMs: 1000, text: 'mate' }] }
+    const romanize = vi.fn().mockResolvedValue(['matte'])
+    vi.stubGlobal('window', { syllable: { lyrics: { romanize } } })
+    expect(romanizationNeedsRepair(input, stale)).toBe(true)
+    const repaired = await completeRomanization(input, [input, stale])
+    expect(repaired[1]).toMatchObject({ generatedRomanizationRevision: ROMANIZATION_REVISION, lines: [{ text: 'matte' }] })
+    expect(romanizationNeedsRepair(input, repaired[1])).toBe(false)
+    expect(await completeRomanization(input, repaired)).toBe(repaired)
+    expect(romanize).toHaveBeenCalledOnce()
+    expect(romanizationNeedsRepair(input, { ...stale, source: 'provider' })).toBe(false)
+    expect(stale.lines[0].text).toBe('mate')
+  })
 
   it('does not retain stale kana-only word fragments after generating complete readings', async () => {
     const timed: LyricTrack = { ...original, lines: [{ startMs: 1000, endMs: 4000, text: '喜んで会いに行くから',

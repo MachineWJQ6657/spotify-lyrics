@@ -74,6 +74,29 @@ afterEach(() => {
   vi.useRealTimers(); vi.unstubAllGlobals()
 })
 
+it.each([false, true])('repairs a stale generated cache without provider refetch; userEdited=%s', async userEdited => {
+  vi.useFakeTimers()
+  const track = { id: `flow-romaji-revision-${userEdited}`, name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }
+  const cached: LyricsDocument = { trackId: track.id, providerRevision: 37, providerContext: 'community::10000', offsetMs: 1400, tracks: [
+    { id: `${track.id}-original`, kind: 'original', language: 'ja', label: '日本語', source: 'provider', lines: [{ startMs: 1000, text: '待って' }] },
+    { id: `${track.id}-romaji`, kind: 'romanization', language: 'romaji', label: 'Romaji', source: 'Kuroshiro · Kuromoji', lines: [{ startMs: 1000, text: 'mate' }] },
+    { id: 'local-zh', kind: 'translation', language: 'zh-Hans', label: '中文', source: 'user', lines: [{ startMs: 1000, text: '等一下' }] }
+  ], ...(userEdited ? { userEditedTrackIds: [`${track.id}-romaji`] } : {}) }
+  const fetch = vi.fn(), romanize = vi.fn().mockResolvedValue(['matte'])
+  vi.stubGlobal('window', { setTimeout, clearTimeout, syllable: { lyrics: { fetch, romanize } } })
+  useAppStore.setState({ demoMode: false, connected: false, lyrics: null, library: { [track.id]: cached },
+    playback: { track, positionMs: 0, observedAtMs: 0, isPlaying: false } })
+  usePlaybackConnection(); cleanup = effects[2]()
+  await vi.advanceTimersByTimeAsync(320)
+  const result = useAppStore.getState().lyrics!
+  expect(fetch).not.toHaveBeenCalled()
+  expect(romanize).toHaveBeenCalledTimes(userEdited ? 0 : 1)
+  expect(result.tracks[1].lines[0].text).toBe(userEdited ? 'mate' : 'matte')
+  expect(result.offsetMs).toBe(1400)
+  expect(result.tracks[0]).toBe(cached.tracks[0])
+  expect(result.tracks[2]).toBe(cached.tracks[2])
+})
+
 it.each([false, true])('replaces rejected automatic lyrics with untimed Spotify words, even when transient=%s', async transient => {
   vi.useFakeTimers()
   const track = { id: `flow-conflict-${transient}`, name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }

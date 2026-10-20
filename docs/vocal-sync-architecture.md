@@ -57,6 +57,32 @@ Spotify remains responsible for song identity, pause/seek invalidation and trans
 
 ## Current limitations / next validation
 
+### 0.4.41 phoneme-frame experiment (not connected to playback)
+
+The ignored local RomajiASR experiment exposes the original ONNX ArgMax input
+as an extra output, verifies exact ID equivalence and preserves frame logits.
+`ctc-tokens.ts` decodes these bounded frames without conflating CTC emission
+peaks with Whisper DTW or sung-word onset. On the tested no-padding frontend,
+stride320/receptive-field400 samples at16k gives599 frames for12seconds;
+timestamps are not obtained by uniformly dividing the recording duration.
+Unknown/special winning labels or malformed tensors reject the observation.
+Repeated labels separated by blank remain distinct and a multi-frame run keeps
+its weakest posterior. No CTC result presently drives the production clock.
+
+Six initial clips, one dependent crop and14 historical coffee captures have
+been tested locally. The provisional spelling/phoneme matcher still produced
+no independent clock lock, despite some improved recognized phrases. Numeric
+readings, phoneme tokenization, posterior calibration, repeated-source
+competition and actual onset error remain required work. The independent
+TypeScript decoder matched21 saved tensor outputs numerically; that is export
+correctness, not proof of audible lyric synchronization.
+
+The same investigation reproduced a separate production romaji defect:
+converting dictionary chunks such as 待っ / て separately dropped small-tsu
+before joining. Readings are now joined before romanization. Generated-cache
+revision changes do not invalidate provider originals/translations or overwrite
+explicit user romaji edits.
+
 Packaged live check on 2026-09-25 (secondary monitor, Byoushinwo Kamu): the full
 capture/child/IPC/UI path ran and returned `insufficient-words`; no lock was
 claimed. Observed child working set approximately733MB. Stop removed the child

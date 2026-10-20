@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
+import { romanizeJapaneseWords } from './japanese-romaji'
 
 const nodeRequire = createRequire(import.meta.url)
 export interface JapaneseWord {
@@ -62,6 +63,7 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
       const { parentPort, workerData } = require('node:worker_threads')
       const AnalyzerModule = require(workerData.analyzerPath)
       const KuromojiAnalyzer = AnalyzerModule.default || AnalyzerModule
+      const romanizeWords = (${romanizeJapaneseWords.toString()})
 
       ;(async () => {
         const analyzer = new KuromojiAnalyzer()
@@ -80,16 +82,7 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
             })))
             continue
           }
-          const words = []
-          for (const token of tokens) {
-            const value = toRomaji(token.pronunciation || token.reading || token.surface_form).trim()
-            if (!value) continue
-            const joinsConjugation = token.pos === '助動詞' || (token.pos === '助詞' && token.pos_detail_1 === '接続助詞' && /^(て|で)$/.test(token.surface_form))
-            const punctuation = token.pos === '記号'
-            if ((joinsConjugation || punctuation) && words.length) words[words.length - 1] += value
-            else words.push(value)
-          }
-          output.push(words.join(' ').replace(/\\s+/g, ' ').trim())
+          output.push(romanizeWords(tokens, toRomaji))
         }
         parentPort.postMessage({ output })
       })().catch(error => parentPort.postMessage({ error: error && error.message ? error.message : String(error) }))

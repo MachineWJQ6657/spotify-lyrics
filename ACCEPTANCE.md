@@ -1,6 +1,13 @@
-# Syllable 0.4.15 验收清单
+# Syllable 验收记录
 
-## 0.4.15 当前验收结论
+## 0.4.42 增量验收 — 2026-10-21
+
+- 已复现并修复不同艺人的同名歌曲误匹配；真实查询返回正确日文及网易云中文／罗马音。这是来源与内容验证，不是所有歌曲的歌声时序验收。
+- 775测试通过／36 opt-in跳过；TypeScript、构建与52项包校验通过。最终打包版副屏恢复QA九项通过、正常退出，检查了150%DPI原生裁剪区覆盖。
+- 固定入口已部署0.4.42，asar `da5930bcb49028b3d23e42b4c03eb0eaa03a4c7a9146505a970bd50b8050e630`；真实桌面三轨完整显示，旧程序与设置已备份。
+- 本轮未独立复现硬件外屏休眠唤醒；通用自动听音同步仍未完成。下方已勾选内容为历史记录，不能作为全部原始需求均已满足的声明。
+
+## 0.4.15 历史验收结论
 
 - [x] 版本号 0.4.15；歌词 Provider/cache revision 27。
 - [x] `npm test`：141 项通过、29 项真实联网用例默认跳过；完整联网回归 170/170 通过；TypeScript 与生产构建通过。
@@ -188,10 +195,3 @@
 - 任意目标语言的机器翻译尚未内置；自动多语言以歌词源已有翻译为主，其他语言可导入 LRC/TXT。
 - Spotify 的 `context_player_state_restore` 可能数秒仍停留在上一首；此时使用经过边界限制的发行时长映射，不会强行套用陈旧私有配方。
 - 安装包没有商业代码签名证书，Windows SmartScreen 可能显示未知发布者；免安装包已从全新目录验证可启动。
-# 0.4.42 incremental acceptance — 2026-10-21
-
-- Confirmed and fixed a real wrong-artist namesake selection; a fresh complete query returns correct Japanese content and NetEase supplemental tracks. This is content/source acceptance, not universal sung-onset timing.
-- 775 tests passed /36 opt-in skipped; TypeScript/build and52 package checks passed. Final packaged secondary-display recovery QA passed9 explicit checks and exited0; native region coverage checked at150%DPI.
-- Current0.4.42 asar `da5930bcb49028b3d23e42b4c03eb0eaa03a4c7a9146505a970bd50b8050e630`; actual desktop overlay inspected with all3lines visible after deployment. Position/size settings retained; old executable/settings backed up.
-- External-screen hardware sleep/wake has NOT been independently reproduced in this turn. General automatic acoustic synchronization remains incomplete. Older checked entries below are historical, not a blanket assertion that every requirement is satisfied.
-

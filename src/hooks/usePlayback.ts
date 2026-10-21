@@ -13,7 +13,9 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // invalidated exact-provider timelines that silently omitted short repeated
 // outro refrains; revision 23 covered translated rewrites and collaboration
 // releases whose producer credit exists only in album aliases.
-const LYRICS_PROVIDER_REVISION = 37
+// Revision 38 rejects namesakes with conflicting artists and unrelated same-
+// script titles that formerly entered a wide quality pool after long gaps.
+const LYRICS_PROVIDER_REVISION = 38
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
 export const ROMANIZATION_REVISION = 1

@@ -1115,12 +1115,18 @@ export function stripTimedTrackMetadata(value: string | null | undefined, track:
   }).join('\n')
 }
 
-function similarity(left: string, right: string) {
+function similarity(left: string, right: string, wholeArtistTokens = false) {
   const normalizedLeft = normalize(left)
   const normalizedRight = normalize(right)
   if (!normalizedLeft || !normalizedRight) return 0
   if (normalizedLeft === normalizedRight) return 1
-  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) return .86
+  // A short artist name is not an alias of an unrelated name containing it
+  // (Eve / Steve, カナ / カナリア). Retain whole-token attribution such as
+  // "Singer / Producer" and provider-supplied collaboration album aliases.
+  const contains = (value: string, part: string) => wholeArtistTokens
+    ? ` ${value} `.includes(` ${part} `)
+    : value.includes(part)
+  if (contains(normalizedLeft, normalizedRight) || contains(normalizedRight, normalizedLeft)) return .86
   const a = new Set(normalizedLeft.split(' ').filter(Boolean))
   const b = new Set(normalizedRight.split(' ').filter(Boolean))
   const intersection = [...a].filter(token => b.has(token)).length
@@ -1175,8 +1181,8 @@ function romanizeKanaIdentity(value: string) {
   return result
 }
 
-function scriptAwareSimilarity(left: string, right: string) {
-  const direct = similarity(left, right)
+function scriptAwareSimilarity(left: string, right: string, wholeArtistTokens = false) {
+  const direct = similarity(left, right, wholeArtistTokens)
   // Spotify often localizes Japanese metadata to Latin script while Asian
   // providers retain a katakana artist/title. Kana has an unambiguous local
   // transliteration, so use it as identity evidence without attempting a
@@ -1186,7 +1192,7 @@ function scriptAwareSimilarity(left: string, right: string) {
   const compactLeft = normalize(romanizedLeft).replace(/\s+/g, '')
   const compactRight = normalize(romanizedRight).replace(/\s+/g, '')
   const sameSpelling = compactLeft.length >= 6 && compactLeft === compactRight ? 1 : 0
-  return Math.max(direct, sameSpelling, similarity(romanizedLeft, right), similarity(left, romanizedRight), similarity(romanizedLeft, romanizedRight))
+  return Math.max(direct, sameSpelling, similarity(romanizedLeft, right, wholeArtistTokens), similarity(left, romanizedRight, wholeArtistTokens), similarity(romanizedLeft, romanizedRight, wholeArtistTokens))
 }
 
 export function recordingEdition(value: string) {
@@ -1231,8 +1237,8 @@ export function lyricHeaderCompatible(value: string, title: string) {
 export function weightedScore(candidateTrack: string, candidateArtist: string, candidateDurationMs: number, query: { track: string; artist: string; album?: string; durationMs?: number }, synced: boolean, candidateAlbum = '') {
   if (recordingEdition(`${candidateTrack} ${candidateAlbum}`) !== recordingEdition(`${query.track} ${query.album ?? ''}`)) return 0
   let track = Math.max(scriptAwareSimilarity(candidateTrack, query.track), scriptAwareSimilarity(cleanTrackTitle(candidateTrack), cleanTrackTitle(query.track)))
-  const directArtist = Math.max(similarity(candidateArtist, query.artist), similarity(primaryArtist(candidateArtist), primaryArtist(query.artist)))
-  let artist = Math.max(scriptAwareSimilarity(candidateArtist, query.artist), scriptAwareSimilarity(primaryArtist(candidateArtist), primaryArtist(query.artist)))
+  const directArtist = Math.max(similarity(candidateArtist, query.artist, true), similarity(primaryArtist(candidateArtist), primaryArtist(query.artist), true))
+  let artist = Math.max(scriptAwareSimilarity(candidateArtist, query.artist, true), scriptAwareSimilarity(primaryArtist(candidateArtist), primaryArtist(query.artist), true))
   const hasAlbumEvidence = Boolean(query.album && candidateAlbum)
   const album = hasAlbumEvidence ? scriptAwareSimilarity(candidateAlbum, query.album!) : 0
   const durationDelta = query.durationMs && candidateDurationMs ? Math.abs(candidateDurationMs - query.durationMs) : 0
@@ -1245,11 +1251,25 @@ export function weightedScore(candidateTrack: string, candidateArtist: string, c
   if (artist < .78 && track >= .98 && album >= .98 && query.durationMs && candidateDurationMs
     && durationDelta <= 1500 && queryLatin.length >= 8 && HAN.test(query.artist) && HAN.test(candidateArtist)
     && queryLatin === latinSkeleton(candidateArtist) && sharedHan) artist = .78
+  // Artist identity is a prerequisite, not a small term that exact title +
+  // single-title album + duration can outvote. A different artist's namesake
+  // used to score 77 and win by containing more short lines. Explicit provider
+  // aliases, kana/Latin folding and the bounded mixed-script rule above remain
+  // valid evidence; title/album alone must never manufacture an artist match.
+  if (artist < .75) return 0
   // Spotify can localize a Japanese title while Asian providers keep its
   // native script. Artist+duration is useful retrieval evidence, but never a
   // near-exact identity: the same artist commonly has unrelated songs of
   // similar length. A matching album makes the cross-script inference safer.
-  if (track < .3 && artist >= .86 && query.durationMs && candidateDurationMs && durationDelta <= 2500) {
+  const titleWriting = (value: string) => {
+    const hasLatin = /\p{Script=Latin}/u.test(value)
+    const hasCjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(value)
+    return hasLatin && !hasCjk ? 'latin' : hasCjk && !hasLatin ? 'cjk' : 'mixed'
+  }
+  const candidateWriting = titleWriting(cleanTrackTitle(candidateTrack))
+  const queryWriting = titleWriting(cleanTrackTitle(query.track))
+  const crossScriptTitle = candidateWriting !== 'mixed' && queryWriting !== 'mixed' && candidateWriting !== queryWriting
+  if (track < .3 && crossScriptTitle && artist >= .86 && query.durationMs && candidateDurationMs && durationDelta <= 2500) {
     // If the artist match exists only after kana transliteration, the exact
     // millisecond duration is a useful release fingerprint. Degrade rapidly as
     // the delta grows so another same-artist song of merely similar length does
@@ -1258,19 +1278,6 @@ export function weightedScore(candidateTrack: string, candidateArtist: string, c
     const durationFingerprint = Math.max(0, 1 - durationDelta / 2500)
     track = album >= .72 ? .74 : transliteratedArtist ? .42 + .30 * durationFingerprint : .58
   }
-  // Spotify can expose localized/romanized artist names and, with crossfade,
-  // a shortened SMTC duration. An exact title+album pair is strong enough to
-  // recognize that same release without trusting either noisy field.
-  // A cover can reuse both the translated title and a single-title album. Do
-  // not manufacture artist identity from that pair when its recording length
-  // is already several seconds away from Spotify's item. Kana folding above
-  // handles ordinary Japanese/Latin artist localization directly.
-  // Never synthesize an artist match from title+album alone. Covers routinely
-  // reuse both fields (and can even land within a second of the original), so
-  // require at least some independent artist-token evidence before promoting
-  // a partially localized credit.
-  if (track >= .98 && album >= .86 && artist >= .30 && artist < .75
-    && (!query.durationMs || !candidateDurationMs || durationDelta <= 1500)) artist = .78
   const duration = query.durationMs && candidateDurationMs ? Math.max(0, 1 - durationDelta / 15_000) : .62
   // Custom Spotify transitions can make SMTC's endpoint differ from the
   // released recording by tens of seconds. Duration is therefore only a
@@ -1403,6 +1410,17 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
         // exact hit does not override a contradictory recording edition.
         if (recordingEdition(`${data.trackName ?? ''} ${data.albumName ?? ''}`)
           !== recordingEdition(`${track.name} ${track.album}`)) return null
+        // /get is a retrieval method, not permission to ignore contradictory
+        // response metadata. Apply the same artist identity gate as search.
+        if (weightedScore(data.trackName ?? '', data.artistName ?? '', Math.round(data.duration * 1000),
+          { track: track.name, artist: track.artist, album: track.album, durationMs }, Boolean(data.syncedLyrics), data.albumName ?? '') === 0) return null
+        // A same-artist, near-duration response can still be a different song.
+        // Exact authority requires the actual returned title (or its cleaned /
+        // deterministic kana spelling) to agree. A title inferred only from
+        // album + duration is a search hypothesis, never a 100-point /get hit.
+        const returnedTitleIdentity = Math.max(scriptAwareSimilarity(data.trackName ?? '', track.name),
+          scriptAwareSimilarity(cleanTrackTitle(data.trackName ?? ''), cleanTrackTitle(track.name)))
+        if (returnedTitleIdentity < .98) return null
         if (!lyricHeaderCompatible(data.syncedLyrics ?? data.plainLyrics ?? '', track.name)) return null
         if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
       }
@@ -1539,8 +1557,10 @@ async function fetchKugou(track: NonNullable<PlaybackSnapshot['track']>, signal?
         return null
       }
       const lyricPayload = await lyricResponse.json() as { candidates?: KugouLyricCandidate[] }
-      const lyricCandidates = (lyricPayload.candidates ?? []).filter(candidate => !candidate.song
-        || recordingEdition(candidate.song) === recordingEdition(track.name)).sort((a, b) => {
+      const lyricCandidates = (lyricPayload.candidates ?? []).filter(candidate => (!candidate.song
+        || recordingEdition(candidate.song) === recordingEdition(track.name))
+        && (!candidate.singer || weightedScore(candidate.song || match.song.SongName, candidate.singer,
+          candidate.duration ?? 0, { track: track.name, artist: track.artist, durationMs }, true) > 0)).sort((a, b) => {
         const left = Math.abs((a.duration ?? 0) - durationMs)
         const right = Math.abs((b.duration ?? 0) - durationMs)
         return left - right

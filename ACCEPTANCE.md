@@ -188,3 +188,10 @@
 - 任意目标语言的机器翻译尚未内置；自动多语言以歌词源已有翻译为主，其他语言可导入 LRC/TXT。
 - Spotify 的 `context_player_state_restore` 可能数秒仍停留在上一首；此时使用经过边界限制的发行时长映射，不会强行套用陈旧私有配方。
 - 安装包没有商业代码签名证书，Windows SmartScreen 可能显示未知发布者；免安装包已从全新目录验证可启动。
+# 0.4.42 incremental acceptance — 2026-10-21
+
+- Confirmed and fixed a real wrong-artist namesake selection; a fresh complete query returns correct Japanese content and NetEase supplemental tracks. This is content/source acceptance, not universal sung-onset timing.
+- 775 tests passed /36 opt-in skipped; TypeScript/build and52 package checks passed. Final packaged secondary-display recovery QA passed9 explicit checks and exited0; native region coverage checked at150%DPI.
+- Current0.4.42 asar `da5930bcb49028b3d23e42b4c03eb0eaa03a4c7a9146505a970bd50b8050e630`; actual desktop overlay inspected with all3lines visible after deployment. Position/size settings retained; old executable/settings backed up.
+- External-screen hardware sleep/wake has NOT been independently reproduced in this turn. General automatic acoustic synchronization remains incomplete. Older checked entries below are historical, not a blanket assertion that every requirement is satisfied.
+

@@ -580,8 +580,10 @@ input[type=range]::-webkit-slider-thumb { width: 14px; height: 14px; border: 0; 
 .karaoke-line span { transition: color 160ms linear; }
 .overlay-line-content { animation: lyric-line-enter 260ms cubic-bezier(.22, .61, .36, 1); }
 @keyframes lyric-line-enter {
-  from { opacity: .5; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* Native window regions must not sample an intermediate translated box.
+     Opacity-only entrance preserves stable text coordinates across frames. */
+  from { opacity: .5; }
+  to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lyric-group, .karaoke-line span { transition: none; }

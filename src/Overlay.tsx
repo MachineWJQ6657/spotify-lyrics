@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { finishPointerDrag } from './lib/pointer-drag'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { usePosition } from './hooks/usePosition'
@@ -26,6 +26,8 @@ export function Overlay() {
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
   const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
+  const layoutGeneration = useRef(0)
+  const [layoutRevision, setLayoutRevision] = useState(0)
   useEffect(() => {
     const cancel = () => finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
     window.addEventListener('blur', cancel)
@@ -54,6 +56,8 @@ export function Overlay() {
   }
   useLayoutEffect(() => {
     let frame = 0
+    let settleTimer = 0
+    let disposed = false
     let previousPayload = ''
     const publishHitRegions = () => {
       const readRegions = (selectors: string[]) => selectors.flatMap(selector => [...document.querySelectorAll(selector)]).map(element => {
@@ -74,11 +78,30 @@ export function Overlay() {
           y: 0
         }
       })() : undefined
-      const payload = JSON.stringify({ regions, controlsAnchor })
+      const layout = { generation: layoutGeneration.current, viewport: { width: window.innerWidth, height: window.innerHeight } }
+      const payload = JSON.stringify({ regions, controlsAnchor, layout })
       if (payload === previousPayload) return
       previousPayload = payload
-      void window.syllable.overlay.setHitRegions(regions, controlsAnchor)
+      void window.syllable.overlay.setHitRegions(regions, controlsAnchor, layout)
     }
+    const refreshLayout = () => {
+      previousPayload = ''
+      schedulePublish()
+      window.clearTimeout(settleTimer)
+      // ResizeObserver does not report a position-only or completed transform
+      // change. Measure again after monitor/font/line animation has settled.
+      settleTimer = window.setTimeout(() => { previousPayload = ''; schedulePublish() }, 300)
+    }
+    const unsubscribeLayout = window.syllable.overlay.onLayoutReset(generation => {
+      if (!Number.isSafeInteger(generation) || generation < layoutGeneration.current) return
+      layoutGeneration.current = generation
+      setLayoutRevision(generation)
+      refreshLayout()
+    })
+    window.addEventListener('resize', refreshLayout)
+    window.addEventListener('pageshow', refreshLayout)
+    document.fonts.addEventListener('loadingdone', refreshLayout)
+    void document.fonts.ready.then(() => { if (!disposed) refreshLayout() })
     const schedulePublish = () => {
       if (frame) return
       frame = window.requestAnimationFrame(() => { frame = 0; publishHitRegions() })
@@ -92,10 +115,16 @@ export function Overlay() {
     // Observe the actual hit targets too, including late font metric changes.
     document.querySelectorAll('.overlay-primary, .overlay-secondary').forEach(element => observer.observe(element))
     return () => {
+      disposed = true
+      unsubscribeLayout()
+      window.removeEventListener('resize', refreshLayout)
+      window.removeEventListener('pageshow', refreshLayout)
+      document.fonts.removeEventListener('loadingdone', refreshLayout)
+      window.clearTimeout(settleTimer)
       if (frame) window.cancelAnimationFrame(frame)
       observer.disconnect()
     }
-  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.fontWeight, settings.lineHeight, settings.alignment, line?.startMs, hitRegionText])
+  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.fontWeight, settings.lineHeight, settings.alignment, line?.startMs, hitRegionText, layoutRevision])
   const overlayStyle = {
     '--overlay-blur': `${settings.blur}px`, '--overlay-size': `${Math.max(34, settings.fontSize)}px`,
     '--overlay-bg-opacity': settings.backgroundOpacity / 100, '--overlay-text-opacity': settings.textOpacity / 100,
@@ -107,7 +136,7 @@ export function Overlay() {
   return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
     <div className="overlay-surface">
       <div className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
-        <div className="overlay-line-content" key={`${playback?.track?.id ?? 'none'}-${line?.startMs ?? -1}`}>
+        <div className="overlay-line-content" key={`${layoutRevision}-${playback?.track?.id ?? 'none'}-${line?.startMs ?? -1}`}>
           <div lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-primary karaoke-line ${baseClass}`}>{line?.words?.length ? line.words.map((word, wordIndex) => <span className={position >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line?.text?.trim() || '♪'}</div>
           {secondaries.map(({ track, line: sibling }) => {
             const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'

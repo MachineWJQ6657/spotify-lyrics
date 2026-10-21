@@ -8,6 +8,37 @@ const timed: LyricsResult = {
 }
 
 describe('recording edition identity', () => {
+  it('rejects a different artist namesake even with an exact single-title album and duration', () => {
+    const query = { track: 'パレード', artist: 'ヨルシカ', album: 'パレード', durationMs: 301561 }
+    for (const duration of [301561, 294240, 0]) {
+      expect(weightedScore('パレード', 'CHABA', duration, query, true, 'パレード')).toBe(0)
+      expect(weightedScore('パレード', '', duration, query, true, 'パレード')).toBe(0)
+    }
+    expect(weightedScore('パレード', 'ヨルシカ', 299792, query, true, '別のアルバム')).toBeGreaterThan(70)
+  })
+
+  it('requires whole artist tokens rather than a name embedded inside another name', () => {
+    for (const [artist, unrelated] of [['Eve', 'Steve'], ['カナ', 'カナリア'], ['Artist One', 'Artist Two']]) {
+      const query = { track: 'A Single', artist, album: 'A Single', durationMs: 180000 }
+      expect(weightedScore('A Single', unrelated, 180000, query, true, 'A Single')).toBe(0)
+      expect(weightedScore('A Single', `${artist} / Guest`, 180000, query, true, 'A Single')).toBe(100)
+    }
+  })
+
+  it('retains explicit artist aliases and kana transliteration as independent identity evidence', () => {
+    const query = { track: 'A Single', artist: 'MorningWind', album: 'A Single', durationMs: 180000 }
+    expect(weightedScore('A Single', '朝風 / MorningWind', 180000, query, true, 'A Single')).toBeGreaterThan(90)
+    expect(weightedScore('A Single', '朝風', 180000, query, true, 'A Single')).toBe(0)
+    expect(weightedScore('A Single', 'ヨルシカ', 180000, { ...query, artist: 'Yorushika' }, true, 'A Single')).toBe(100)
+  })
+
+  it('does not infer localized titles for unrelated songs in the same writing system', () => {
+    for (const [title, unrelated] of [['パレード', '冬眠'], ['Golden Morning', 'Velvet Evening']]) {
+      expect(weightedScore(unrelated, 'Original Singer', 301186,
+        { track: title, artist: 'Original Singer', album: title, durationMs: 301561 }, true, 'Different Album')).toBeLessThan(55)
+    }
+  })
+
   it('does not choose a shifted recording search hit merely for its extra line breaks', () => {
     const rows = Array.from({ length: 16 }, (_, i) => `original complete phrase ${i} with unique ending ${i}`)
     const stamp = (seconds: number) => `[${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}.00]`
@@ -130,6 +161,153 @@ describe('conservative repeated-word repair', () => {
 })
 
 describe('lyrics provider request budget', () => {
+  it('does not download a denser unrelated namesake from NetEase over the original artist', async () => {
+    const original = Array.from({ length: 12 }, (_, i) => `[${String(Math.floor(i * 24 / 60)).padStart(2, '0')}:${String(i * 24 % 60).padStart(2, '0')}.00]正しいテスト原文 ${i}`).join('\n')
+    const wrong = Array.from({ length: 53 }, (_, i) => `[${String(Math.floor(i * 5 / 60)).padStart(2, '0')}:${String(i * 5 % 60).padStart(2, '0')}.00]別のテスト文章 ${i}`).join('\n')
+    const downloaded: string[] = []
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') {
+        if (url.pathname.endsWith('/search/get')) return new Response(JSON.stringify({ result: { songs: [
+          { id: 42, name: 'パレード', duration: 294240, artists: [{ name: 'CHABA' }], album: { name: 'パレード' } },
+          { id: 41, name: 'パレード', duration: 299792, artists: [{ name: 'ヨルシカ' }], album: { name: '違うアルバム' } }
+        ] } }))
+        downloaded.push(url.searchParams.get('id')!)
+        return new Response(JSON.stringify({ lrc: { lyric: url.searchParams.get('id') === '41' ? original : wrong } }))
+      }
+      return new Response('{"data":{"lists":[]}}')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const result = await fetchLyrics({ id: 'qa-namesake-source-gate', name: 'パレード', artist: 'ヨルシカ', album: 'パレード', durationMs: 301561, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(original)
+      expect(result?.source).toBe('网易云音乐 · 搜索候选')
+      expect(downloaded.length).toBeGreaterThan(0)
+      expect(downloaded.every(id => id === '41')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('does not treat an exact-get response from a different artist as authoritative', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify({ trackName: 'Identical Single', artistName: 'Unrelated Cover', albumName: 'Identical Single', duration: 100,
+        syncedLyrics: '[00:05.00]unrelated synthetic words\n[00:40.00]second synthetic line\n[01:30.00]ending synthetic line' }))
+      if (url.includes('lrclib.net')) return new Response('[]')
+      if (url.includes('music.163.com')) return new Response('{"result":{"songs":[]}}')
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-exact-get-wrong-artist', name: 'Identical Single', artist: 'Original Singer', album: 'Identical Single', durationMs: 100000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics ?? null).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('rejects contradictory exact-get titles even for the same artist, album and duration', async () => {
+    const response = { trackName: '冬眠', artistName: 'Original Singer', albumName: 'Shared Album', duration: 100,
+      syncedLyrics: '[00:05.00]synthetic unrelated opening\n[00:40.00]synthetic unrelated bridge\n[01:30.00]synthetic unrelated ending' }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(response))
+      if (url.includes('lrclib.net')) return new Response('[]')
+      if (url.includes('music.163.com')) return new Response('{"result":{"songs":[]}}')
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      for (const title of ['パレード', 'Golden Morning']) {
+        const result = await fetchLyrics({ id: `qa-exact-get-wrong-title-${title}`, name: title, artist: response.artistName, album: response.albumName, durationMs: 100000, coverUrl: '' }, null, true)
+        expect(result?.syncedLyrics ?? null).toBeNull()
+      }
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('retains exact-get authority for deterministic kana and Latin title spellings', async () => {
+    const response = { trackName: 'ヒバナ', artistName: 'Original Singer', albumName: 'Shared Album', duration: 100,
+      syncedLyrics: '[00:05.00]合成されたテスト歌詞\n[00:35.00]次のテスト歌詞\n[01:10.00]三番目のテスト歌詞\n[01:35.00]最後のテスト歌詞' }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(response))
+      if (url.includes('lrclib.net')) return new Response('[]')
+      if (url.includes('music.163.com')) return new Response('{"result":{"songs":[]}}')
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-exact-get-kana-title', name: 'HIBANA', artist: response.artistName, album: response.albumName, durationMs: 100000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(response.syncedLyrics)
+      expect(result?.confidence).toBe(100)
+      expect(result?.source).toBe('LRCLIB · 精确匹配')
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('rejects contradictory lyric-candidate singer metadata even after a matching song hash', async () => {
+    const original = '[00:05.00]correct synthetic phrase\n[00:35.00]second correct phrase\n[01:10.00]third correct phrase\n[01:35.00]last correct phrase'
+    const downloads: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+      if (url.hostname === 'songsearch.kugou.com') return new Response(JSON.stringify({ data: { lists: [
+        { FileHash: 'synthetic-song-hash', Duration: 100, SongName: 'Candidate Single', SingerName: 'Original Singer' }
+      ] } }))
+      if (url.pathname === '/search') return new Response(JSON.stringify({ candidates: [
+        { id: 'wrong', accesskey: 'test', singer: 'Different Singer', song: 'Candidate Single', duration: 100000 },
+        { id: 'correct', accesskey: 'test', singer: 'Original Singer', song: 'Candidate Single', duration: 100001 }
+      ] }))
+      downloads.push(url.searchParams.get('id')!)
+      return new Response(JSON.stringify({ content: Buffer.from(url.searchParams.get('id') === 'correct' ? original : original.replaceAll('correct', 'wrong')).toString('base64') }))
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-kugou-candidate-artist-gate', name: 'Candidate Single', artist: 'Original Singer', album: 'Candidate Single', durationMs: 100000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(original)
+      expect(downloads).toEqual(['correct'])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('accepts an explicit provider artist alias and retains its own translation', async () => {
+    const original = '[00:05.00]朝を待っている\n[00:35.00]風を聞いている\n[01:10.00]遠くへ歩いていく\n[01:35.00]今日を歌っている'
+    const translation = '[00:05.00]合成译文甲\n[00:35.00]合成译文乙\n[01:10.00]合成译文丙\n[01:35.00]合成译文丁'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') {
+        if (url.pathname.endsWith('/search/get')) return new Response(JSON.stringify({ result: { songs: [
+          { id: 43, name: 'Alias Single', duration: 100000, artists: [{ name: '朝風', alias: ['MorningWind'] }], album: { name: 'Alias Single' } }
+        ] } }))
+        return new Response(JSON.stringify({ lrc: { lyric: original }, tlyric: { lyric: translation } }))
+      }
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-namesake-explicit-artist-alias', name: 'Alias Single', artist: 'MorningWind', album: 'Alias Single', durationMs: 100000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(original)
+      expect(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics).toBe(translation)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('retains an exact title with a long instrumental gap over a denser same-artist different song', async () => {
+    const original = '[00:17.00]最初のテスト歌詞\n[00:26.00]次のテスト歌詞\n[00:53.00]長い間奏の後に歌う\n[01:10.00]テスト原文は続く\n[01:35.00]ここも正しい文章\n[02:15.00]また歌い始める\n[03:23.00]静かな最後の歌詞\n[04:19.00]テスト原文の終わり'
+    const unrelated = Array.from({ length: 35 }, (_, i) => `[${String(Math.floor(i * 8 / 60)).padStart(2, '0')}:${String(i * 8 % 60).padStart(2, '0')}.00]別曲の合成テキスト ${i}`).join('\n')
+    const downloads: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') {
+        if (url.pathname.endsWith('/search/get')) return new Response(JSON.stringify({ result: { songs: [
+          { id: 44, name: 'パレード', duration: 299792, artists: [{ name: 'ヨルシカ' }], album: { name: '違うアルバム' } },
+          { id: 45, name: '冬眠', duration: 301186, artists: [{ name: 'ヨルシカ' }], album: { name: '違うアルバム' } }
+        ] } }))
+        downloads.push(url.searchParams.get('id')!)
+        return new Response(JSON.stringify({ lrc: { lyric: url.searchParams.get('id') === '44' ? original : unrelated } }))
+      }
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-same-script-different-song', name: 'パレード', artist: 'ヨルシカ', album: 'パレード', durationMs: 301561, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(original)
+      expect(downloads.every(id => id === '44')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('retrieves spaced romanization and rejects a metadata-exact Korean pronunciation export', async () => {
     const japanese = Array.from({ length: 12 }, (_, i) => `[${String(Math.floor(i * 22 / 60)).padStart(2, '0')}:${String(i * 22 % 60).padStart(2, '0')}.00]テストの原文を歌っている ${i}`).join('\n')
     const korean = japanese.split('\n').map((line, i) => `${line.slice(0, 10)}한국어 발음 표기 ${i}\n${line.slice(0, 10)}번역된 다른 문장 ${i}`).join('\n')

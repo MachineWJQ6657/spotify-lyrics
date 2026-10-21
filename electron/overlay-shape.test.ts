@@ -12,9 +12,13 @@ describe('overlay window shape', () => {
     expect(overlayShape(200, 100, [{ x: -4.5, y: 80.5, width: 250, height: 40 }], false)[0])
       .toEqual({ x: 0, y: 72, width: 200, height: 28 })
   })
-  it('keeps only native resize edges in click-through mode', () => {
+  it('never clips painting in click-through mode (mouse-ignore owns input)', () => {
     expect(overlayShape(200, 100, [{ x: 20, y: 20, width: 100, height: 50 }], true))
-      .toEqual(overlayShape(200, 100, [], false))
+      .toEqual([])
+  })
+  it('does not leave an edge-only paint mask when measurements are absent', () => {
+    expect(overlayShape(920, 230, [], false)).toEqual([])
+    expect(overlayShape(920, 230, [{ x: 1000, y: 60, width: 500, height: 60 }], false)).toEqual([])
   })
   it('rejects invalid text geometry and keeps tiny-window borders bounded', () => {
     expect(overlayShape(5, 3, [{ x: NaN, y: 0, width: 20, height: 20 }, { x: 0, y: 0, width: -1, height: 2 }], false))

@@ -77,7 +77,7 @@ afterEach(() => {
 it.each([false, true])('repairs a stale generated cache without provider refetch; userEdited=%s', async userEdited => {
   vi.useFakeTimers()
   const track = { id: `flow-romaji-revision-${userEdited}`, name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }
-  const cached: LyricsDocument = { trackId: track.id, providerRevision: 37, providerContext: 'community::10000', offsetMs: 1400, tracks: [
+  const cached: LyricsDocument = { trackId: track.id, providerRevision: 38, providerContext: 'community::10000', offsetMs: 1400, tracks: [
     { id: `${track.id}-original`, kind: 'original', language: 'ja', label: '日本語', source: 'provider', lines: [{ startMs: 1000, text: '待って' }] },
     { id: `${track.id}-romaji`, kind: 'romanization', language: 'romaji', label: 'Romaji', source: 'Kuroshiro · Kuromoji', lines: [{ startMs: 1000, text: 'mate' }] },
     { id: 'local-zh', kind: 'translation', language: 'zh-Hans', label: '中文', source: 'user', lines: [{ startMs: 1000, text: '等一下' }] }

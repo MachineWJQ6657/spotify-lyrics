@@ -37,7 +37,12 @@ contextBridge.exposeInMainWorld('syllable', {
     show: () => ipcRenderer.invoke('overlay:show'),
     hide: () => ipcRenderer.invoke('overlay:hide'),
     setClickThrough: (value: boolean) => ipcRenderer.invoke('overlay:click-through', value),
-    setHitRegions: (regions: Array<{ x: number; y: number; width: number; height: number }>, controlsAnchor?: { x: number; y: number }) => ipcRenderer.invoke('overlay:hit-regions', regions, controlsAnchor),
+    setHitRegions: (regions: Array<{ x: number; y: number; width: number; height: number }>, controlsAnchor?: { x: number; y: number }, layout?: { generation: number; viewport: { width: number; height: number } }) => ipcRenderer.invoke('overlay:hit-regions', regions, controlsAnchor, layout),
+    onLayoutReset: (callback: (generation: number) => void) => {
+      const handler = (_: unknown, generation: number) => callback(generation)
+      ipcRenderer.on('overlay:layout-reset', handler)
+      return () => ipcRenderer.removeListener('overlay:layout-reset', handler)
+    },
     setControlsHover: (hovered: boolean) => ipcRenderer.send('overlay:controls-hover', hovered),
     getBounds: () => ipcRenderer.invoke('overlay:bounds'),
     setSize: (width: number, height: number) => ipcRenderer.invoke('overlay:size', width, height),

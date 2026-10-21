@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import { appendFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -8,6 +8,7 @@ import { romanizeLines, analyzeJapaneseLines } from './romanizer'
 import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
+import { inspectWindowRegion } from './windows-window-region'
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
@@ -16,6 +17,7 @@ import { DiagnosticExporter } from './diagnostic-export'
 import { sanitizeLyricDiagnosticContext } from '../src/lib/sync-diagnostics'
 import { createQaChecks } from './qa-checks'
 import { overlayShape } from './overlay-shape'
+import { OverlayLayoutGate } from './overlay-layout'
 import { isOverOverlayRegion } from './overlay-hover'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 import { LocalAsr } from './audio-sync/local-asr'
@@ -56,6 +58,7 @@ let boundsSaveTimer: NodeJS.Timeout | null = null
 let boundsPublishTimer: NodeJS.Timeout | null = null
 let pendingBoundsShapeUpdate = false
 let applyingOverlayBounds = false
+let overlayBoundsOperation = 0
 let overlayBoundsReady: Promise<void> = Promise.resolve()
 let overlayBoundsRestored = false
 let hadStoredOverlayBounds = false
@@ -79,6 +82,17 @@ let overlayMovable = true
 let overlayPointerDrag: { cursor: Electron.Point; bounds: Electron.Rectangle; fromControls: boolean; controlsWereVisible: boolean } | null = null
 let lastOverlayDragEndedAt = 0
 let overlayHitRegions: Array<{ x: number; y: number; width: number; height: number }> = []
+const overlayLayout = new OverlayLayoutGate()
+let overlayShapeKey = ''
+let overlayShapeTimer: NodeJS.Timeout | null = null
+let overlayLayoutRetry: NodeJS.Timeout | null = null
+let displayRecoveryTimer: NodeJS.Timeout | null = null
+let displayRecoveryBounds: StoredWindowBounds | null = null
+let stableOverlayBounds: StoredWindowBounds | null = null
+let displayRecoveryRevision = 0
+let pendingDisplayRecoveryReason = ''
+let overlayRemapPending = false
+let lastOverlayViewportKey = ''
 let lastBroadcastCoverTrackId = ''
 const windowBoundsStore = new WindowBoundsStore()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -366,6 +380,7 @@ async function showOverlay() {
 
 function hideOverlay() {
   overlayShowRequested = false
+  overlayRemapPending = false
   if (!overlayWindow || overlayWindow.isDestroyed()) return false
   overlayPointerDrag = null
   if (overlayDragSettleTimer) clearTimeout(overlayDragSettleTimer)
@@ -386,7 +401,7 @@ function setOverlayClickThrough(value: boolean) {
   // Ignore input across the entire HWND, including its resize frame. Toggling
   // the native thick-frame style itself changes DIP geometry on mixed-DPI
   // Windows desktops and gradually grows the saved window by a pixel.
-  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
+  applyOverlayMouseIgnore(overlayInputTransparent())
   refreshTransparentHoverTracking()
   for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:click-through-changed', overlayClickThrough)
   return overlayClickThrough
@@ -412,30 +427,113 @@ function applyOverlayMouseIgnore(value: boolean) {
   qaLog(`overlay mouse ignored=${value}; regions=${overlayHitRegions.length}`)
 }
 
+function overlayInputTransparent() {
+  return !overlayMovable || overlayClickThrough || !overlayLayout.ready || overlayHitRegions.length === 0
+}
+
 function applyOverlayShape() {
   if (!overlayWindow || overlayWindow.isDestroyed() || process.platform !== 'win32') return
   if (disableOverlayShapeForQa) { overlayWindow.setShape([]); return }
   const bounds = overlayWindow.getBounds()
-  // HWND shape also clips painting. Removing text regions for hit-through
-  // would erase the lyrics; input transparency belongs to native mouse-ignore.
-  overlayWindow.setShape(overlayShape(bounds.width, bounds.height, overlayHitRegions, false))
+  // Monitor wake can leave DWM/Chromium holding an old complex clip even when
+  // GetWindowRgn reports the new rectangles. Clear it before replacing it.
+  // While waiting for fresh geometry (and throughout lock/pass-through), paint
+  // the complete surface. Mouse-ignore is independent of the visual mask.
+  const shape = overlayShape(bounds.width, bounds.height, overlayHitRegions,
+    !overlayMovable || overlayClickThrough || !overlayLayout.ready)
+  const key = JSON.stringify(shape)
+  if (key === overlayShapeKey) return
+  overlayShapeKey = key
+  overlayWindow.setShape([])
+  if (shape.length) overlayWindow.setShape(shape)
+}
+
+function requestOverlayLayout(reason: string) {
+  const generation = overlayLayout.requestLayout()
+  overlayShapeKey = ''
+  overlayHitRegions = []
+  overlayControlsWindow?.hide()
+  if (!overlayWindow || overlayWindow.isDestroyed()) return
+  applyOverlayShape()
+  applyOverlayMouseIgnore(true)
+  const send = () => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || generation !== overlayLayout.generation) return
+    overlayWindow.webContents.send('overlay:layout-reset', generation)
+  }
+  send()
+  if (overlayLayoutRetry) clearTimeout(overlayLayoutRetry)
+  overlayLayoutRetry = setTimeout(() => { overlayLayoutRetry = null; if (!overlayLayout.ready) send() }, 600)
+  qaLog(`overlay layout reset: reason=${reason}; generation=${generation}`)
+}
+
+function recoverOverlayDisplay(reason: string) {
+  if (quitting || !overlayWindow || overlayWindow.isDestroyed()) return
+  if (!overlayBoundsRestored || !overlayNativeRestored) {
+    pendingDisplayRecoveryReason = reason
+    return
+  }
+  const revision = ++displayRecoveryRevision
+  // Keep the last stable logical size, not a transient DPI-scaled size emitted
+  // while an external panel is disconnecting/waking. Coalesce the event burst.
+  displayRecoveryBounds ??= stableOverlayBounds ?? overlayWindow.getBounds()
+  overlayPointerDrag = null
+  requestOverlayLayout(reason)
+  if (boundsSaveTimer) { clearTimeout(boundsSaveTimer); boundsSaveTimer = null }
+  if (displayRecoveryTimer) clearTimeout(displayRecoveryTimer)
+  displayRecoveryTimer = setTimeout(() => {
+    displayRecoveryTimer = null
+    const saved = displayRecoveryBounds
+    if (!saved || revision !== displayRecoveryRevision || quitting || !overlayWindow || overlayWindow.isDestroyed()) return
+    void applyOverlayBounds(visibleOverlayBounds(saved), false, () => revision === displayRecoveryRevision).then(async () => {
+      if (revision !== displayRecoveryRevision || quitting) return
+      displayRecoveryBounds = null
+      requestOverlayLayout(`${reason}-settled`)
+      // The native layered surface must rejoin the new display compositor.
+      // A showInactive on an already visible HWND is a no-op; actually unmap
+      // for one compositor frame. Preserve hide/close intent during that gap.
+      const reshow = (overlayWindow?.isVisible() || overlayRemapPending) && overlayShowRequested
+      if (reshow) {
+        overlayRemapPending = true
+        overlayWindow?.hide()
+        await new Promise(resolve => setTimeout(resolve, 50))
+        if (revision === displayRecoveryRevision && overlayShowRequested && !quitting && overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.showInactive()
+          overlayWindow.setIgnoreMouseEvents(overlayMouseIgnored, { forward: true })
+          overlayRemapPending = false
+        }
+      }
+      refreshTransparentHoverTracking()
+    }).catch(error => { if (revision === displayRecoveryRevision) displayRecoveryBounds = null; console.error('Overlay display recovery failed:', error) })
+  }, 900)
+}
+
+function cancelOverlayDisplayRecovery() {
+  ++displayRecoveryRevision
+  ++overlayBoundsOperation
+  applyingOverlayBounds = false
+  if (displayRecoveryTimer) clearTimeout(displayRecoveryTimer)
+  displayRecoveryTimer = null
+  displayRecoveryBounds = null
+  if (overlayRemapPending && overlayShowRequested && overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.showInactive()
+  overlayRemapPending = false
 }
 
 function startOverlayMouseTracking() {
   applyOverlayShape()
-  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
+  applyOverlayMouseIgnore(overlayInputTransparent())
 }
 
 function stopOverlayMouseTracking() {
   // Hidden windows retain the intended native policy for their next show.
-  applyOverlayMouseIgnore(!overlayMovable || overlayClickThrough)
+  applyOverlayMouseIgnore(overlayInputTransparent())
 }
 
 function publishOverlayBounds(updateShape = true) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return
   // Never publish default/half-restored dimensions back into persisted UI state.
-  if (!overlayBoundsRestored || !overlayNativeRestored || applyingOverlayBounds) return
+  if (!overlayBoundsRestored || !overlayNativeRestored || applyingOverlayBounds || displayRecoveryBounds || !overlayLayout.ready) return
   const bounds = overlayWindow.getBounds()
+  stableOverlayBounds = { ...bounds }
   if (updateShape && !overlayDragSettleTimer) applyOverlayShape()
   if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) syncOverlayControlsBounds()
   overlayWindow.webContents.send('overlay:bounds-changed', bounds)
@@ -481,8 +579,9 @@ function queueOverlayBounds(updateShape = true) {
   }, 16)
 }
 
-async function applyOverlayBounds(bounds: StoredWindowBounds, animate = false) {
+async function applyOverlayBounds(bounds: StoredWindowBounds, animate = false, isCurrent = () => true) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return bounds
+  const operation = ++overlayBoundsOperation
   applyingOverlayBounds = true
   try {
     // Moving a window between displays with different DPI in one setBounds()
@@ -490,13 +589,15 @@ async function applyOverlayBounds(bounds: StoredWindowBounds, animate = false) {
     // DPI transition finish first, then re-assert the saved logical size.
     overlayWindow.setPosition(bounds.x, bounds.y, animate)
     await new Promise(resolve => setTimeout(resolve, 100))
-    if (!overlayWindow || overlayWindow.isDestroyed()) return bounds
+    if (!overlayWindow || overlayWindow.isDestroyed() || operation !== overlayBoundsOperation || !isCurrent()) return bounds
     setExactOverlaySize(bounds.width, bounds.height, animate)
     await new Promise(resolve => setTimeout(resolve, 40))
     return overlayWindow.getBounds()
   } finally {
-    applyingOverlayBounds = false
-    publishOverlayBounds()
+    if (operation === overlayBoundsOperation) {
+      applyingOverlayBounds = false
+      publishOverlayBounds()
+    }
   }
 }
 
@@ -594,7 +695,49 @@ function createWindows() {
         : qaView === 'audio-sync-live' ? ['enabled', 'captures', 'analyses', 'stopped']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
-        : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds'] : [])
+        : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
+        : qaView === 'overlay-display-recovery' ? ['initial-layout', 'invalidated', 'fresh-layout', 'stale-rejected', 'locked-paint', 'native-coverage', 'bounds-preserved', 'visible', 'bounded-resets'] : [])
+      if (qaView === 'overlay-display-recovery' && overlayWindow) {
+        const waitForLayout = async () => {
+          for (let i = 0; i < 80 && (!overlayLayout.ready || displayRecoveryBounds || overlayRemapPending); i++) await new Promise(resolve => setTimeout(resolve, 50))
+          return overlayLayout.ready && !displayRecoveryBounds && !overlayRemapPending
+        }
+        const record = (name: string, passed: boolean) => { checks.record(name, passed); qaLog(`display recovery check: ${name}=${passed}`) }
+        await showOverlay()
+        record('initial-layout', await waitForLayout())
+        const before = overlayWindow.getBounds()
+        const generationBefore = overlayLayout.generation
+        // Exercise actual production recovery twice, including an event arriving
+        // after the first timer began its asynchronous native bounds operation.
+        recoverOverlayDisplay('qa-monitor-wake')
+        record('invalidated', !overlayLayout.ready && overlayMouseIgnored && overlayShapeKey === '[]')
+        await new Promise(resolve => setTimeout(resolve, 940))
+        recoverOverlayDisplay('qa-metrics-burst')
+        record('fresh-layout', await waitForLayout())
+        const currentGeneration = overlayLayout.generation
+        const stale = await overlayWindow.webContents.executeJavaScript(`window.syllable.overlay.setHitRegions([], undefined, {generation:${overlayLayout.generation - 1},viewport:{width:innerWidth,height:innerHeight}})`)
+        // A current layout/lyric can legitimately finish publishing while the
+        // IPC reply is in flight; compare ownership, not an old shape string.
+        record('stale-rejected', stale === false && overlayLayout.ready && currentGeneration === overlayLayout.generation && overlayHitRegions.length > 0)
+        setOverlayMovable(false)
+        const locked = inspectWindowRegion(overlayWindow)
+        record('locked-paint', locked.ok && !locked.hasCustomRegion && overlayShapeKey === '[]' && overlayMouseIgnored)
+        setOverlayMovable(true)
+        await new Promise(resolve => setTimeout(resolve, 350))
+        const regions = overlayHitRegions.map(rect => ({ ...rect }))
+        const native = inspectWindowRegion(overlayWindow)
+        const scale = native.dpi / 96
+        const covered = regions.every(rect => [
+          [rect.x + 1, rect.y + 1], [rect.x + rect.width - 1, rect.y + rect.height - 1],
+          [rect.x + rect.width / 2, rect.y + rect.height / 2]
+        ].every(([x, y]) => native.rectangles.some(box => x * scale >= box.x && x * scale < box.x + box.width && y * scale >= box.y && y * scale < box.y + box.height)))
+        record('native-coverage', native.ok && native.hasCustomRegion && regions.length > 0 && covered)
+        const after = overlayWindow.getBounds()
+        record('bounds-preserved', Object.entries(before).every(([key, value]) => Math.abs(after[key as keyof Electron.Rectangle] - value) <= 1))
+        record('visible', overlayWindow.isVisible())
+        record('bounded-resets', overlayLayout.generation - generationBefore < 24)
+        qaLog(`display recovery native: ${JSON.stringify({ before, after, regions, locked, native })}`)
+      }
       if (qaView === 'overlay-unlock' && overlayWindow && overlayControlsWindow) {
         await showOverlay()
         const initialBounds = overlayWindow.getBounds()
@@ -959,7 +1102,7 @@ function createWindows() {
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`overlay controls capture: visible=${overlayControlsWindow.isVisible()}, bounds=${JSON.stringify(overlayControlsWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayControlsWindow.webContents.capturePage()).toPNG())
-      } else if ((qaView === 'overlay' || qaView === 'overlay-sync' || qaView === 'overlay-custom' || qaView === 'overlay-drag-performance') && overlayWindow) {
+      } else if ((qaView === 'overlay' || qaView === 'overlay-sync' || qaView === 'overlay-custom' || qaView === 'overlay-drag-performance' || qaView === 'overlay-display-recovery') && overlayWindow) {
         overlayWindow.showInactive()
         await new Promise(resolve => setTimeout(resolve, 450))
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
@@ -969,7 +1112,7 @@ function createWindows() {
         checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
         checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
       }
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'audio-sync-live' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'audio-sync-live' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -987,7 +1130,7 @@ function createWindows() {
         })()`)
       }
       quitting = true
-      if (qaView?.startsWith('overlay-restore')) app.quit()
+      if (qaView?.startsWith('overlay-restore') || qaView === 'overlay-display-recovery') app.quit()
       else app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
     }, 7000)
   }
@@ -1003,11 +1146,25 @@ function createWindows() {
   overlayWindow.setBackgroundColor('#00000000')
   bindToolWindowStyle(overlayWindow, 'overlay')
   overlayWindow.on('move', () => queueOverlayBounds(false))
+  // Unlike resize notifications, these events represent an explicit native
+  // user gesture, not our own SetShape/setBounds work during screen recovery.
+  overlayWindow.on('will-resize', () => cancelOverlayDisplayRecovery())
+  overlayWindow.on('will-move', () => cancelOverlayDisplayRecovery())
   overlayWindow.on('resize', () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return
+    const bounds = overlayWindow.getBounds()
+    const key = JSON.stringify([bounds.width, bounds.height, ...overlayWindow.getContentSize()])
+    // SetShape/SetWindowRgn can synchronously emit a resize notification with
+    // unchanged dimensions. Invalidating from that notification recursively
+    // clears the shape again. Only a real viewport-size change owns a reset.
+    if (key === lastOverlayViewportKey) return
+    lastOverlayViewportKey = key
     suppressOverlayControls()
+    requestOverlayLayout('resize')
     queueOverlayBounds(true)
   })
   void overlayWindow.loadURL(rendererUrl('#/overlay'))
+  overlayWindow.webContents.on('did-finish-load', () => requestOverlayLayout('renderer-loaded'))
   overlayBoundsReady = windowBoundsStore.get().then(async storedBounds => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return
     hadStoredOverlayBounds = Boolean(storedBounds)
@@ -1336,6 +1493,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('overlay:ready', event => {
     if (event.sender !== overlayWindow?.webContents) return false
     acknowledgeOverlayRenderer()
+    overlayWindow.webContents.send('overlay:layout-reset', overlayLayout.generation)
     return true
   })
   ipcMain.handle('overlay:restore', async (event, settings) => {
@@ -1354,16 +1512,30 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     overlayNativeRestored = true
     acknowledgeOverlaySettings()
     publishOverlayBounds()
+    if (pendingDisplayRecoveryReason) {
+      const reason = pendingDisplayRecoveryReason
+      pendingDisplayRecoveryReason = ''
+      recoverOverlayDisplay(reason)
+    }
     return settings.overlayVisible === true ? showOverlay() : hideOverlay()
   })
   ipcMain.handle('overlay:show', showOverlay)
   ipcMain.handle('overlay:hide', hideOverlay)
   ipcMain.handle('overlay:click-through', (_event, value: boolean) => setOverlayClickThrough(value))
-  ipcMain.handle('overlay:hit-regions', (_event, regions: Array<{ x: number; y: number; width: number; height: number }>, controlsAnchor?: { x: number; y: number }) => {
-    const nextRegions = regions.filter(region => [region.x, region.y, region.width, region.height].every(Number.isFinite)).slice(0, 8)
+  ipcMain.handle('overlay:hit-regions', (event, regions: unknown, controlsAnchor?: unknown, layout?: { generation: number; viewport: { width: number; height: number } }) => {
+    if (!overlayWindow || event.sender !== overlayWindow.webContents) return false
+    const [width, height] = overlayWindow.getContentSize()
+    const wasReady = overlayLayout.ready
+    const publication = overlayLayout.accept({ ...layout, regions, controlsAnchor },
+      { width, height, zoomFactor: overlayWindow.webContents.getZoomFactor() })
+    if (!publication.accepted) {
+      if (!overlayLayout.ready) { applyOverlayShape(); applyOverlayMouseIgnore(true) }
+      return false
+    }
+    const nextRegions = publication.regions
     const regionsChanged = JSON.stringify(nextRegions) !== JSON.stringify(overlayHitRegions)
-    const nextAnchor = controlsAnchor && Number.isFinite(controlsAnchor.x) && Number.isFinite(controlsAnchor.y)
-      ? { x: Math.round(controlsAnchor.x), y: Math.round(controlsAnchor.y) }
+    const nextAnchor = publication.controlsAnchor
+      ? { x: Math.round(publication.controlsAnchor.x), y: Math.round(publication.controlsAnchor.y) }
       : null
     const anchorChanged = JSON.stringify(nextAnchor) !== JSON.stringify(overlayControlsAnchor)
     if (regionsChanged) {
@@ -1376,6 +1548,19 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
         applyOverlayShape()
       }
     }
+    // A layout arriving during the resize/drag grace period must eventually
+    // replace the old mask even if the next lyric has identical dimensions.
+    if (overlayShapeTimer) clearTimeout(overlayShapeTimer)
+    overlayShapeTimer = setTimeout(() => {
+      overlayShapeTimer = null
+      if (overlayPointerDrag || quitting) return
+      applyOverlayShape()
+      applyOverlayMouseIgnore(overlayInputTransparent())
+      if (!wasReady) publishOverlayBounds(false)
+    }, Math.max(0, overlayControlsSuppressedUntil - Date.now()) + 16)
+    const wasIgnored = overlayMouseIgnored
+    applyOverlayMouseIgnore(overlayInputTransparent())
+    if (wasIgnored !== overlayMouseIgnored) refreshTransparentHoverTracking()
     if (anchorChanged) {
       overlayControlsAnchor = nextAnchor
       if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) qaLog(`overlay controls anchor: ${JSON.stringify(overlayControlsAnchor)}`)
@@ -1389,6 +1574,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('overlay:bounds', async () => { await Promise.all([overlayBoundsReady, overlaySettingsReady]); return overlayWindow?.getBounds() ?? defaultOverlayBounds() })
   ipcMain.handle('overlay:size', (_event, width: number, height: number) => {
     if (!overlayWindow) return defaultOverlayBounds()
+    cancelOverlayDisplayRecovery()
     const area = screen.getDisplayMatching(overlayWindow.getBounds()).workArea
     setExactOverlaySize(Math.max(480, Math.min(area.width, Math.round(width))), Math.max(140, Math.min(area.height, Math.round(height))), true)
     publishOverlayBounds()
@@ -1397,6 +1583,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.on('overlay:move-start', event => {
     if (overlayPointerDrag) return
     if (!overlayMovable || (event.sender !== overlayWindow?.webContents && event.sender !== overlayControlsWindow?.webContents) || !overlayWindow) return
+    cancelOverlayDisplayRecovery()
     const fromControls = event.sender === overlayControlsWindow?.webContents
     const controlsWereVisible = overlayControlsWindow?.isVisible() ?? false
     overlayPointerDrag = { cursor: screen.getCursorScreenPoint(), bounds: overlayWindow.getBounds(), fromControls, controlsWereVisible }
@@ -1459,6 +1646,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('overlay:position', (_event, position: 'top' | 'center' | 'bottom') => {
     if (!overlayWindow) return defaultOverlayBounds()
+    cancelOverlayDisplayRecovery()
     const current = overlayWindow.getBounds()
     const area = screen.getDisplayMatching(current).workArea
     const margin = 32
@@ -1472,6 +1660,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('overlay:reset-position', async () => {
     if (!overlayWindow) return defaultOverlayBounds()
+    cancelOverlayDisplayRecovery()
     const current = overlayWindow.getBounds()
     const bounds = defaultOverlayBounds(current.width, current.height, screen.getDisplayMatching(current))
     return await applyOverlayBounds(bounds, true)
@@ -1495,6 +1684,13 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   // The bridge must be ready before either renderer loads; otherwise their
   // first playback, visibility, and hit-region requests can race startup.
   createWindows()
+  screen.on('display-added', () => recoverOverlayDisplay('display-added'))
+  screen.on('display-removed', () => recoverOverlayDisplay('display-removed'))
+  screen.on('display-metrics-changed', (_event, _display, metrics) => {
+    if (metrics.some(metric => ['bounds', 'workArea', 'scaleFactor', 'rotation'].includes(metric))) recoverOverlayDisplay(`display-metrics:${metrics.join(',')}`)
+  })
+  powerMonitor.on('resume', () => recoverOverlayDisplay('resume'))
+  powerMonitor.on('unlock-screen', () => recoverOverlayDisplay('unlock-screen'))
   if (!headlessAudioQa) createTray()
   if (forceOverlayForQa) setTimeout(showOverlay, 1200)
   await spotify.restore()
@@ -1533,19 +1729,28 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', event => {
   quitting = true
   vocalSync.clear()
-  void localSpotify?.close()
+  const closeNative = localSpotify?.close() ?? Promise.resolve()
   globalShortcut.unregisterAll()
   stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking()
   if (pollTimer) clearTimeout(pollTimer)
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
   if (boundsPublishTimer) clearTimeout(boundsPublishTimer)
+  if (overlayShapeTimer) clearTimeout(overlayShapeTimer)
+  if (overlayLayoutRetry) clearTimeout(overlayLayoutRetry)
+  if (displayRecoveryTimer) clearTimeout(displayRecoveryTimer)
   if (quitFlushed) return
   event.preventDefault()
   mainWindow?.webContents.session.flushStorageData()
-  const save = overlayBoundsRestored && overlayWindow && !overlayWindow.isDestroyed()
-    ? windowBoundsStore.set(overlayWindow.getBounds()) : Promise.resolve()
-  void save.catch(error => console.error('Final overlay bounds save failed:', error)).finally(() => {
+  const finalOverlayBounds = displayRecoveryBounds ?? (overlayLayout.ready && overlayWindow && !overlayWindow.isDestroyed()
+    ? overlayWindow.getBounds() : stableOverlayBounds)
+  const save = overlayBoundsRestored && overlayNativeRestored && finalOverlayBounds
+    ? windowBoundsStore.set(finalOverlayBounds) : Promise.resolve()
+  void Promise.all([
+    save.catch(error => console.error('Final overlay bounds save failed:', error)),
+    closeNative.catch(error => console.error('Native media shutdown failed:', error))
+  ]).finally(() => {
     quitFlushed = true
-    app.quit()
+    if (qaCapturePath) app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
+    else app.quit()
   })
 })

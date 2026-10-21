@@ -37,7 +37,7 @@ export function decodeCtcFrames(value: CtcOutput): CtcDecode {
   const reject = (reason: 'invalid-input' | 'unsupported-label'): CtcDecode => ({ reason, tokens: [] })
   if (!value || !value.geometry || !Array.isArray(value.vocabulary)
     || value.vocabulary.length < 2 || value.vocabulary.length > 512
-    || value.vocabulary.some(label => typeof label !== 'string' || !label || label.length > 32)
+    || [...value.vocabulary].some(label => typeof label !== 'string' || !label || label.length > 32)
     || new Set(value.vocabulary).size !== value.vocabulary.length
     || !Number.isInteger(value.blankId) || value.blankId < 0 || value.blankId >= value.vocabulary.length
     || !(value.logits instanceof Float32Array) || value.logits.length > 1_000_000) return reject('invalid-input')

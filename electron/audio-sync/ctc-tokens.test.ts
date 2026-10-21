@@ -69,5 +69,7 @@ describe('independent CTC probability-frame evidence', () => {
     }
     expect(decodeCtcFrames({ ...value, vocabulary: ['<blank>', 'kyo', 'N', 'cl', '<unk>', 'SOS', 'EOS', 'N'] }).reason).toBe('invalid-input')
     expect(decodeCtcFrames({ ...value, blankId: 100 }).reason).toBe('invalid-input')
+    const sparse = [...value.vocabulary]; delete sparse[4]
+    expect(decodeCtcFrames({ ...value, vocabulary: sparse }).reason).toBe('invalid-input')
   })
 })

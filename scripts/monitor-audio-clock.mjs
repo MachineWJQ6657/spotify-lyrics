@@ -5,6 +5,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
+import lifecycle from './monitor-lifecycle.cjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const seconds = Number(process.argv.find(value => value.startsWith('--seconds='))?.slice(10) ?? 300)
@@ -14,9 +15,11 @@ const startedAtMs = Date.now(), deadline = startedAtMs + seconds * 1000
 const report = { startedAtMs, limitSeconds: seconds, status: 'running', directory, samples: 0, captures: [] }
 const save = () => fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2))
 save(); console.log(JSON.stringify({ event: 'started', directory, limitSeconds: seconds }))
-let currentChild, latestNative, finished = false
-const native = new Worker(path.join(root, 'scripts/transition-audio-ab-native.cjs'))
+let currentChild, latestNative, finished = false, finishPromise, nativeFailure
+const native = new Worker(path.join(root, 'scripts/monitor-audio-native.cjs'))
 native.on('message', message => {
+  if (message.type === 'error') { nativeFailure = new Error(message.error || 'Native monitor error'); void finish(); return }
+  if (finished) return
   if (message.type !== 'sample') return
   const value = message.state ?? message.sample
   if (!value) return
@@ -26,14 +29,29 @@ native.on('message', message => {
   fs.appendFileSync(path.join(directory, 'timeline.ndjson'), JSON.stringify(row) + '\n')
   report.samples++; save()
 })
-native.on('error', error => console.log(JSON.stringify({ event: 'native-error', message: error.message })))
-async function finish() {
-  if (finished) return
-  finished = true; currentChild?.kill()
-  report.status = 'completed'; report.endedAtMs = Date.now(); save()
-  console.log(JSON.stringify({ event: 'completed', directory, captures: report.captures.length, samples: report.samples }))
-  void native.terminate()
-  setTimeout(() => process.exit(0), 1000)
+native.on('error', error => { nativeFailure = error; void finish() })
+native.on('exit', code => { if (!finished) { nativeFailure = new Error(`Unexpected native exit ${code}`); void finish() } })
+function finish() {
+  if (finishPromise) return finishPromise
+  finished = true
+  finishPromise = (async () => {
+    const capture = currentChild
+    const releaseCapture = capture ? new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Capture close timed out')), 3000)
+      capture.once('close', () => { clearTimeout(timer); resolve() })
+      try { capture.kill() } catch (error) { clearTimeout(timer); reject(error) }
+    }) : Promise.resolve()
+    const results = await Promise.allSettled([releaseCapture, lifecycle.closeMonitorNative(native)])
+    const failure = nativeFailure || results.find(result => result.status === 'rejected')?.reason
+    report.status = failure ? 'failed' : 'completed'; report.endedAtMs = Date.now()
+    if (failure) report.error = String(failure.message || failure)
+    save()
+    console.log(JSON.stringify({ event: report.status, directory, captures: report.captures.length, samples: report.samples, error: report.error }))
+    // Persist failure BEFORE forced teardown can terminate the native host.
+    if (failure) await native.terminate().catch(() => {})
+    process.exitCode = failure ? 1 : 0
+  })()
+  return finishPromise
 }
 const watchdog = setTimeout(() => void finish(), seconds * 1000)
 process.once('SIGINT', () => void finish()); process.once('SIGTERM', () => void finish())
@@ -59,8 +77,9 @@ while (!finished && Date.now() + 13000 < deadline) {
       catch { resolve({ error: stderr || stdout, code }) }
     })
   })
+  if (finished) break // Do not append a deliberately cancelled final capture.
   report.captures.push(result); save()
   console.log(JSON.stringify({ event: 'capture', directory, ...result }))
-  if (result.error) break
+  if (result.error) { nativeFailure = new Error('Audio capture failed'); break }
 }
 clearTimeout(watchdog); await finish()

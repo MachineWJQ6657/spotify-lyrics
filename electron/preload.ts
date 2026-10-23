@@ -76,6 +76,12 @@ contextBridge.exposeInMainWorld('syllable', {
     }
   },
   window: {
+    visibility: () => ipcRenderer.invoke('window:visibility'),
+    onVisibilityChanged: (callback: (visible: boolean) => void) => {
+      const handler = (_: unknown, visible: boolean) => callback(visible)
+      ipcRenderer.on('window:visibility-changed', handler)
+      return () => ipcRenderer.removeListener('window:visibility-changed', handler)
+    },
     show: () => ipcRenderer.invoke('window:show'),
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),

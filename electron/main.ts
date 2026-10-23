@@ -25,6 +25,7 @@ import { VocalSync } from './audio-sync/vocal-sync'
 import { LocalCtc } from './audio-sync/local-ctc'
 import { PhonemeSession } from './audio-sync/phoneme-session'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
+import { watchWindowVisibility, windowVisible } from './window-visibility'
 import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -116,7 +117,7 @@ const liveAudioQa = qaView === 'audio-sync-live' || qaView === 'audio-phoneme-li
 // Offscreen audio-panel checks must not interrupt the user's active desktop.
 // This mode requires explicit QA capture arguments and an isolated profile.
 const headlessAudioQa = process.argv.includes('--syllable-qa-headless') && Boolean(qaCapturePath)
-  && (qaView === 'audio-sync' || liveAudioQa)
+  && (qaView === 'audio-sync' || liveAudioQa || qaView === 'performance')
   && process.argv.some(value => value.startsWith('--user-data-dir='))
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
 let qaVocalCaptures = 0
@@ -612,6 +613,12 @@ async function applyOverlayBounds(bounds: StoredWindowBounds, animate = false, i
   }
 }
 
+function bindRenderVisibility(window: BrowserWindow) {
+  watchWindowVisibility(window, visible => {
+    if (!window.webContents.isDestroyed()) window.webContents.send('window:visibility-changed', visible)
+  })
+}
+
 function createWindows() {
   const testArea = secondaryMonitorQa ? secondaryDisplay().workArea : null
   const mainWidth = testArea ? Math.min(1120, testArea.width) : 1120
@@ -627,6 +634,7 @@ function createWindows() {
     backgroundColor: '#000000', titleBarStyle: 'hidden', icon: appIcon(),
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: !headlessAudioQa, offscreen: headlessAudioQa }
   })
+  bindRenderVisibility(mainWindow)
   void mainWindow.loadURL(rendererUrl())
   mainWindow.webContents.on('render-process-gone', () => {
     audioCaptureGrantUntil = 0; activeAudioMode = null
@@ -707,6 +715,7 @@ function createWindows() {
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
         : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary', 'romaji'] : [])]
         : liveAudioQa ? ['enabled', 'captures', 'analyses', 'stopped', ...(qaView === 'audio-phoneme-live' ? ['diagnostic-only', 'hidden'] : [])]
+        : qaView === 'performance' ? ['isolated', 'hidden-clock', 'fresh-samples', 'visible-clock', 'rehidden-clock', 'restore-projection', 'hidden-surfaces']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
         : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
@@ -880,6 +889,44 @@ function createWindows() {
           checks.record('hidden', headlessAudioQa && !mainWindow.isVisible() && !overlayWindow?.isVisible() && !overlayControlsWindow?.isVisible() && !tray)
         }
         qaLog(`audio sync live: ${JSON.stringify({ enabled, captures: qaVocalCaptures, analyses: qaVocalAnalyses, stopped })}`)
+      }
+      if (qaView === 'performance') {
+        checks.record('isolated', headlessAudioQa && secondaryMonitorQa && screen.getAllDisplays().length > 1)
+        const snapshot = async () => ({
+          renderer: await mainWindow!.webContents.executeJavaScript(`({ probe: window.__syllablePositionProbe,
+            renders: window.__syllableRenderProbe, documentVisible: document.visibilityState,
+            time: document.querySelector('.progress-row span')?.textContent,
+            heapBytes: performance.memory?.usedJSHeapSize ?? null })`),
+          processes: app.getAppMetrics().map(item => ({ type: item.type, pid: item.pid,
+            cpu: item.cpu.percentCPUUsage, workingSetKiB: item.memory.workingSetSize }))
+        })
+        await mainWindow.webContents.executeJavaScript('window.__syllablePositionProbe = {ticks:0,samples:0}; window.__syllableRenderProbe = {}')
+        await new Promise(resolve => setTimeout(resolve, 2400))
+        const hidden = await snapshot()
+        checks.record('hidden-clock', hidden.renderer.probe?.ticks === 0)
+        checks.record('fresh-samples', hidden.renderer.probe?.samples > 0 && Boolean(lastPlayback?.isPlaying))
+        // Explicit secondary-only fixture: showInactive must not steal focus.
+        if (secondaryMonitorQa && screen.getAllDisplays().length > 1) mainWindow.showInactive()
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        const shown = await snapshot()
+        checks.record('visible-clock', shown.renderer.probe?.ticks - hidden.renderer.probe?.ticks >= 12)
+        mainWindow.hide()
+        await new Promise(resolve => setTimeout(resolve, 120))
+        const hiddenAgain = await snapshot()
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        const settled = await snapshot()
+        checks.record('rehidden-clock', settled.renderer.probe?.ticks === hiddenAgain.renderer.probe?.ticks)
+        if (secondaryMonitorQa && screen.getAllDisplays().length > 1) mainWindow.showInactive()
+        await new Promise(resolve => setTimeout(resolve, 120))
+        const restored = await snapshot()
+        const clockText = String(restored.renderer.time ?? '').match(/^(\d+):(\d+)$/)
+        const displayedSeconds = clockText ? Number(clockText[1]) * 60 + Number(clockText[2]) : NaN
+        const expectedSeconds = lastPlayback ? (lastPlayback.positionMs + (lastPlayback.isPlaying ? Math.max(0, Date.now() - lastPlayback.observedAtMs) : 0)) / 1000 : NaN
+        checks.record('restore-projection', Math.abs(displayedSeconds - expectedSeconds) <= 1.2)
+        mainWindow.hide()
+        checks.record('hidden-surfaces', !mainWindow.isVisible() && !overlayWindow?.isVisible() && !overlayControlsWindow?.isVisible() && !tray)
+        qaLog(`performance phases: ${JSON.stringify({hidden, shown, hiddenAgain, settled, restored})}`)
+        await mainWindow.webContents.executeJavaScript('delete window.__syllablePositionProbe; delete window.__syllableRenderProbe')
       }
       if (qaView === 'render-isolation') {
         const playingAtStart = Boolean(lastPlayback?.isPlaying)
@@ -1131,7 +1178,7 @@ function createWindows() {
         checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
         checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
       }
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || liveAudioQa || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || liveAudioQa || qaView === 'performance' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -1162,6 +1209,7 @@ function createWindows() {
     hasShadow: false, webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+  bindRenderVisibility(overlayWindow)
   overlayWindow.setBackgroundColor('#00000000')
   bindToolWindowStyle(overlayWindow, 'overlay')
   overlayWindow.on('move', () => queueOverlayBounds(false))
@@ -1224,6 +1272,7 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
   overlayControlsWindow.setAlwaysOnTop(true, 'screen-saver')
+  bindRenderVisibility(overlayControlsWindow)
   overlayControlsWindow.setOpacity(1)
   overlayControlsWindow.setMenu(null)
   bindToolWindowStyle(overlayControlsWindow, 'overlay-controls')
@@ -1710,6 +1759,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return setOverlayMovable(value)
   })
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
+  ipcMain.handle('window:visibility', event => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return [mainWindow, overlayWindow, overlayControlsWindow].includes(owner) && windowVisible(owner)
+  })
   ipcMain.handle('window:maximize', () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize())
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:show', event => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createReferenceDeduplicatingStorage, useAppStore } from './useAppStore'
 import type { LyricsDocument } from '../types'
 
@@ -90,6 +90,116 @@ describe('application-state persistence', () => {
 
     storage.setItem('preferences', { state: { settings: { ...settings }, library } } as unknown as Parameters<typeof storage.setItem>[1])
     expect(writes).toBe(2)
+  })
+
+  it('reuses the library JSON during settings edits and serializes a replacement exactly once', () => {
+    const values = new Map<string, string>()
+    const backend = { getItem: (name: string) => values.get(name) ?? null,
+      setItem: (name: string, value: string) => { values.set(name, value) }, removeItem: () => undefined } as unknown as Storage
+    const storage = createReferenceDeduplicatingStorage(backend)
+    let lineReads = 0
+    const document = { trackId: 'song', tracks: [{ lines: [{ startMs: 1000,
+      get text() { lineReads += 1; return '保留完整歌词' } }] }] }
+    const library = { song: document }
+    const write = (nextLibrary: typeof library, fontSize: number) => storage.setItem('preferences', {
+      version: 9, state: { settings: { fontSize }, library: nextLibrary }
+    } as unknown as Parameters<typeof storage.setItem>[1])
+    write(library, 52)
+    expect(lineReads).toBe(1)
+    for (let fontSize = 53; fontSize < 83; fontSize += 1) write(library, fontSize)
+    expect(lineReads).toBe(1)
+    write({ ...library }, 83)
+    expect(lineReads).toBe(2)
+    expect(JSON.parse(values.get('preferences')!)).toEqual({ version: 9,
+      state: { settings: { fontSize: 83 }, library: { song: { trackId: 'song',
+        tracks: [{ lines: [{ startMs: 1000, text: '保留完整歌词' }] }] } } } })
+  })
+
+  it('hydrates without another stringify and lazily caches the library on the first real edit', () => {
+    let saved = JSON.stringify({ version: 9, state: { settings: { fontSize: 52 },
+      library: { song: { trackId: 'song' } } } })
+    let writes = 0
+    const storage = createReferenceDeduplicatingStorage({ getItem: () => saved,
+      setItem: (_name: string, value: string) => { writes += 1; saved = value },
+      removeItem: () => undefined } as unknown as Storage)
+    const stringify = vi.spyOn(JSON, 'stringify')
+    let hydrated: NonNullable<Awaited<ReturnType<typeof storage.getItem>>>
+    try {
+      hydrated = storage.getItem('preferences') as typeof hydrated
+      expect(stringify).not.toHaveBeenCalled()
+      storage.setItem('preferences', hydrated)
+      expect(stringify).not.toHaveBeenCalled()
+    } finally { stringify.mockRestore() }
+    let libraryReads = 0
+    Object.defineProperty(hydrated!.state.library.song, 'trackId', {
+      enumerable: true, get: () => { libraryReads += 1; return 'song' }
+    })
+    for (const fontSize of [53, 54, 55]) storage.setItem('preferences', {
+      ...hydrated!, state: { ...hydrated!.state, settings: { ...hydrated!.state.settings, fontSize } }
+    })
+    expect(writes).toBe(3)
+    expect(libraryReads).toBe(1)
+    expect(JSON.parse(saved).state.library.song.trackId).toBe('song')
+  })
+
+  it('does not commit a replacement library cache after a failed storage write', () => {
+    let fail = false
+    let saved = ''
+    const storage = createReferenceDeduplicatingStorage({ getItem: () => null,
+      setItem: (_name: string, value: string) => { if (fail) throw new Error('quota'); saved = value },
+      removeItem: () => undefined } as unknown as Storage)
+    const initial = { version: 9, state: { settings: {}, library: { song: { trackId: 'first' } } } } as unknown as Parameters<typeof storage.setItem>[1]
+    storage.setItem('preferences', initial)
+    let reads = 0
+    const next = { ...initial, state: { ...initial.state, library: { song: {
+      get trackId() { reads += 1; return 'replacement' }, tracks: []
+    } } } }
+    fail = true
+    expect(() => storage.setItem('preferences', next)).toThrow('quota')
+    expect(reads).toBe(1)
+    expect(JSON.parse(saved)).toEqual(initial)
+    fail = false
+    storage.setItem('preferences', next)
+    expect(reads).toBe(2)
+    storage.setItem('preferences', { ...next, state: { ...next.state, settings: { ...next.state.settings } } })
+    expect(reads).toBe(2)
+    expect(JSON.parse(saved).state.library.song.trackId).toBe('replacement')
+  })
+
+  it('retries a library serialization failure without writing partial JSON', () => {
+    let failedRead = true
+    let writes = 0
+    let saved = ''
+    const storage = createReferenceDeduplicatingStorage({ getItem: () => null,
+      setItem: (_name: string, value: string) => { writes += 1; saved = value },
+      removeItem: () => undefined } as unknown as Storage)
+    const value = { version: 9, state: { settings: {}, library: { song: {
+      get trackId() { if (failedRead) throw new Error('serialization failure'); return 'song' }, tracks: []
+    } } } } as unknown as Parameters<typeof storage.setItem>[1]
+    expect(() => storage.setItem('preferences', value)).toThrow('serialization failure')
+    expect(writes).toBe(0)
+    failedRead = false
+    storage.setItem('preferences', value)
+    expect(writes).toBe(1)
+    expect(JSON.parse(saved).state.library.song.trackId).toBe('song')
+  })
+
+  it('preserves key, version, omitted fields and escaped JSON content', () => {
+    const values = new Map<string, string>()
+    const storage = createReferenceDeduplicatingStorage({ getItem: (name: string) => values.get(name) ?? null,
+      setItem: (name: string, value: string) => { values.set(name, value) },
+      removeItem: (name: string) => { values.delete(name) } } as unknown as Storage)
+    const value = { version: 9, state: { settings: { label: '"state":{}\n\\日本語', ignored: undefined },
+      library: { '"song"': { trackId: 'song', tracks: [] } } } } as unknown as Parameters<typeof storage.setItem>[1]
+    storage.setItem('first', value)
+    storage.setItem('second', value)
+    storage.setItem('first', { ...value, version: 10 })
+    expect(JSON.parse(values.get('second')!)).toEqual(JSON.parse(JSON.stringify(value)))
+    expect(JSON.parse(values.get('first')!).version).toBe(10)
+    storage.removeItem('first')
+    expect(values.has('first')).toBe(false)
+    storage.setItem('first', value)
+    expect(JSON.parse(values.get('first')!)).toEqual(JSON.parse(JSON.stringify(value)))
   })
 
   it('does not notify the UI for repeated connection flags or no-op setting patches', () => {

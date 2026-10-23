@@ -52,7 +52,8 @@ interface SyllableApi {
     onVisibilityChanged(callback: (visible: boolean) => void): () => void
     onClickThroughChanged(callback: (value: boolean) => void): () => void
   }
-  window: { show(): Promise<boolean>; minimize(): Promise<void>; maximize(): Promise<void>; close(): Promise<void> }
+  window: { show(): Promise<boolean>; minimize(): Promise<void>; maximize(): Promise<void>; close(): Promise<void>;
+    visibility(): Promise<boolean>; onVisibilityChanged(callback: (visible: boolean) => void): () => void }
   meta: { redirectUri: string }
 }
 

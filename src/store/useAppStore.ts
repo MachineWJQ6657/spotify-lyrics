@@ -70,29 +70,64 @@ const memoryOnlyStorage: PersistStorage<PersistedAppState> = {
  * still committed immediately.
  */
 export function createReferenceDeduplicatingStorage(storage: Storage): PersistStorage<PersistedAppState> {
+  let previousName: string | undefined
+  let previousVersion: number | undefined
   let previousSettings: AppSettings | undefined
   let previousLibrary: Record<string, LyricsDocument> | undefined
+  let serializedLibrary: string | undefined
+  let hasSerializedLibrary = false
+  const reset = () => {
+    previousName = undefined
+    previousVersion = undefined
+    previousSettings = undefined
+    previousLibrary = undefined
+    serializedLibrary = undefined
+    hasSerializedLibrary = false
+  }
+  // Keep the legacy single-key JSON format, but do not walk every lyric line
+  // again while the user drags a settings slider. Only immutable library
+  // replacements require a new library fragment; localStorage writes remain
+  // synchronous so closing the client cannot discard a pending setting.
+  const appendJsonField = (object: string, key: string, value: string | undefined) => value === undefined
+    ? object
+    : `${object.slice(0, -1)}${object.length > 2 ? ',' : ''}"${key}":${value}}`
   return {
     getItem(name) {
       const raw = storage.getItem(name)
-      if (!raw) return null
+      if (!raw) { reset(); return null }
       const value = JSON.parse(raw) as StorageValue<PersistedAppState>
+      previousName = name
+      previousVersion = value.version
       previousSettings = value.state?.settings
       previousLibrary = value.state?.library
+      // Hydration already parsed the library. Do not stringify it a second
+      // time until a real edit needs a write; transport-only updates skip it.
+      serializedLibrary = undefined
+      hasSerializedLibrary = false
       return value
     },
     setItem(name, value) {
-      if (value.state.settings === previousSettings && value.state.library === previousLibrary) return
+      if (name === previousName && value.version === previousVersion
+        && value.state.settings === previousSettings && value.state.library === previousLibrary) return
+      const library = value.state.library
+      const libraryJson = hasSerializedLibrary && library === previousLibrary
+        ? serializedLibrary
+        : JSON.stringify(library)
+      const stateJson = appendJsonField(JSON.stringify({ ...value.state, library: undefined }), 'library', libraryJson)
+      const serialized = appendJsonField(JSON.stringify({ ...value, state: undefined }), 'state', stateJson)
       // Commit the deduplication marker only after serialization and storage
       // succeed. A failed quota/disk write must remain eligible for retry.
-      storage.setItem(name, JSON.stringify(value))
+      storage.setItem(name, serialized)
+      previousName = name
+      previousVersion = value.version
       previousSettings = value.state.settings
-      previousLibrary = value.state.library
+      previousLibrary = library
+      serializedLibrary = libraryJson
+      hasSerializedLibrary = true
     },
     removeItem(name) {
-      previousSettings = undefined
-      previousLibrary = undefined
       storage.removeItem(name)
+      reset()
     }
   }
 }

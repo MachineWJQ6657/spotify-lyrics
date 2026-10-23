@@ -52,6 +52,9 @@ const checks = {
   rawNativeClock: native.includes('function observeNativeClock(') && native.includes('nativeClockPosition(nativeClock, performance.now())') && !native.includes('client.positionSmoothMs'),
   rawBoundaryQuarantine: native.includes('function guardNativeBoundary(') && native.includes('nativeBoundaryPending') && native.includes('boundary.observedAtMs'),
   stablePcmTimestamp: renderer.includes('class CaptureTimeline') && renderer.includes('captureTimeline.timestamp('),
+  nativeVisualSuspension: main.includes('watchWindowVisibility') && main.includes('window:visibility')
+    && renderer.includes('nativeVisible.current') && renderer.includes('visibilitychange'),
+  cachedLibrarySerialization: renderer.includes('serializedLibrary') && renderer.includes('hasSerializedLibrary') && renderer.includes('libraryJson'),
   phonemeDiagnosticIsolation: main.includes('audio-sync:phoneme') && main.includes('clockApplied: false')
     && renderer.includes('开启音素校验（不接管）') && renderer.includes('未接管歌词时钟'),
   boundedPhonemeRuntime: main.includes('class LocalCtc') && main.includes('this.stoppingChild') && main.includes('Local phoneme shutdown failed:'),

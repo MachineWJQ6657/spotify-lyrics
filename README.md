@@ -2,9 +2,11 @@
 
 Syllable 是一个面向 Spotify 的多语言桌面歌词客户端。Windows 上打开 Spotify 桌面端并播放歌曲即可自动同步，不需要先申请开发者账号；也可以选择连接 Spotify Web API。
 
-当前源码为 0.4.43 实验候选版；实际部署位置与验收状态以 [CONTINUATION.md](CONTINUATION.md) 顶部为准，旧 ZIP / Setup 不代表本版。
+当前源码为 0.4.44 实验候选版；实际部署位置与验收状态以 [CONTINUATION.md](CONTINUATION.md) 顶部为准，旧 ZIP / Setup 不代表本版。
 歌词跨源完整性、自定义转场下的实际听觉同步仍在验证中；以下功能清单不代表所有歌曲均已同步准确。
 续作状态见 [CONTINUATION.md](CONTINUATION.md)，待办见 [TODO.md](TODO.md)。本机测试截图和账号缓存不随仓库发布。
+
+0.4.44 暂停隐藏窗口的视觉定时刷新（媒体时钟仍持续采样），并避免设置滑块反复序列化整座歌词库。性能实测、清理范围与恢复方式见 [性能与目录清理记录](docs/performance-cleanup-2026-10-23.md)。
 
 ## 0.4.30 声音同步实验
 

@@ -1,6 +1,6 @@
 {
   "name": "syllable",
-  "version": "0.4.42",
+  "version": "0.4.43",
   "private": true,
   "description": "A multilingual floating lyrics companion for Spotify",
   "author": "Syllable Contributors",
@@ -55,6 +55,10 @@
       {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "scripts/audio-sync/romaji-ctc-runner.py",
+        "to": "audio-sync/romaji-ctc-runner.py"
       }
     ],
     "asarUnpack": [

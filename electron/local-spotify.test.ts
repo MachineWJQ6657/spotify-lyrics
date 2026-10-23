@@ -107,6 +107,22 @@ describe('local Spotify command clock ownership', () => {
     finish(); await pending
     expect(service.current()).toMatchObject({ positionMs: 11_900, isPlaying: true })
   })
+
+  it('does not turn a bounded confirmed native reset into another2.8-second position hold', () => {
+    const { service, receive } = controlFixture()
+    receive({ positionMs: 0, durationMs: 180_000, sampledAtMs: 2_000, nativeBoundaryResetConfirmed: true })
+    expect(service.current()).toMatchObject({ positionMs: 0, isPlaying: true })
+    vi.setSystemTime(2_250)
+    expect(service.current()?.positionMs).toBe(250)
+  })
+
+  it('checks raw next-item duration ownership before applying the outgoing Mix duration', () => {
+    const { service, internals, receive } = controlFixture()
+    Object.assign(internals, { transitionTrackIdentity: localTrackIdentity(internals.state!), transitionProfile: { outputDurationMs: 200_000 } })
+    receive({ positionMs: 0, durationMs: 218_000, sampledAtMs: 2_000, nativeBoundaryResetConfirmed: true })
+    expect(service.current()).toMatchObject({ positionMs: 0, track: { durationMs: 200_000 } })
+    expect((internals as unknown as { durationChangeCandidate: { durationMs: number } }).durationChangeCandidate.durationMs).toBe(218_000)
+  })
 })
 
 describe('local Spotify track identity', () => {
@@ -169,6 +185,20 @@ describe('local Spotify track identity', () => {
 })
 
 describe('local Spotify startup clock gate', () => {
+  it.each([
+    { elapsedMs: 2145, progressMs: 4501 },
+    { elapsedMs: 1485, progressMs: 4511 },
+  ])('retains the existing startup quarantine for measured stale subscription +$progressMs ms in$elapsedMs ms', ({ elapsedMs, progressMs }) => {
+    const state = { artist: 'ヨルシカ', title: 'ただ君に晴れ', album: 'ただ君に晴れ', positionMs: 161385, statusName: 'PLAYING' }
+    const initial = advanceStartupClockGate(null, state, 0)
+    expect(initial?.readyAtMs).toBe(5000)
+    const corrected = advanceStartupClockGate(initial, { ...state, positionMs: state.positionMs + progressMs }, elapsedMs)
+    expect(corrected).toMatchObject({ correctionDetected: true, readyAtMs: elapsedMs + 180 })
+    // This is an authoritative initial correction, not evidence for scaling
+    // the remainder of the song or extrapolating a non-unit playback rate.
+    expect(corrected?.anchorPositionMs).toBe(state.positionMs + progressMs)
+  })
+
   it('quarantines the observed Shura stale startup sample before the authoritative update', () => {
     const state = { artist: 'ヨルシカ', title: '修羅', album: '', positionMs: 27506, statusName: 'PLAYING' }
     const initial = advanceStartupClockGate(null, state, 32)

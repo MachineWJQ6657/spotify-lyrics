@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
 export default defineConfig({
-  main: { build: { rollupOptions: { input: resolve('electron/main.ts'), external: ['libspotifyctl', 'koffi'] } } },
+  main: { build: { rollupOptions: { input: { main: resolve('electron/main.ts'), 'ctc-matcher-worker': resolve('electron/audio-sync/ctc-matcher-worker.ts') }, external: ['libspotifyctl', 'koffi'] } } },
   preload: {
     build: {
       rollupOptions: {

@@ -85,6 +85,8 @@ export interface LyricsCandidate {
 export interface AppSettings {
   /** Remember the one-time system-output capture opt-in across tracks and launches. */
   automaticAudioSync?: boolean
+  /** Diagnostic CTC backend never publishes a playback/lyric clock anchor. */
+  audioSyncBackend?: 'whisper' | 'phoneme-diagnostic'
   enabledLanguages: string[]
   romanization: boolean
   offsetMs: number

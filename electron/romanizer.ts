@@ -16,6 +16,8 @@ type JobMode = keyof JobOutput
 const jobs = new Map<string, Promise<unknown>>()
 let queue: Promise<unknown> = Promise.resolve()
 let sequence = 0
+let blockedWorker: Worker | null = null
+const queuedRejectors = new Set<(error: Error) => void>()
 
 function abortError() {
   const error = new Error('日文分析已取消')
@@ -35,6 +37,7 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
     return Promise.reject(new Error('日文分析输入过大（最多 400 行、16000 字，每行 500 字）'))
   }
   if (!lines.length) return Promise.resolve([] as unknown as JobOutput[M])
+  if (blockedWorker) return Promise.reject(new Error('上一次日文分析尚未确认退出，暂不启动新字典'))
   // Cancellable requests have independent ownership, even with identical input.
   const key = `${mode}:${JSON.stringify(lines)}${signal ? `:${++sequence}` : ''}`
   const existing = jobs.get(key)
@@ -47,6 +50,11 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
   const task = new Promise<JobOutput[M]>((resolve, reject) => { resolveTask = resolve; rejectTask = reject })
   let cancelled = false
   let finishActive: ((output?: JobOutput[M], error?: Error) => void) | undefined
+  const rejectQueued = (error: Error) => {
+    if (finishActive) return
+    cancelled = true; rejectTask(error)
+  }
+  queuedRejectors.add(rejectQueued)
   const cancel = () => {
     cancelled = true
     if (finishActive) finishActive(undefined, abortError())
@@ -96,31 +104,59 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
         wanakanaPath: nodeRequire.resolve('wanakana')
       }
     })
-    let finished = false
+    let finished = false, exited = false, settled = false
+    let stopTimer: NodeJS.Timeout | undefined
+    let finalOutput: JobOutput[M] | undefined, finalError: Error | undefined
+    const settle = (error = finalError) => {
+      if (settled) return
+      settled = true
+      if (stopTimer) clearTimeout(stopTimer)
+      if (cancelled) rejectTask(abortError())
+      else if (error) rejectTask(error)
+      else resolveTask(finalOutput ?? [] as unknown as JobOutput[M])
+    }
+    const confirmExit = () => {
+      exited = true
+      if (blockedWorker === worker) blockedWorker = null
+      releaseQueue()
+      if (finished) settle()
+    }
+    const stopFailed = () => {
+      if (settled || exited) return
+      // Reject callers within a bounded cleanup budget, but do not release the
+      // physical queue until exit is confirmed. Reject queued work too so a
+      // broken dictionary cannot strand callers or stack expanded dictionaries.
+      const error = new Error('日文分析字典未能在 2 秒内确认退出，已暂停新分析')
+      blockedWorker = worker
+      worker.unref()
+      settle(error)
+      for (const reject of queuedRejectors) reject(error)
+    }
     const finish = (output?: JobOutput[M], error?: Error) => {
       if (finished) return
-      finished = true
+      finished = true; finalOutput = output; finalError = error
       clearTimeout(timer)
       // Do not release the queue while the expanded dictionary still lives.
-      void worker.terminate().then(() => {
-        releaseQueue()
-        if (cancelled) rejectTask(abortError())
-        else if (error) rejectTask(error)
-        else resolveTask(output ?? [] as unknown as JobOutput[M])
-      }, fail)
+      if (exited) { settle(); return }
+      stopTimer = setTimeout(stopFailed, 2000)
+      // Node's successful terminate promise is itself confirmation of exit;
+      // reject/throw/hang is not, and must not admit the next dictionary.
+      try { void worker.terminate().then(confirmExit, stopFailed) }
+      catch { stopFailed() }
     }
     finishActive = finish
     const timer = setTimeout(() => finish(undefined, new Error('日文分析超时')), 20_000)
-    worker.once('message', (message: { output?: JobOutput[M]; error?: string }) => {
-      if (message.output) finish(message.output)
-      else finish(undefined, new Error(message.error || '日文分析失败'))
+    worker.once('message', (message: { output?: JobOutput[M]; error?: string } | null) => {
+      if (message && typeof message === 'object' && Array.isArray(message.output)) finish(message.output)
+      else finish(undefined, new Error(message?.error || '日文分析失败'))
     })
     worker.once('error', error => finish(undefined, error))
-    worker.once('exit', () => finish(undefined, new Error('日文分析进程提前退出')))
+    worker.once('exit', () => { confirmExit(); finish(undefined, new Error('日文分析进程提前退出')) })
   }).catch(fail)
   jobs.set(key, task)
   void task.finally(() => {
     signal?.removeEventListener('abort', cancel)
+    queuedRejectors.delete(rejectQueued)
     jobs.delete(key)
   }).catch(() => undefined)
   return task

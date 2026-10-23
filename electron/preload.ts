@@ -4,8 +4,10 @@ contextBridge.exposeInMainWorld('syllable', {
   audioSync: {
     prepare: (mode?: string) => ipcRenderer.invoke('audio-sync:prepare', mode),
     engineStatus: () => ipcRenderer.invoke('audio-sync:engine-status'),
+    phonemeStatus: () => ipcRenderer.invoke('audio-sync:phoneme-status'),
     configureEngine: () => ipcRenderer.invoke('audio-sync:configure-engine'),
     vocal: (value: unknown) => ipcRenderer.invoke('audio-sync:vocal', value),
+    phoneme: (value: unknown) => ipcRenderer.invoke('audio-sync:phoneme', value),
     clear: () => ipcRenderer.invoke('audio-sync:clear'),
     observation: (value: unknown) => ipcRenderer.invoke('audio-sync:observation', value)
   },

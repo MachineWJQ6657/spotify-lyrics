@@ -7,7 +7,9 @@ export function AudioSyncPanel() {
   const playback = useAppStore(store => store.playback)
   const [error, setError] = useState('')
   const [engine, setEngine] = useState<{ ready: boolean; modelName: string; message: string } | null>(null)
+  const [phoneme, setPhoneme] = useState<{ available: boolean; message: string } | null>(null)
   useEffect(() => { let active = true; void window.syllable.audioSync.engineStatus().then(value => { if (active) setEngine(value) }).catch(() => {}); return () => { active = false } }, [])
+  useEffect(() => { let active = true; void window.syllable.audioSync.phonemeStatus().then(value => { if (active) setPhoneme(value) }).catch(() => {}); return () => { active = false } }, [])
   const input = useRef<HTMLInputElement>(null)
   const run = async (operation: () => Promise<void>) => {
     setError('')
@@ -19,9 +21,11 @@ export function AudioSyncPanel() {
     <p>读取系统输出（包括其他应用声音），不使用麦克风、不上传。每次分析新增 12 秒声音，较快的引擎会保留上一段作为上下文；临时 WAV 最长 30 秒，任务结束后删除。只运行一个识别进程，4 线程、15 秒限时。异常退出可能留下临时文件。</p>
     <p>{engine?.message ?? '正在检查本地识别引擎…'} {engine?.ready ? engine.modelName : ''}</p>
     <p>日语不同写法可通过读音补充匹配，需要时短暂加载字典并及时释放；漏字、弱起首词和重复段落仍需继续收集声音。</p>
+    <p>日语音素校验是独立诊断后端：无歌词提示识别歌声，保留重复句与句中词的竞争解释。它不会接管时间轴，也不代表同步已成功；与人声同步二选一，不同时运行。只用内存 PCM、2 线程、15 秒总限时，空闲自动释放模型。{phoneme?.message}</p>
     <div className="audio-sync-actions">
       <button disabled={state.busy || state.running} onClick={() => void run(async () => { const value = await window.syllable.audioSync.configureEngine(); if (value) setEngine(value) })}>配置本地引擎</button>
       <button disabled={!engine?.ready || state.automatic || state.busy || state.running} onClick={() => void run(acousticController.startVocal)}>开启自动声音同步</button>
+      <button disabled={!phoneme?.available || state.automatic || state.busy || state.running} onClick={() => void run(acousticController.startPhoneme)}>开启音素校验（不接管）</button>
       <button disabled={!state.automatic && !state.running && !state.busy} onClick={() => void run(() => acousticController.stop())}>关闭声音同步</button>
     </div>
     <input ref={input} type="file" accept="audio/*,.flac,.wav,.mp3,.m4a,.ogg" hidden onChange={event => {

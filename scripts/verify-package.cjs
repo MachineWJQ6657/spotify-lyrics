@@ -50,6 +50,13 @@ const checks = {
   cancellableWebMutations: main.includes('controller.signal.throwIfAborted()') && main.includes('Spotify 控制请求超时'),
   retainedTransitionClock: native.includes('!matched && wasResolved'),
   rawNativeClock: native.includes('function observeNativeClock(') && native.includes('nativeClockPosition(nativeClock, performance.now())') && !native.includes('client.positionSmoothMs'),
+  rawBoundaryQuarantine: native.includes('function guardNativeBoundary(') && native.includes('nativeBoundaryPending') && native.includes('boundary.observedAtMs'),
+  stablePcmTimestamp: renderer.includes('class CaptureTimeline') && renderer.includes('captureTimeline.timestamp('),
+  phonemeDiagnosticIsolation: main.includes('audio-sync:phoneme') && main.includes('clockApplied: false')
+    && renderer.includes('开启音素校验（不接管）') && renderer.includes('未接管歌词时钟'),
+  boundedPhonemeRuntime: main.includes('class LocalCtc') && main.includes('this.stoppingChild') && main.includes('Local phoneme shutdown failed:'),
+  phonemeWorker: entries.some(entry => /[\\/]main[\\/]ctc-matcher-worker\.js$/.test(entry)),
+  phonemePythonHelper: fs.existsSync(path.join(directory, 'resources', 'audio-sync', 'romaji-ctc-runner.py')),
   activeQueueOccurrence: native.includes('const end = Math.min(nextTitle, nextTrack)') && native.includes('keyLength.value === needle.length'),
   isolatedRenderSurfaces: renderer.includes('function ClockedLyricsStage') && renderer.includes('function ClockedPlayerBar') && main.includes('render isolation:'),
   diagnosticExport: main.includes('class DiagnosticExporter') && main.includes('playback:export-diagnostics'),

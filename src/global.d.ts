@@ -2,10 +2,12 @@ import type { AppSettings, LyricsCandidate, PlaybackSnapshot, TrackInfo } from '
 
 interface SyllableApi {
   audioSync: {
-    prepare(mode?: 'reference' | 'vocal'): Promise<boolean>
+    prepare(mode?: 'reference' | 'vocal' | 'phoneme'): Promise<boolean>
     engineStatus(): Promise<import('../electron/audio-sync/local-asr').AsrStatus>
+    phonemeStatus(): Promise<import('../electron/audio-sync/local-ctc').LocalCtcStatus>
     configureEngine(): Promise<import('../electron/audio-sync/local-asr').AsrStatus | null>
     vocal(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('./lib/vocal-sync-types').VocalResult>
+    phoneme(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('./lib/phoneme-diagnostic-types').PhonemeDiagnosticResult>
     clear(): Promise<boolean>
     observation(value: import('../electron/audio-sync/acoustic-clock').AcousticObservation): Promise<'locked' | 'confirming' | 'rejected'>
   }

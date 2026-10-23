@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = vi.hoisted(() => ({ playback: null as any, lyrics: null as any, settings: { automaticAudioSync: false }, listeners: new Set<(next: any, prior: any) => void>() }))
+const store = vi.hoisted(() => ({ playback: null as any, lyrics: null as any,
+  settings: { automaticAudioSync: false } as { automaticAudioSync: boolean; audioSyncBackend?: 'whisper' | 'phoneme-diagnostic' },
+  listeners: new Set<(next: any, prior: any) => void>() }))
 vi.mock('../store/useAppStore', () => ({ useAppStore: {
   getState: () => ({ playback: store.playback, lyrics: store.lyrics, settings: store.settings,
     patchSettings: (patch: any) => {
@@ -49,11 +51,11 @@ beforeEach(() => {
 afterEach(async () => { cleanup?.(); cleanup = undefined; await Promise.resolve(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('audio capture lifecycle', () => {
-  async function automaticHarness() {
+  async function automaticHarness(backend?: 'phoneme-diagnostic') {
     vi.useFakeTimers()
     window.setTimeout = setTimeout as unknown as typeof window.setTimeout
     window.clearTimeout = clearTimeout
-    store.settings = { automaticAudioSync: true }; store.lyrics = original()
+    store.settings = { automaticAudioSync: true, audioSyncBackend: backend }; store.lyrics = original()
     const captures: any[] = []
     const getDisplayMedia = vi.fn(async () => {
       const track = { stop: vi.fn(), onended: null }
@@ -61,7 +63,8 @@ describe('audio capture lifecycle', () => {
       return { getTracks: () => [track], getAudioTracks: () => [track], getVideoTracks: () => [] }
     })
     vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia } })
-    Object.assign(window.syllable.audioSync, { engineStatus: vi.fn(async () => ({ ready: true })), vocal: vi.fn() })
+    Object.assign(window.syllable.audioSync, { engineStatus: vi.fn(async () => ({ ready: true })), vocal: vi.fn(),
+      phonemeStatus: vi.fn(async () => ({ available: true })), phoneme: vi.fn() })
     const { acousticController: controller } = await import('./acoustic-controller')
     cleanup = controller.connect()
     await vi.advanceTimersByTimeAsync(401)
@@ -151,6 +154,14 @@ describe('audio capture lifecycle', () => {
     expect(controller.snapshot().running).toBe(false)
   })
   it('keeps a text-free prior analysis summary visible during inference and stop, but clears it on track change', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(112000)
+    let contextTime = 12
+    vi.stubGlobal('AudioContext', class {
+      sampleRate = 16000; get currentTime() { return contextTime }; destination = {}
+      audioWorklet = { addModule: async () => {} }
+      async close() {} async resume() {}
+      createMediaStreamSource() { return { connect() {} } }
+    })
     store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:
       Array.from({ length: 4 }, (_, index) => ({ text: `Synthetic line ${index}`, startMs: index * 4000 })) }] }
     let port: any
@@ -169,7 +180,8 @@ describe('audio capture lifecycle', () => {
     expect(controller.snapshot().lastResult).toMatchObject({ decision: 'rejected', elapsedMs: 2000 })
     let complete!: (value: any) => void
     vi.mocked(window.syllable.audioSync.vocal).mockImplementation(() => new Promise(resolve => { complete = resolve }))
-    const pending = port.onmessage(block)
+    contextTime = 24; vi.setSystemTime(124000)
+    const pending = port.onmessage({ data: { ...block.data, startContextTime: 12, endContextTime: 24 } })
     expect(controller.snapshot().busy).toBe(true)
     expect(controller.snapshot().lastResult?.message).toContain('未识别到足够可靠')
     await controller.stop()
@@ -178,6 +190,44 @@ describe('audio capture lifecycle', () => {
     expect(controller.snapshot().lastResult?.decision).toBe('rejected')
     publish({ ...store.playback, track: { id: 'other', name: 'Other' } })
     expect(controller.snapshot().lastResult).toBeUndefined()
+  })
+  it('restores the diagnostic backend without ever starting Whisper and waits for Japanese lyrics after a song change', async () => {
+    const { controller, captures, getDisplayMedia } = await automaticHarness('phoneme-diagnostic')
+    expect(controller.snapshot()).toMatchObject({ automatic: true, mode: 'phoneme', running: true })
+    expect(window.syllable.audioSync.engineStatus).not.toHaveBeenCalled()
+    expect(window.syllable.audioSync.prepare).toHaveBeenCalledWith('phoneme')
+    publish({ ...store.playback, track: { id: 'english' } })
+    publishLyrics({ ...original('english'), tracks: [{ ...original().tracks[0], language: 'en' }] })
+    await vi.advanceTimersByTimeAsync(401)
+    expect(captures[0].stop).toHaveBeenCalledOnce()
+    expect(getDisplayMedia).toHaveBeenCalledOnce()
+    expect(controller.snapshot().message).toContain('等待有日语原文')
+    publishLyrics(original('english'))
+    await vi.advanceTimersByTimeAsync(401)
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2)
+  })
+  it('never calls a resolved phoneme hypothesis a clock lock and discards late results after stopping', async () => {
+    let port: any
+    vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null, postMessage: vi.fn() }; constructor() { port = this.port } connect() {} disconnect() {} })
+    const { controller } = await automaticHarness('phoneme-diagnostic')
+    const result = { clockApplied: false as const, reason: 'hypotheses', hypothesisDecision: 'resolved' as const,
+      groups: 3, candidates: 8, commonRows: 3, coverageComplete: false, coverageReasons: ['uncalibrated-acoustic-onsets'],
+      elapsedMs: 1000, inferenceMs: 700, matchingMs: 300 }
+    vi.mocked(window.syllable.audioSync.phoneme).mockResolvedValue(result)
+    const block = { data: { pcm: new Float32Array(192000), sampleRate: 16000, startContextTime: 0, endContextTime: 12 } }
+    await port.onmessage(block)
+    expect(window.syllable.audioSync.vocal).not.toHaveBeenCalled()
+    expect(controller.snapshot().lastResult?.decision).toBe('confirming')
+    expect(controller.snapshot().message).toContain('未接管歌词时钟')
+    expect(controller.snapshot().rate).toBeUndefined()
+    // Restart with a new stream/context to model a fresh capture epoch.
+    await controller.stop(); await controller.startPhoneme()
+    let complete!: (value: typeof result) => void
+    vi.mocked(window.syllable.audioSync.phoneme).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    const pending = port.onmessage(block)
+    await controller.stop(); complete(result); await pending
+    expect(controller.snapshot()).toMatchObject({ running: false, automatic: false })
+    expect(controller.snapshot().message).not.toContain('假设一致')
   })
   it('invalidates a gap during inference, ignores its old result and resumes fresh sampling', async () => {
     store.lyrics = { trackId: 'song', tracks: [{ kind: 'original', language: 'ja', lines:

@@ -22,6 +22,9 @@ import { isOverOverlayRegion } from './overlay-hover'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 import { LocalAsr } from './audio-sync/local-asr'
 import { VocalSync } from './audio-sync/vocal-sync'
+import { LocalCtc } from './audio-sync/local-ctc'
+import { PhonemeSession } from './audio-sync/phoneme-session'
+import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -33,9 +36,16 @@ if (process.platform === 'win32') app.setAppUserModelId('studio.syllable.desktop
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const spotify = new SpotifyService()
 const acousticClock = new AcousticClock()
+const audioSyncRoots = [path.join(process.resourcesPath, 'audio-sync'),
+  path.resolve(app.getAppPath(), '.tools/audio-sync'), path.resolve(app.getAppPath(), '../../../../.tools/audio-sync'),
+  path.resolve(app.getAppPath(), '../../../../../.tools/audio-sync')]
 const vocalSync = new VocalSync(new LocalAsr(path.join(app.getPath('userData'), 'local-asr.json'),
-  path.join(app.getPath('temp'), 'syllable-local-asr'), [path.join(process.resourcesPath, 'audio-sync'),
-    path.resolve(app.getAppPath(), '.tools/audio-sync'), path.resolve(app.getAppPath(), '../../../../.tools/audio-sync')]))
+  path.join(app.getPath('temp'), 'syllable-local-asr'), audioSyncRoots))
+const localCtc = new LocalCtc({ roots: audioSyncRoots, runnerPath: app.isPackaged
+  ? path.join(process.resourcesPath, 'audio-sync/romaji-ctc-runner.py')
+  : path.join(app.getAppPath(), 'scripts/audio-sync/romaji-ctc-runner.py') })
+const phonemeSession = new PhonemeSession(localCtc, matchPhonemeInWorker)
+let activeAudioMode: 'reference' | 'vocal' | 'phoneme' | null = null
 let audioCaptureGrantUntil = 0
 let localSpotify: LocalSpotifyService | null = null
 let mainWindow: BrowserWindow | null = null
@@ -102,10 +112,11 @@ const qaLogPath = process.argv.find(value => value.startsWith('--syllable-qa-log
 const forceOverlayForQa = process.argv.includes('--syllable-force-overlay')
 const secondaryMonitorQa = process.argv.includes('--syllable-secondary-test') || process.env.SYLLABLE_SECONDARY_TEST === '1'
 const disableOverlayShapeForQa = process.argv.includes('--syllable-disable-overlay-shape')
+const liveAudioQa = qaView === 'audio-sync-live' || qaView === 'audio-phoneme-live'
 // Offscreen audio-panel checks must not interrupt the user's active desktop.
 // This mode requires explicit QA capture arguments and an isolated profile.
 const headlessAudioQa = process.argv.includes('--syllable-qa-headless') && Boolean(qaCapturePath)
-  && (qaView === 'audio-sync' || qaView === 'audio-sync-live')
+  && (qaView === 'audio-sync' || liveAudioQa)
   && process.argv.some(value => value.startsWith('--user-data-dir='))
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
 let qaVocalCaptures = 0
@@ -617,7 +628,10 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: !headlessAudioQa, offscreen: headlessAudioQa }
   })
   void mainWindow.loadURL(rendererUrl())
-  mainWindow.webContents.on('render-process-gone', () => { audioCaptureGrantUntil = 0; acousticClock.clear(); vocalSync.clear() })
+  mainWindow.webContents.on('render-process-gone', () => {
+    audioCaptureGrantUntil = 0; activeAudioMode = null
+    acousticClock.clear(); vocalSync.clear(); phonemeSession.clear()
+  })
   mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
     // A short, one-use grant from the visible main renderer. Auxiliary windows
     // cannot start capture. This prototype reads system output, never a mic.
@@ -649,7 +663,7 @@ function createWindows() {
       qaLog(`qa watchdog forced exit: view=${qaView ?? 'main'}`)
       quitting = true
       app.exit(2)
-    }, qaView === 'overlay-click-through-physical' ? 180_000 : qaView === 'audio-sync-live' ? 100_000 : 20_000)
+    }, qaView === 'overlay-click-through-physical' ? 180_000 : liveAudioQa ? 100_000 : 20_000)
     setTimeout(async () => {
       if (!mainWindow) return
       if (qaView === 'overlay-click-through-physical' && overlayWindow) {
@@ -692,7 +706,7 @@ function createWindows() {
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
         : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary', 'romaji'] : [])]
-        : qaView === 'audio-sync-live' ? ['enabled', 'captures', 'analyses', 'stopped']
+        : liveAudioQa ? ['enabled', 'captures', 'analyses', 'stopped', ...(qaView === 'audio-phoneme-live' ? ['diagnostic-only', 'hidden'] : [])]
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
         : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
@@ -810,7 +824,8 @@ function createWindows() {
           const viewport = document.querySelector('.content-page')?.getBoundingClientRect();
           return { panel: Boolean(panel?.textContent.includes('本地人声对齐')),
             off: Boolean(panel?.querySelector('[role="status"]')?.textContent.includes('未启用')),
-            controls: buttons?.length === 5 && buttons[2].disabled && buttons[4].disabled,
+            controls: buttons?.length === 6 && [...buttons].find(item => item.textContent === '关闭声音同步')?.disabled
+              && [...buttons].find(item => item.textContent === '用参考音频校准')?.disabled,
             visible: Boolean(rect && viewport && rect.top >= viewport.top && rect.bottom <= viewport.bottom + 1) };
         })()`)
         for (const name of ['panel', 'off', 'controls', 'visible']) checks.record(name, result?.[name] === true)
@@ -834,7 +849,7 @@ function createWindows() {
           qaLog(`packaged romaji: ${JSON.stringify(romaji)}`)
         }
       }
-      if (qaView === 'audio-sync-live') {
+      if (liveAudioQa) {
         // Explicit diagnostic only, on an isolated test profile. Exercise the
         // real visible controls and PCM -> IPC -> local model path. A passing
         // liveness check does not assert a correct audible lyric lock.
@@ -843,7 +858,7 @@ function createWindows() {
           await new Promise(resolve => setTimeout(resolve, 600));
           const panel = document.querySelector('.audio-sync-panel');
           panel?.scrollIntoView({ block: 'end' });
-          const start = [...(panel?.querySelectorAll('button') ?? [])].find(item => item.textContent === '开启自动声音同步');
+          const start = [...(panel?.querySelectorAll('button') ?? [])].find(item => item.textContent === ${JSON.stringify(qaView === 'audio-phoneme-live' ? '开启音素校验（不接管）' : '开启自动声音同步')});
           if (!start || start.disabled) return false;
           start.click();
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -860,6 +875,10 @@ function createWindows() {
           return Boolean(stop?.disabled);
         })()`)
         checks.record('stopped', stopped === true)
+        if (qaView === 'audio-phoneme-live') {
+          checks.record('diagnostic-only', !vocalSync.clock.decorate<import('../src/types').PlaybackSnapshot>(acousticClock.decorate(lastPlayback))?.acousticAnchor)
+          checks.record('hidden', headlessAudioQa && !mainWindow.isVisible() && !overlayWindow?.isVisible() && !overlayControlsWindow?.isVisible() && !tray)
+        }
         qaLog(`audio sync live: ${JSON.stringify({ enabled, captures: qaVocalCaptures, analyses: qaVocalAnalyses, stopped })}`)
       }
       if (qaView === 'render-isolation') {
@@ -1112,7 +1131,7 @@ function createWindows() {
         checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
         checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
       }
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || qaView === 'audio-sync-live' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || liveAudioQa || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -1253,6 +1272,7 @@ function broadcast(value: unknown) {
   if (value === null || (value && typeof value === 'object' && 'track' in value)) {
     acousticClock.observePlayback(value as typeof lastPlayback)
     vocalSync.observePlayback(value as typeof lastPlayback)
+    phonemeSession.observePlayback(value as typeof lastPlayback)
     value = vocalSync.clock.decorate(acousticClock.decorate(value as typeof lastPlayback))
   }
   let mainPayload = value
@@ -1334,6 +1354,7 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
     try {
       acousticClock.clear()
       vocalSync.clear()
+      phonemeSession.clear()
       if (decision.action === 'seek-to-zero') await service.seek(0)
       else await service.control(decision.action)
     } catch (error) {
@@ -1408,9 +1429,13 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
   ipcMain.handle('audio-sync:prepare', (event, mode?: string) => {
     if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error('请先播放歌曲')
+    if (mode !== 'reference' && mode !== 'vocal' && mode !== 'phoneme') throw new Error('无效的声音后端')
+    activeAudioMode = mode
     vocalSync.clear()
+    phonemeSession.clear()
     acousticClock.clear()
     if (mode === 'vocal' && lastPlayback.track) vocalSync.start(lastPlayback.track.id)
+    if (mode === 'phoneme' && lastPlayback.track) phonemeSession.start(lastPlayback.track.id)
     audioCaptureGrantUntil = Date.now() + 10000
     broadcast(lastPlayback)
     return true
@@ -1418,13 +1443,15 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('audio-sync:clear', event => {
     if (event.sender !== mainWindow?.webContents) return false
     audioCaptureGrantUntil = 0
+    activeAudioMode = null
     acousticClock.clear()
     vocalSync.clear()
+    phonemeSession.clear()
     broadcast(lastPlayback)
     return true
   })
   ipcMain.handle('audio-sync:observation', (event, observation: AcousticObservation) => {
-    if (event.sender !== mainWindow?.webContents) return 'rejected'
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'reference') return 'rejected'
     const result = acousticClock.accept(observation)
     broadcast(lastPlayback)
     qaLog(`acoustic sync: ${result}; score=${Number(observation?.score).toFixed(3)}; rate=${observation?.rate}`)
@@ -1433,6 +1460,19 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('audio-sync:engine-status', event => {
     if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可配置识别')
     return vocalSync.recognizer.status()
+  })
+  ipcMain.handle('audio-sync:phoneme-status', event => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可检查音素引擎')
+    return localCtc.status()
+  })
+  ipcMain.handle('audio-sync:phoneme', async (event, value: VocalCapture) => {
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'phoneme') throw new Error('音素校验未启用')
+    if (qaView === 'audio-phoneme-live') qaVocalCaptures++
+    const result = await phonemeSession.process(value)
+    if (qaView === 'audio-phoneme-live' && result.inferenceMs > 0 && result.matchingMs > 0) qaVocalAnalyses++
+    // Text-free diagnostics only: no clock decorate/accept call on this path.
+    qaLog(`phoneme diagnostic: ${JSON.stringify(result)}`)
+    return result
   })
   ipcMain.handle('audio-sync:configure-engine', async event => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return null
@@ -1443,7 +1483,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return vocalSync.recognizer.configure({ executable: executable.filePaths[0], model: model.filePaths[0] })
   })
   ipcMain.handle('audio-sync:vocal', async (event, value: VocalCapture) => {
-    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可识别录音')
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'vocal') throw new Error('人声同步未启用')
     if (qaView === 'audio-sync-live') qaVocalCaptures++
     const result = await vocalSync.process(value)
     if (qaView === 'audio-sync-live' && result.elapsedMs >= 250) qaVocalAnalyses++
@@ -1462,6 +1502,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
     acousticClock.clear()
     vocalSync.clear()
+    phonemeSession.clear()
     const result = await playbackRequests.run(async () => {
       if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
       playbackRefreshes.invalidate()
@@ -1729,6 +1770,8 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', event => {
   quitting = true
   vocalSync.clear()
+  phonemeSession.clear()
+  const closeCtc = localCtc.close()
   const closeNative = localSpotify?.close() ?? Promise.resolve()
   globalShortcut.unregisterAll()
   stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking()
@@ -1747,7 +1790,8 @@ app.on('before-quit', event => {
     ? windowBoundsStore.set(finalOverlayBounds) : Promise.resolve()
   void Promise.all([
     save.catch(error => console.error('Final overlay bounds save failed:', error)),
-    closeNative.catch(error => console.error('Native media shutdown failed:', error))
+    closeNative.catch(error => console.error('Native media shutdown failed:', error)),
+    closeCtc.catch(error => console.error('Local phoneme shutdown failed:', error))
   ]).finally(() => {
     quitFlushed = true
     if (qaCapturePath) app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)

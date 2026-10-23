@@ -6,6 +6,7 @@ import type { SpotifyTransitionProfile } from '../src/types'
 import { spotifySourcePosition } from '../src/lib/clock'
 import { resolveSpotifyTransitionProfile } from './spotify-transition'
 import { nativeClockPosition, observeNativeClock } from './native-clock'
+import { guardNativeBoundary } from './native-boundary'
 
 type Command = 'play' | 'pause' | 'next' | 'previous'
 
@@ -18,6 +19,8 @@ export interface LocalState {
   durationMs: number
   statusName: string
   sampledAtMs: number
+  /** Internal Worker ownership evidence; never derived from a duration ratio. */
+  nativeBoundaryResetConfirmed?: boolean
 }
 
 export interface StartupClockGate {
@@ -323,6 +326,7 @@ export class LocalSpotifyService {
       const localTrackIdentitySource = localTrackIdentity.toString()
       const observeNativeClockSource = observeNativeClock.toString()
       const nativeClockPositionSource = nativeClockPosition.toString()
+      const guardNativeBoundarySource = guardNativeBoundary.toString()
       const workerSource = `
         const { parentPort, workerData } = require('node:worker_threads')
         const { performance } = require('node:perf_hooks')
@@ -345,6 +349,9 @@ export class LocalSpotifyService {
         let startupClockReady = false
         let settledTrackKey = ''
         let nativeClock = null
+        let nativeBoundaryPending = null
+        let nativeBoundaryTimer = null
+        let nativeBoundaryResetConfirmed = false
 
         const advanceStartupClockGate = (${startupClockGateSource})
         const retainPendingLocalState = (${retainPendingLocalStateSource})
@@ -352,6 +359,7 @@ export class LocalSpotifyService {
         const shouldResetTrackClock = (${shouldResetTrackClockSource})
         const observeNativeClock = (${observeNativeClockSource})
         const nativeClockPosition = (${nativeClockPositionSource})
+        const guardNativeBoundary = (${guardNativeBoundarySource})
 
         const sendMediaCommand = command => sendNotifyMessage(0xFFFF, 0x0319, 0, command << 16)
 
@@ -363,7 +371,8 @@ export class LocalSpotifyService {
             albumArtBase64: includeArt && art && art.length ? Buffer.from(art).toString('base64') : '',
             positionMs: Number(state.positionMs) || 0,
             durationMs: Number(state.durationMs) || 0,
-            statusName: state.statusName || 'UNKNOWN', sampledAtMs: Date.now()
+            statusName: state.statusName || 'UNKNOWN', sampledAtMs: Date.now(),
+            ...(nativeBoundaryResetConfirmed ? { nativeBoundaryResetConfirmed: true } : {})
           }
         }
         const publishState = () => {
@@ -404,8 +413,21 @@ export class LocalSpotifyService {
           // skip transaction is pending so duplicate commands cannot turn the
           // worker's comparison key into an empty string. Outside that bounded
           // transaction, an empty snapshot still correctly clears the session.
-          lastState = retainPendingLocalState(lastState, state, skipPendingTrack, Date.now(), skipPendingUntil)
-          nativeClock = observeNativeClock(nativeClock, lastState, performance.now())
+          const retained = retainPendingLocalState(lastState, state, skipPendingTrack, Date.now(), skipPendingUntil)
+          const boundary = guardNativeBoundary(lastState, retained, nativeBoundaryPending, performance.now())
+          nativeBoundaryPending = boundary.pending
+          if (nativeBoundaryTimer) clearTimeout(nativeBoundaryTimer)
+          nativeBoundaryTimer = null
+          if (boundary.held) {
+            nativeBoundaryTimer = setTimeout(() => {
+              nativeBoundaryTimer = null
+              if (nativeBoundaryPending) sendState(nativeBoundaryPending.sample, true)
+            }, Math.max(0, nativeBoundaryPending.firstSeenAtMs + 250 - performance.now()))
+            return
+          }
+          nativeBoundaryResetConfirmed = boundary.resetConfirmed
+          lastState = boundary.sample
+          nativeClock = observeNativeClock(nativeClock, lastState, boundary.observedAtMs)
           if (shouldResetTrackClock(settledTrackKey, lastState)) {
             // Native clock ownership already reset with the new identity.
             // Keep checking its initial sample, but announce the reported
@@ -460,7 +482,13 @@ export class LocalSpotifyService {
           })
           // positionChanged is synthesized by the library's smooth clock;
           // only stateChanged / distinct latestState positions are observations.
-          client.on('closed', () => parentPort.postMessage({ type: 'closed' }))
+          client.on('closed', () => {
+            if (nativeBoundaryTimer) clearTimeout(nativeBoundaryTimer)
+            nativeBoundaryTimer = null
+            nativeBoundaryPending = null
+            nativeBoundaryResetConfirmed = false
+            parentPort.postMessage({ type: 'closed' })
+          })
           client.start()
           sendState(client.latestState(), true)
           setInterval(() => {
@@ -553,13 +581,13 @@ export class LocalSpotifyService {
         }
       }
       const incomingIdentity = incoming ? localTrackIdentity(incoming) : ''
-      let transitionDurationAuthoritative = false
-      if (incoming && this.transitionTrackIdentity === incomingIdentity && this.transitionProfile?.outputDurationMs) {
-        // Once a Mix recipe is validated, its output duration is authoritative;
-        // SMTC sometimes flashes the source duration again near a crossfade.
-        incoming = { ...incoming, durationMs: this.transitionProfile.outputDurationMs }
-        transitionDurationAuthoritative = true
-      }
+      const transitionDuration = incoming && this.transitionTrackIdentity === incomingIdentity
+        ? this.transitionProfile?.outputDurationMs : undefined
+      // Inspect RAW ownership before applying an outgoing Mix duration. Doing
+      // the override first erased the next item's changed/zero duration and
+      // allowed its zero position to look like an authoritative outgoing seek.
+      const boundaryResetConfirmed = incoming?.nativeBoundaryResetConfirmed === true
+      const transitionDurationAuthoritative = Boolean(transitionDuration && !boundaryResetConfirmed)
       if (previous && incoming && localTrackIdentity(previous) === localTrackIdentity(incoming)
         && previous.statusName === 'PLAYING' && incoming.statusName === 'PLAYING') {
         const projected = previous.positionMs + Math.max(0, incoming.sampledAtMs - previous.sampledAtMs)
@@ -592,7 +620,11 @@ export class LocalSpotifyService {
             ? Math.min(previous.durationMs || Number.MAX_SAFE_INTEGER, previous.positionMs + Math.max(0, incoming.sampledAtMs - previous.sampledAtMs))
             : previous.positionMs
           this.statusListener?.(`duration ownership pending: held=${previous.durationMs}ms/${Math.round(heldPositionMs)}ms reported=${reportedDurationMs}ms/${Math.round(incoming.positionMs)}ms`)
-          incoming = { ...incoming, durationMs: gated.durationMs, positionMs: heldPositionMs }
+          incoming = { ...incoming, durationMs: gated.durationMs,
+            // The native boundary guard already waited its maximum 250 ms. A
+            // real same-title reset must not be held for this duration gate's
+            // separate 2.8-second metadata confirmation as well.
+            positionMs: boundaryResetConfirmed ? incoming.positionMs : heldPositionMs }
         }
       } else {
         const adopted = adoptQueuedTrackDuration(previous, incoming, this.durationChangeCandidate, Date.now())
@@ -602,6 +634,7 @@ export class LocalSpotifyService {
         }
         this.durationChangeCandidate = null
       }
+      if (incoming && transitionDuration) incoming = { ...incoming, durationMs: transitionDuration }
       const next = stabilizeLocalState(previous, incoming, allowShorterDuration)
       const sameTrack = Boolean(next && previous && localTrackIdentity(next) === localTrackIdentity(previous))
       if (!sameTrack) {

@@ -16,6 +16,7 @@ const main = read(mainEntry)
 const native = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]local-spotify-.*\.js$/.test(entry)).map(read).join('\n')
 const renderer = entries.filter(entry => /[\\/]renderer[\\/].*\.js$/.test(entry)).map(read).join('\n')
 const rendererCss = entries.filter(entry => /[\\/]renderer[\\/].*\.css$/.test(entry)).map(read).join('\n')
+const preload = entries.filter(entry => /[\\/]preload[\\/].*\.cjs$/.test(entry)).map(read).join('\n')
 const checks = {
   executable: fs.existsSync(path.join(directory, 'Syllable.exe')),
   version: packaged.version === expectedVersion,
@@ -31,7 +32,7 @@ const checks = {
   captureContinuityGate: main.includes('function captureQuality(') && renderer.includes('captureEpoch') && renderer.includes('startContextTime'),
   automaticAudioRecovery: renderer.includes('automaticAudioSync') && renderer.includes('function reconcileAutomatic(') && renderer.includes('开启自动声音同步'),
   longBaselineVocalRate: main.includes('class OnsetClock') && main.includes('const slopes = this.history.flatMap') && main.includes('baseline < 2e4'),
-  independentVocalLandmarks: main.includes('function extractLyricLandmarks(') && main.includes('captureStart + point.heardMs') && main.includes('this.history.length < 3'),
+  independentVocalLandmarks: main.includes('function extractLyricLandmarks(') && /captureStart \+ [\w$]+\.heardMs/.test(main) && main.includes('this.history.length < 3'),
   pronunciationLandmarks: main.includes('function extractPhoneticLandmarks(') && main.includes('function analyzeJapaneseLines(') && main.includes('phoneticElapsedMs'),
   boundedReadingFallback: main.includes('remainingMs - 100') && main.includes('this.readingAbort') && /mode === ["']analyze["']/.test(main),
   headlessAudioQa: main.includes('--syllable-qa-headless') && main.includes('show: !headlessAudioQa'),
@@ -43,7 +44,8 @@ const checks = {
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
   exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),
   displayedVersion: renderer.includes(`const version = "${expectedVersion}";`),
-  clippedOverlayShape: main.includes('function overlayShape('),
+  unclippedOverlayPaint: !/overlayWindow\.setShape\(/.test(main) && main.includes('overlayShapeKey = "[]"'),
+  separateOverlayInput: main.includes('function overlayInputState(') && main.includes('overlay:pointer-move') && preload.includes('overlay:pointer-move'),
   explicitOverlayAcceptance: main.includes('qa acceptance:'),
   serializedPlaybackRequests: main.includes('class PlaybackRequestGate') && main.includes('backend request still in flight'),
   orderedPlaybackRefreshes: main.includes('class PlaybackRefreshGate') && main.includes('playbackRefreshes.invalidate()'),
@@ -77,6 +79,7 @@ const checks = {
   trayIconAssets: ['icon.ico', 'icon.png'].every(name => fs.existsSync(path.join(directory, 'resources', name))),
   secondaryContrast: /-webkit-text-stroke:\s*1\.5px #121212/.test(rendererCss) && rendererCss.includes('.no-background.effect-none .overlay-secondary'),
   overlayStartupBarrier: main.includes('overlayRendererReady, overlaySettingsReady') && main.includes('overlay:restore') && renderer.includes('receivedSettings'),
+  overlayFirstPaintBarrier: main.includes('overlayFirstPaintReady') && main.includes('function waitForFirstPaint(') && main.includes('retrying renderer once'),
   lockedFullWindowPassthrough: main.includes('setIgnoreMouseEvents(value, { forward: true })') && main.includes('overlay:movable-changed'),
   finalBoundsFlush: main.includes('Final overlay bounds save failed:') && main.includes('session.flushStorageData()'),
   lockedOverlayRecovery: main.includes('function recoverOverlayControls()') && main.includes('function sampleTransparentHover(') && main.includes('CommandOrControl+Alt+U') && renderer.includes('解锁并显示控制栏'),

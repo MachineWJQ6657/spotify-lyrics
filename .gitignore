@@ -2,6 +2,15 @@ node_modules/
 out/
 dist/
 release/
+*.exe
+*.msi
+*.msix
+*.appx
+*.zip
+*.7z
+*.asar
+*.blockmap
+*.nupkg
 *.log
 qa-*.png
 .qa-user-data-*/

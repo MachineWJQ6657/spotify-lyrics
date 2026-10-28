@@ -39,6 +39,8 @@ interface SyllableApi {
     show(): Promise<boolean>; hide(): Promise<boolean>; setClickThrough(value: boolean): Promise<boolean>; setHitRegions(regions: Array<{ x: number; y: number; width: number; height: number }>, controlsAnchor?: { x: number; y: number }, layout?: { generation: number; viewport: { width: number; height: number } }): Promise<boolean>
     onLayoutReset(callback: (generation: number) => void): () => void
     setControlsHover(hovered: boolean): void
+    pointerMoved(): void
+      pointerCaptured(active: boolean): void
     getBounds(): Promise<{ x: number; y: number; width: number; height: number }>
     setSize(width: number, height: number): Promise<{ x: number; y: number; width: number; height: number }>
     beginMove(): void

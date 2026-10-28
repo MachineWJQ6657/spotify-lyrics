@@ -8,9 +8,9 @@ describe('overlay window shape', () => {
       expect(overlayShape(200, 100, [{ x, y, width: 20, height: 20 }], false)).toEqual(border)
     }
   })
-  it('clips partially visible padded text to integer window bounds', () => {
-    expect(overlayShape(200, 100, [{ x: -4.5, y: 80.5, width: 250, height: 40 }], false)[0])
-      .toEqual({ x: 0, y: 72, width: 200, height: 28 })
+  it('never converts partial text or resize borders into a painting clip', () => {
+    expect(overlayShape(200, 100, [{ x: -4.5, y: 80.5, width: 250, height: 40 }], false)).toEqual([])
+    expect(overlayShape(920, 230, [{ x: 50, y: 49, width: 820, height: 78 }, { x: 284, y: 127, width: 352, height: 26 }], false)).toEqual([])
   })
   it('never clips painting in click-through mode (mouse-ignore owns input)', () => {
     expect(overlayShape(200, 100, [{ x: 20, y: 20, width: 100, height: 50 }], true))

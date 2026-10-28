@@ -4,6 +4,8 @@
 // cropped compositor evidence contain fixture content rather than the desktop.
 // electron scripts/verify-overlay-paint.cjs [--visible] [--strategy=both|direct|reset]
 //   [--output=.qa-overlay-clip/paint-fixture] [--hold-ms=0]
+// Both legacy strategies now exercise unrestricted painting; a custom native
+// region is an architectural failure, never evidence that pixels were drawn.
 const { app, BrowserWindow, desktopCapturer, screen } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -75,6 +77,81 @@ function bright(image) {
   return count
 }
 
+// BEGIN PURE PAINT COVERAGE
+// Bright neutral/mint text is distinguishable from the fixture's dark blue
+// underlay. Comparing each expected text row also detects one missing language
+// or a horizontal strip that an overall bright-pixel count would conceal.
+function paintCoverage(renderer, composed, regions, viewport) {
+  const expectedSize = renderer.getSize(), actualSize = composed.getSize()
+  const validSize = size => Number.isInteger(size.width) && Number.isInteger(size.height)
+    && size.width > 0 && size.height > 0 && size.width * size.height <= 16_000_000
+  if (!validSize(expectedSize) || !validSize(actualSize)
+    || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)
+    || viewport.width <= 0 || viewport.height <= 0 || !Array.isArray(regions) || regions.length !== 3) {
+    return { passed: false, reason: 'invalid-image-or-three-row-geometry', rows: [] }
+  }
+  const expected = renderer.toBitmap(), actual = composed.toBitmap()
+  if (expected.length < expectedSize.width * expectedSize.height * 4
+    || actual.length < actualSize.width * actualSize.height * 4) {
+    return { passed: false, reason: 'invalid-bitmap-size', rows: [] }
+  }
+  const textPixel = (pixels, width, x, y) => {
+    const at = (y * width + x) * 4
+    return pixels[at + 3] > 128 && Math.min(pixels[at], pixels[at + 1], pixels[at + 2]) > 150
+      && Math.max(pixels[at], pixels[at + 1], pixels[at + 2]) > 210
+  }
+  const rows = regions.map((region, index) => {
+    if (![region.x, region.y, region.width, region.height].every(Number.isFinite) || region.width <= 0 || region.height <= 0) {
+      return { index, passed: false, reason: 'invalid-text-row' }
+    }
+    const left = Math.max(0, Math.floor(region.x / viewport.width * expectedSize.width))
+    const top = Math.max(0, Math.floor(region.y / viewport.height * expectedSize.height))
+    const right = Math.min(expectedSize.width, Math.ceil((region.x + region.width) / viewport.width * expectedSize.width))
+    const bottom = Math.min(expectedSize.height, Math.ceil((region.y + region.height) / viewport.height * expectedSize.height))
+    const bins = Array.from({ length: 8 }, () => ({ expected: 0, covered: 0 }))
+    let expectedPixels = 0, coveredPixels = 0, actualPixels = 0
+    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
+      if (!textPixel(expected, expectedSize.width, x, y)) continue
+      expectedPixels++
+      const bin = bins[Math.min(7, Math.floor((x - left) / Math.max(1, right - left) * 8))]
+      bin.expected++
+      // The two captures can differ by one rounded physical pixel at mixed
+      // DPI. A local 2px search tolerates that, not a relocated/missing glyph.
+      const actualX = Math.round((x + .5) * actualSize.width / expectedSize.width - .5)
+      const actualY = Math.round((y + .5) * actualSize.height / expectedSize.height - .5)
+      let covered = false
+      for (let yy = Math.max(0, actualY - 2); !covered && yy <= Math.min(actualSize.height - 1, actualY + 2); yy++) {
+        for (let xx = Math.max(0, actualX - 2); xx <= Math.min(actualSize.width - 1, actualX + 2); xx++) {
+          if (textPixel(actual, actualSize.width, xx, yy)) { covered = true; break }
+        }
+      }
+      if (covered) { coveredPixels++; bin.covered++ }
+    }
+    const actualLeft = Math.max(0, Math.floor(left / expectedSize.width * actualSize.width))
+    const actualTop = Math.max(0, Math.floor(top / expectedSize.height * actualSize.height))
+    const actualRight = Math.min(actualSize.width, Math.ceil(right / expectedSize.width * actualSize.width))
+    const actualBottom = Math.min(actualSize.height, Math.ceil(bottom / expectedSize.height * actualSize.height))
+    for (let y = actualTop; y < actualBottom; y++) for (let x = actualLeft; x < actualRight; x++) {
+      if (textPixel(actual, actualSize.width, x, y)) actualPixels++
+    }
+    const pixelRatio = expectedPixels ? actualPixels / expectedPixels
+      * (expectedSize.width * expectedSize.height) / (actualSize.width * actualSize.height) : 0
+    const coverage = expectedPixels ? coveredPixels / expectedPixels : 0
+    const populatedBins = bins.filter(bin => bin.expected >= 12)
+    const minColumnCoverage = populatedBins.length ? Math.min(...populatedBins.map(bin => bin.covered / bin.expected)) : 0
+    return { index, expectedPixels, actualPixels, pixelRatio, coverage, minColumnCoverage,
+      // Anti-aliasing over an opaque underlay changes counts slightly. Coverage
+      // and independent column bins keep this tolerance from accepting strips.
+      passed: expectedPixels >= 32 && pixelRatio >= .65 && pixelRatio <= 1.35
+        && coverage >= .85 && minColumnCoverage >= .6,
+      bins: bins.map(bin => ({ ...bin, coverage: bin.expected ? bin.covered / bin.expected : null })) }
+  })
+  return { passed: rows.every(row => row.passed), rows,
+    thresholds: { minimumExpectedPixelsPerRow: 32, minimumPixelRatio: .65, maximumPixelRatio: 1.35,
+      minimumCoverage: .85, minimumPopulatedColumnCoverage: .6, positionTolerancePx: 2 } }
+}
+// END PURE PAINT COVERAGE
+
 async function composedCrop(display, bounds) {
   const physicalSize = { width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) }
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: physicalSize })
@@ -104,7 +181,9 @@ const underlayHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   p { margin:16px; color:#67b3c8; font:14px 'Segoe UI'; }
   </style></head><body><p>Syllable isolated paint fixture — no Spotify / no input</p></body></html>`
 
-const report = { startedAt: new Date().toISOString(), visible, strategy, productionCss: 'src/styles.css', phases: [] }
+const report = { startedAt: new Date().toISOString(), visible, strategy, productionCss: 'src/styles.css',
+  verificationScope: visible ? 'actual-secondary-compositor' : 'renderer-only-not-desktop-acceptance',
+  compositorVerified: false, passed: false, phases: [] }
 // A diagnostic failure must not show Electron's unhandled-exception dialog.
 process.on('uncaughtException', error => {
   report.error = error instanceof Error ? error.stack : String(error)
@@ -144,8 +223,9 @@ app.whenReady().then(async () => {
       }))()`)
       const bounds = window.getBounds()
       const shape = unshaped ? [] : makeShape(bounds.width, bounds.height, metrics.regions, false)
-      if (mode === 'reset' && !unshaped) window.setShape([])
-      window.setShape(shape)
+      // Production no longer invokes SetWindowRgn at all. "reset" retains
+      // the former empty-reset path as a comparison, not as production code.
+      if (mode === 'reset') window.setShape(shape)
       window.setIgnoreMouseEvents(ignored, { forward: true })
       await sleep(180)
       const prefix = `${mode}-${String(report.phases.filter(item => item.mode === mode).length).padStart(2, '0')}-${name}`
@@ -158,12 +238,24 @@ app.whenReady().then(async () => {
       }
       const renderer = await window.webContents.capturePage(undefined, { stayHidden: !visible })
       fs.writeFileSync(path.join(output, `${prefix}-renderer.png`), renderer.toPNG())
+      const coverage = scene ? paintCoverage(renderer, scene, metrics.regions, metrics) : null
+      const nativeState = native(window)
       const row = { mode, name, ignored, unshaped, bounds, metrics, shape, native: native(window),
         rendererSize: renderer.getSize(), rendererBrightPixels: bright(renderer),
-        composedSize: scene?.getSize() ?? null, composedBrightPixels: scene ? bright(scene) : null }
+        composedSize: scene?.getSize() ?? null, composedBrightPixels: scene ? bright(scene) : null,
+        coverage, checks: { unrestrictedPaint: shape.length === 0,
+          noCustomNativeRegion: nativeState.regionKind === 0 && nativeState.rectangles.length === 0,
+          nonemptyThreeRows: metrics.regions.length === 3 && metrics.regions.every(region => region.width > 0 && region.height > 0),
+          // Fixed wide text at48px should never be accepted as a few bright
+          // edge pixels, even if an unexpected empty renderer masked the loss.
+          rendererTextPresent: bright(renderer) >= (name.includes('narrow') ? 100 : 750),
+          compositorTextComplete: coverage ? coverage.passed : null } }
+      row.passed = Object.values(row.checks).every(check => check !== false)
       report.phases.push(row)
       fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
-      console.log(JSON.stringify({ mode, name, dpi: row.native.dpi, rendererBright: row.rendererBrightPixels, composedBright: row.composedBrightPixels }))
+      console.log(JSON.stringify({ mode, name, passed: row.passed, dpi: row.native.dpi,
+        rendererBright: row.rendererBrightPixels, composedBright: row.composedBrightPixels,
+        coverage: coverage?.rows.map(item => ({ row: item.index, coverage: item.coverage, ratio: item.pixelRatio, passed: item.passed })) ?? null }))
       await sleep(holdMs)
     }
     const text = async narrow => window.webContents.executeJavaScript(`(() => {
@@ -178,14 +270,21 @@ app.whenReady().then(async () => {
     await capture('locked-shaped', { ignored: true })
     await text(true); await capture('locked-narrow', { ignored: true })
     await text(false); await capture('unlocked-wide')
+    window.setBounds({ x: base.x + 24, y: base.y + 18, width: 704, height: 196 }, false)
+    await sleep(150); await capture('resized-wide')
+    window.setBounds(base, false); await sleep(150); await capture('restored-wide')
     await capture('recovered-unshaped', { unshaped: true, ignored: true })
     window.destroy()
   }
   underlay.destroy()
+  const expectedPhases = strategy === 'both' ? 20 : 10
+  report.passed = report.phases.length === expectedPhases && report.phases.every(row => row.passed)
+  report.compositorVerified = visible && report.passed && report.phases.every(row => row.coverage?.passed === true)
+  report.failedPhases = report.phases.filter(row => !row.passed).map(row => ({ mode: row.mode, name: row.name, checks: row.checks }))
   report.finishedAt = new Date().toISOString()
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
   clearTimeout(watchdog)
-  app.exit(0)
+  app.exit(report.passed ? 0 : 1)
 }).catch(error => {
   report.error = error instanceof Error ? error.stack : String(error)
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))

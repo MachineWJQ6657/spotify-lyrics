@@ -16,7 +16,7 @@ import { PlaybackDiagnostics } from './playback-diagnostics'
 import { DiagnosticExporter } from './diagnostic-export'
 import { sanitizeLyricDiagnosticContext } from '../src/lib/sync-diagnostics'
 import { createQaChecks } from './qa-checks'
-import { overlayShape } from './overlay-shape'
+import { overlayInputState } from './overlay-input'
 import { OverlayLayoutGate } from './overlay-layout'
 import { isOverOverlayRegion } from './overlay-hover'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
@@ -26,6 +26,7 @@ import { LocalCtc } from './audio-sync/local-ctc'
 import { PhonemeSession } from './audio-sync/phoneme-session'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import { watchWindowVisibility, windowVisible } from './window-visibility'
+import { waitForFirstPaint } from './first-paint'
 import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -91,6 +92,9 @@ let overlayClickThrough = false
 let overlayMouseIgnored = false
 let overlayMovable = true
 let overlayPointerDrag: { cursor: Electron.Point; bounds: Electron.Rectangle; fromControls: boolean; controlsWereVisible: boolean } | null = null
+let overlayNativeGesture = false
+let overlayPointerCaptured = false
+let overlayFirstPaintReady: Promise<boolean> = Promise.resolve(false)
 let lastOverlayDragEndedAt = 0
 let overlayHitRegions: Array<{ x: number; y: number; width: number; height: number }> = []
 const overlayLayout = new OverlayLayoutGate()
@@ -112,7 +116,6 @@ const qaView = process.argv.find(value => value.startsWith('--syllable-qa-view='
 const qaLogPath = process.argv.find(value => value.startsWith('--syllable-qa-log='))?.slice('--syllable-qa-log='.length)
 const forceOverlayForQa = process.argv.includes('--syllable-force-overlay')
 const secondaryMonitorQa = process.argv.includes('--syllable-secondary-test') || process.env.SYLLABLE_SECONDARY_TEST === '1'
-const disableOverlayShapeForQa = process.argv.includes('--syllable-disable-overlay-shape')
 const liveAudioQa = qaView === 'audio-sync-live' || qaView === 'audio-phoneme-live'
 // Offscreen audio-panel checks must not interrupt the user's active desktop.
 // This mode requires explicit QA capture arguments and an isolated profile.
@@ -257,7 +260,7 @@ function startOverlayControlsVisibilityTracking() {
 }
 
 function stopOverlayControlsVisibilityTracking() {
-  if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+  if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
   transparentHoverTimer = null
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
@@ -267,7 +270,7 @@ function stopOverlayControlsVisibilityTracking() {
 }
 
 function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boolean) {
-  // Native cursor sampling owns hover while the lyric HWND ignores input.
+  // Native cursor sampling owns hover independently of paint/input state.
   if (transparentHoverTimer) return
   if (sender === overlayWindow?.webContents) overlayHovered = hovered
   else if (sender === overlayControlsWindow?.webContents) overlayControlsHovered = hovered
@@ -276,16 +279,26 @@ function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boole
 }
 
 function refreshTransparentHoverTracking() {
-  if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+  if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
   transparentHoverTimer = null
-  if (!overlayWindow?.isVisible() || !overlayMouseIgnored || quitting) return
-  // Only input-transparent visible overlays need this fallback. Four tiny
-  // native cursor reads per second; no renderer IPC or layout polling.
-  transparentHoverTimer = setInterval(() => sampleTransparentHover(screen.getCursorScreenPoint()), 250)
+  if (!overlayWindow?.isVisible() || quitting) return
+  // Forwarded DOM movement gives immediate entry/leave. This independent
+  // native fallback also works when Chromium misses movement after a wake.
+  const tick = () => {
+    transparentHoverTimer = null
+    if (!overlayWindow?.isVisible() || quitting) return
+    const cursor = screen.getCursorScreenPoint()
+    sampleTransparentHover(cursor)
+    const pollMs = overlayInputState({ bounds: overlayWindow.getBounds(), cursor, regions: overlayHitRegions,
+      layoutReady: overlayLayout.ready, movable: overlayMovable, clickThrough: overlayClickThrough }).pollMs
+    transparentHoverTimer = setTimeout(tick, pollMs)
+  }
+  transparentHoverTimer = setTimeout(tick, 0)
 }
 
 function sampleTransparentHover(cursor: Electron.Point) {
     if (!overlayWindow?.isVisible() || !overlayControlsWindow || quitting) return
+    applyOverlayMouseIgnore(overlayInputTransparent(cursor))
     const lyricsHover = isOverOverlayRegion(cursor, overlayWindow.getBounds(), overlayHitRegions)
     const controlsBounds = overlayControlsWindow.getBounds()
     const controlsHover = overlayControlsWindow.isVisible() && isOverOverlayRegion(cursor, controlsBounds,
@@ -313,7 +326,7 @@ function updateControlsVisibility() {
   }
   // The pill lives in a separate HWND with a small visual gap above the lyric
   // text. Keep it alive long enough for the pointer to cross that gap, then
-  // hide it without a permanent 8 Hz global cursor poll in the main process.
+  // hide it without flickering while the pointer crosses the gap.
   overlayControlsHideTimer = setTimeout(() => {
     overlayControlsHideTimer = null
     if (!overlayHovered && !overlayControlsHovered && !overlayPointerDrag) overlayControlsWindow?.hide()
@@ -322,11 +335,13 @@ function updateControlsVisibility() {
 
 async function recoverOverlayControls() {
   if (headlessAudioQa) return false
+  if (!await overlayFirstPaintReady) return false
   await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
   if (quitting) return false
   setOverlayMovable(true)
   await showOverlay()
   if (!overlayControlsWindow || overlayControlsWindow.isDestroyed()) return false
+  overlayControlsWindow.setOpacity(1)
   controlsRecoveryUntil = Date.now() + 4000
   overlayControlsSuppressedUntil = 0
   syncOverlayControlsBounds()
@@ -360,6 +375,8 @@ function syncOverlayControlsBounds() {
 async function showOverlay() {
   if (headlessAudioQa) return
   overlayShowRequested = true
+  const painted = await overlayFirstPaintReady
+  if (!painted) { qaLog('overlay show failed: no first painted frame'); return false }
   await Promise.all([overlayBoundsReady, overlayRendererReady, overlaySettingsReady])
   if (!overlayShowRequested || quitting) return false
   if (!overlayWindow || overlayWindow.isDestroyed()) return false
@@ -394,7 +411,7 @@ function hideOverlay() {
   overlayShowRequested = false
   overlayRemapPending = false
   if (!overlayWindow || overlayWindow.isDestroyed()) return false
-  overlayPointerDrag = null
+  cancelOverlayGesture()
   if (overlayDragSettleTimer) clearTimeout(overlayDragSettleTimer)
   overlayDragSettleTimer = null
   overlayControlsWindow?.setOpacity(1)
@@ -408,6 +425,7 @@ function hideOverlay() {
 
 function setOverlayClickThrough(value: boolean) {
   overlayClickThrough = !overlayMovable || value
+  if (overlayClickThrough) cancelOverlayGesture()
   qaLog(`overlay click-through=${overlayClickThrough}`)
   applyOverlayShape()
   // Ignore input across the entire HWND, including its resize frame. Toggling
@@ -421,13 +439,22 @@ function setOverlayClickThrough(value: boolean) {
 
 function setOverlayMovable(value: boolean) {
   overlayMovable = value
-  if (!value) overlayPointerDrag = null
+  if (!value) cancelOverlayGesture()
   overlayWindow?.setMovable(value)
   overlayControlsWindow?.setMovable(value)
   // Lock passes every pixel through; explicit unlock restores drag/resize.
   setOverlayClickThrough(!value)
   for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:movable-changed', value)
   return value
+}
+
+function cancelOverlayGesture() {
+  overlayPointerDrag = null
+  overlayNativeGesture = false
+  overlayPointerCaptured = false
+  // A handle drag keeps the controls HWND alive at opacity zero to preserve
+  // pointer capture. Every forced cancellation must restore those pixels.
+  if (overlayControlsWindow && !overlayControlsWindow.isDestroyed()) overlayControlsWindow.setOpacity(1)
 }
 
 function applyOverlayMouseIgnore(value: boolean) {
@@ -439,25 +466,21 @@ function applyOverlayMouseIgnore(value: boolean) {
   qaLog(`overlay mouse ignored=${value}; regions=${overlayHitRegions.length}`)
 }
 
-function overlayInputTransparent() {
-  return !overlayMovable || overlayClickThrough || !overlayLayout.ready || overlayHitRegions.length === 0
+function overlayInputTransparent(cursor = screen.getCursorScreenPoint()) {
+  if (!overlayMovable || overlayClickThrough) return true
+  // Keep an already accepted drag/resize captured even beyond its initial
+  // target, until release. A layout invalidation must not lose that gesture.
+  if (overlayPointerDrag || overlayNativeGesture || overlayPointerCaptured) return false
+  if (!overlayWindow || overlayWindow.isDestroyed()) return true
+  return overlayInputState({ bounds: overlayWindow.getBounds(), cursor, regions: overlayHitRegions,
+    layoutReady: overlayLayout.ready, movable: overlayMovable, clickThrough: overlayClickThrough }).ignoreMouse
 }
 
 function applyOverlayShape() {
-  if (!overlayWindow || overlayWindow.isDestroyed() || process.platform !== 'win32') return
-  if (disableOverlayShapeForQa) { overlayWindow.setShape([]); return }
-  const bounds = overlayWindow.getBounds()
-  // Monitor wake can leave DWM/Chromium holding an old complex clip even when
-  // GetWindowRgn reports the new rectangles. Clear it before replacing it.
-  // While waiting for fresh geometry (and throughout lock/pass-through), paint
-  // the complete surface. Mouse-ignore is independent of the visual mask.
-  const shape = overlayShape(bounds.width, bounds.height, overlayHitRegions,
-    !overlayMovable || overlayClickThrough || !overlayLayout.ready)
-  const key = JSON.stringify(shape)
-  if (key === overlayShapeKey) return
-  overlayShapeKey = key
-  overlayWindow.setShape([])
-  if (shape.length) overlayWindow.setShape(shape)
+  // Each BrowserWindow starts without a native region. Do not even call
+  // setShape([]): SetWindowRgn is unnecessary for input and can invalidate a
+  // layered surface during its initial mixed-DPI bounds restoration.
+  overlayShapeKey = '[]'
 }
 
 function requestOverlayLayout(reason: string) {
@@ -467,7 +490,7 @@ function requestOverlayLayout(reason: string) {
   overlayControlsWindow?.hide()
   if (!overlayWindow || overlayWindow.isDestroyed()) return
   applyOverlayShape()
-  applyOverlayMouseIgnore(true)
+  applyOverlayMouseIgnore(overlayInputTransparent())
   const send = () => {
     if (!overlayWindow || overlayWindow.isDestroyed() || generation !== overlayLayout.generation) return
     overlayWindow.webContents.send('overlay:layout-reset', generation)
@@ -488,7 +511,7 @@ function recoverOverlayDisplay(reason: string) {
   // Keep the last stable logical size, not a transient DPI-scaled size emitted
   // while an external panel is disconnecting/waking. Coalesce the event burst.
   displayRecoveryBounds ??= stableOverlayBounds ?? overlayWindow.getBounds()
-  overlayPointerDrag = null
+  cancelOverlayGesture()
   requestOverlayLayout(reason)
   if (boundsSaveTimer) { clearTimeout(boundsSaveTimer); boundsSaveTimer = null }
   if (displayRecoveryTimer) clearTimeout(displayRecoveryTimer)
@@ -719,7 +742,46 @@ function createWindows() {
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
         : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
+        : qaView === 'overlay-startup' ? ['restored', 'visible', 'unclipped', 'measured', 'native-input', 'uncloaked']
         : qaView === 'overlay-display-recovery' ? ['initial-layout', 'invalidated', 'fresh-layout', 'stale-rejected', 'locked-paint', 'native-coverage', 'bounds-preserved', 'visible', 'bounded-resets'] : [])
+      if (qaView === 'overlay-startup' && overlayWindow) {
+        // Do not show/remap/resize first: inspect the actual cold-start state
+        // restored from this profile, not a state repaired by the test itself.
+        const bounds = overlayWindow.getBounds()
+        const native = inspectWindowRegion(overlayWindow)
+        checks.record('restored', Boolean(firstOverlayPresentation && overlayBoundsRestored && overlayNativeRestored))
+        checks.record('visible', overlayWindow.isVisible())
+        checks.record('unclipped', native.ok && !native.hasCustomRegion && overlayShapeKey === '[]')
+        checks.record('measured', overlayLayout.ready && overlayHitRegions.length > 0)
+        checks.record('native-input', overlayMouseIgnored === overlayInputTransparent())
+        checks.record('uncloaked', native.cloaked === 0)
+        const display = screen.getDisplayMatching(bounds)
+        if (secondaryMonitorQa && display.id === screen.getPrimaryDisplay().id) throw new Error('Startup QA must stay on secondary display')
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: {
+          width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) } })
+        const scene = sources.find(source => source.display_id === String(display.id))?.thumbnail
+        if (!scene || scene.isEmpty()) throw new Error('Startup compositor capture unavailable')
+        const size = scene.getSize()
+        const sx = size.width / display.bounds.width, sy = size.height / display.bounds.height
+        const crop = { x: Math.round((bounds.x - display.bounds.x) * sx), y: Math.round((bounds.y - display.bounds.y) * sy),
+          width: Math.round(bounds.width * sx), height: Math.round(bounds.height * sy) }
+        if (crop.x < 0 || crop.y < 0 || crop.x + crop.width > size.width || crop.y + crop.height > size.height) throw new Error('Startup capture crosses display boundary')
+        // Capture composition before capturePage can request a new renderer frame.
+        await writeFile(`${qaCapturePath}.composed.png`, scene.crop(crop).toPNG())
+        qaLog(`startup paint: ${JSON.stringify({ bounds, native, regions: overlayHitRegions, firstOverlayPresentation })}`)
+        for (let sample = 1; sample <= 2; sample++) {
+          await new Promise(resolve => setTimeout(resolve, 600))
+          const dom = await overlayWindow.webContents.executeJavaScript(`(() => ({visibility:document.visibilityState,
+            rows:[...document.querySelectorAll('.overlay-primary,.overlay-secondary')].map(node=>({text:node.textContent,
+              opacity:getComputedStyle(node).opacity,parentOpacity:getComputedStyle(node.parentElement).opacity}))}))()`)
+          const fresh = (await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: {
+            width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) } }))
+            .find(source => source.display_id === String(display.id))?.thumbnail
+          if (!fresh || fresh.isEmpty()) throw new Error('Startup follow-up capture unavailable')
+          await writeFile(`${qaCapturePath}.composed-${sample}.png`, fresh.crop(crop).toPNG())
+          qaLog(`startup paint sample ${sample}: ${JSON.stringify({ dom, native: inspectWindowRegion(overlayWindow) })}`)
+        }
+      }
       if (qaView === 'overlay-display-recovery' && overlayWindow) {
         const waitForLayout = async () => {
           for (let i = 0; i < 80 && (!overlayLayout.ready || displayRecoveryBounds || overlayRemapPending); i++) await new Promise(resolve => setTimeout(resolve, 50))
@@ -749,12 +811,9 @@ function createWindows() {
         await new Promise(resolve => setTimeout(resolve, 350))
         const regions = overlayHitRegions.map(rect => ({ ...rect }))
         const native = inspectWindowRegion(overlayWindow)
-        const scale = native.dpi / 96
-        const covered = regions.every(rect => [
-          [rect.x + 1, rect.y + 1], [rect.x + rect.width - 1, rect.y + rect.height - 1],
-          [rect.x + rect.width / 2, rect.y + rect.height / 2]
-        ].every(([x, y]) => native.rectangles.some(box => x * scale >= box.x && x * scale < box.x + box.width && y * scale >= box.y && y * scale < box.y + box.height)))
-        record('native-coverage', native.ok && native.hasCustomRegion && regions.length > 0 && covered)
+        // Native state is only an architecture check. Actual paint coverage
+        // is separately checked by the compositor-first pixel fixture.
+        record('native-coverage', native.ok && !native.hasCustomRegion && regions.length > 0 && overlayShapeKey === '[]')
         const after = overlayWindow.getBounds()
         record('bounds-preserved', Object.entries(before).every(([key, value]) => Math.abs(after[key as keyof Electron.Rectangle] - value) <= 1))
         record('visible', overlayWindow.isVisible())
@@ -768,7 +827,7 @@ function createWindows() {
         checks.record('locked-poll', transparentHoverTimer !== null)
         // Exercise the exact native sampler with deterministic screen points,
         // without injecting mouse input into the user's other applications.
-        if (transparentHoverTimer) clearInterval(transparentHoverTimer)
+        if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
         transparentHoverTimer = null
         overlayHitRegions = [{ x: 28, y: 40, width: 400, height: 90 }]
         overlayHovered = false; overlayControlsHovered = false
@@ -786,7 +845,7 @@ function createWindows() {
         checks.record('hidden-stop', transparentHoverTimer === null && !overlayControlsWindow.isVisible())
         const recovered = await recoverOverlayControls()
         await new Promise(resolve => setTimeout(resolve, 900))
-        checks.record('recover', recovered && overlayWindow.isVisible() && overlayControlsWindow.isVisible() && overlayMovable && !overlayMouseIgnored && transparentHoverTimer === null)
+        checks.record('recover', recovered && overlayWindow.isVisible() && overlayControlsWindow.isVisible() && overlayMovable && overlayMouseIgnored === overlayInputTransparent() && transparentHoverTimer !== null)
         const saved = await mainWindow.webContents.executeJavaScript(`JSON.parse(localStorage.getItem('syllable-preferences')).state.settings`)
         checks.record('state', saved.positionLocked === false && saved.clickThrough === false && saved.overlayVisible === true)
         checks.record('shortcut', globalShortcut.isRegistered('CommandOrControl+Alt+U'))
@@ -815,7 +874,7 @@ function createWindows() {
         await showOverlay()
         checks.record('reopen-restored', overlayWindow.isVisible() && matches(overlayWindow.getBounds()) && overlayMouseIgnored)
         setOverlayMovable(true)
-        checks.record('unlock', overlayMovable && !overlayClickThrough && !overlayMouseIgnored && overlayWindow.isResizable() && matches(overlayWindow.getBounds()))
+        checks.record('unlock', overlayMovable && !overlayClickThrough && overlayMouseIgnored === overlayInputTransparent() && overlayWindow.isResizable() && matches(overlayWindow.getBounds()))
         setOverlayMovable(false)
         hideOverlay()
         await new Promise(resolve => setTimeout(resolve, 180))
@@ -1168,7 +1227,7 @@ function createWindows() {
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`overlay controls capture: visible=${overlayControlsWindow.isVisible()}, bounds=${JSON.stringify(overlayControlsWindow.getBounds())}`)
         await writeFile(qaCapturePath, (await overlayControlsWindow.webContents.capturePage()).toPNG())
-      } else if ((qaView === 'overlay' || qaView === 'overlay-sync' || qaView === 'overlay-custom' || qaView === 'overlay-drag-performance' || qaView === 'overlay-display-recovery') && overlayWindow) {
+      } else if ((qaView === 'overlay' || qaView === 'overlay-sync' || qaView === 'overlay-custom' || qaView === 'overlay-drag-performance' || qaView === 'overlay-display-recovery' || qaView === 'overlay-startup') && overlayWindow) {
         overlayWindow.showInactive()
         await new Promise(resolve => setTimeout(resolve, 450))
         qaLog(`overlay bounds: ${JSON.stringify(overlayWindow.getBounds())}`)
@@ -1178,7 +1237,7 @@ function createWindows() {
         checks.record('hidden', !mainWindow.isVisible() && !overlayWindow?.isVisible())
         checks.record('controls-hidden', Boolean(overlayControlsWindow && !overlayControlsWindow.isVisible()))
       }
-      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || liveAudioQa || qaView === 'performance' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
+      if (qaView === 'overlay-controls' || qaView === 'overlay-drag-open-guard' || qaView === 'audio-sync' || liveAudioQa || qaView === 'performance' || qaView === 'reopen' || qaView === 'overlay-unlock' || qaView === 'overlay-startup' || qaView === 'overlay-display-recovery' || qaView?.startsWith('overlay-restore-check')) {
         const result = checks.result()
         qaLog(`qa acceptance: ${JSON.stringify(result)}`)
         if (!result.passed) process.exitCode = 1
@@ -1196,7 +1255,7 @@ function createWindows() {
         })()`)
       }
       quitting = true
-      if (qaView?.startsWith('overlay-restore') || qaView === 'overlay-display-recovery') app.quit()
+      if (qaView?.startsWith('overlay-restore') || qaView === 'overlay-display-recovery' || qaView === 'overlay-startup') app.quit()
       else app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
     }, 7000)
   }
@@ -1208,6 +1267,16 @@ function createWindows() {
     frame: false, transparent: true, backgroundColor: '#00000000', resizable: true, thickFrame: true, show: false, focusable: true, alwaysOnTop: true, skipTaskbar: true,
     hasShadow: false, webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
+  // DOM/layout-ready precedes the first paint. Register before navigation and
+  // retry a failed renderer once; never leave show() waiting forever on it.
+  const firstPaint = waitForFirstPaint(overlayWindow)
+  overlayFirstPaintReady = firstPaint.then(async painted => {
+    if (painted || quitting || !overlayWindow || overlayWindow.isDestroyed()) return painted
+    qaLog('overlay first paint failed; retrying renderer once')
+    const retryPaint = waitForFirstPaint(overlayWindow)
+    void overlayWindow.loadURL(rendererUrl('#/overlay')).catch(error => qaLog(`overlay load retry failed: ${String(error)}`))
+    return retryPaint
+  })
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
   bindRenderVisibility(overlayWindow)
   overlayWindow.setBackgroundColor('#00000000')
@@ -1217,6 +1286,19 @@ function createWindows() {
   // user gesture, not our own SetShape/setBounds work during screen recovery.
   overlayWindow.on('will-resize', () => cancelOverlayDisplayRecovery())
   overlayWindow.on('will-move', () => cancelOverlayDisplayRecovery())
+  if (process.platform === 'win32') {
+    // Observe native gesture lifetime only: this is NOT a WM_NCHITTEST
+    // override. Retain input while a resize/move leaves the original border.
+    overlayWindow.hookWindowMessage(0x0231, () => {
+      if (!overlayMovable || overlayClickThrough) return
+      overlayNativeGesture = true
+      applyOverlayMouseIgnore(false)
+    })
+    overlayWindow.hookWindowMessage(0x0232, () => {
+      overlayNativeGesture = false
+      applyOverlayMouseIgnore(overlayInputTransparent())
+    })
+  }
   overlayWindow.on('resize', () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return
     const bounds = overlayWindow.getBounds()
@@ -1230,7 +1312,7 @@ function createWindows() {
     requestOverlayLayout('resize')
     queueOverlayBounds(true)
   })
-  void overlayWindow.loadURL(rendererUrl('#/overlay'))
+  void overlayWindow.loadURL(rendererUrl('#/overlay')).catch(error => qaLog(`overlay load failed: ${String(error)}`))
   overlayWindow.webContents.on('did-finish-load', () => requestOverlayLayout('renderer-loaded'))
   overlayBoundsReady = windowBoundsStore.get().then(async storedBounds => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return
@@ -1247,7 +1329,11 @@ function createWindows() {
   overlayWindow.webContents.on('console-message', (_details, _level, message) => {
     if (message.startsWith('[overlay-input]') || _level >= 2) qaLog(`overlay console[${_level}]: ${message}`)
   })
-  overlayWindow.webContents.on('render-process-gone', (_event, details) => qaLog(`overlay renderer gone: ${details.reason} (${details.exitCode})`))
+  overlayWindow.webContents.on('render-process-gone', (_event, details) => {
+    cancelOverlayGesture()
+    requestOverlayLayout('renderer-gone')
+    qaLog(`overlay renderer gone: ${details.reason} (${details.exitCode})`)
+  })
   overlayWindow.on('unresponsive', () => qaLog('overlay renderer unresponsive'))
   if (qaLogPath) overlayWindow.webContents.on('did-finish-load', () => {
     setTimeout(async () => {
@@ -1278,6 +1364,11 @@ function createWindows() {
   bindToolWindowStyle(overlayControlsWindow, 'overlay-controls')
   void overlayControlsWindow.loadURL(controlsRendererUrl())
   overlayControlsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  overlayControlsWindow.webContents.on('render-process-gone', () => {
+    if (!overlayPointerDrag?.fromControls) return
+    cancelOverlayGesture()
+    applyOverlayMouseIgnore(overlayInputTransparent())
+  })
 }
 
 function toggleOverlay() {
@@ -1619,7 +1710,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     const publication = overlayLayout.accept({ ...layout, regions, controlsAnchor },
       { width, height, zoomFactor: overlayWindow.webContents.getZoomFactor() })
     if (!publication.accepted) {
-      if (!overlayLayout.ready) { applyOverlayShape(); applyOverlayMouseIgnore(true) }
+      if (!overlayLayout.ready) { applyOverlayShape(); applyOverlayMouseIgnore(overlayInputTransparent()) }
       return false
     }
     const nextRegions = publication.regions
@@ -1661,6 +1752,19 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     return true
   })
   ipcMain.on('overlay:controls-hover', (event, hovered: boolean) => updateOverlayControlsHover(event.sender, hovered === true))
+  ipcMain.on('overlay:pointer-move', event => {
+    if (event.sender !== overlayWindow?.webContents || !overlayWindow.isVisible()) return
+    // Renderer screenX/screenY may be physical pixels on mixed-DPI screens.
+    // Always derive native input geometry from Electron's actual DIP cursor.
+    sampleTransparentHover(screen.getCursorScreenPoint())
+  })
+  ipcMain.on('overlay:pointer-capture', (event, active: boolean) => {
+    if (event.sender !== overlayWindow?.webContents) return
+    // This hold starts on pointerdown, before the 6 DIP drag threshold. A
+    // lyric change or a tiny movement outside text must not sever capture.
+    overlayPointerCaptured = active === true && overlayMovable && !overlayClickThrough
+    applyOverlayMouseIgnore(overlayInputTransparent())
+  })
   ipcMain.handle('overlay:bounds', async () => { await Promise.all([overlayBoundsReady, overlaySettingsReady]); return overlayWindow?.getBounds() ?? defaultOverlayBounds() })
   ipcMain.handle('overlay:size', (_event, width: number, height: number) => {
     if (!overlayWindow) return defaultOverlayBounds()
@@ -1677,6 +1781,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     const fromControls = event.sender === overlayControlsWindow?.webContents
     const controlsWereVisible = overlayControlsWindow?.isVisible() ?? false
     overlayPointerDrag = { cursor: screen.getCursorScreenPoint(), bounds: overlayWindow.getBounds(), fromControls, controlsWereVisible }
+    applyOverlayMouseIgnore(false)
     if (controlsWereVisible && overlayControlsWindow) {
       // Keep pointer capture alive when the handle initiated the drag, but
       // remove its layered pixels so the second window cannot leave a trail.
@@ -1714,6 +1819,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       if (bounds.width !== origin.bounds.width || bounds.height !== origin.bounds.height) setExactOverlaySize(origin.bounds.width, origin.bounds.height)
     }
     overlayPointerDrag = null
+    applyOverlayMouseIgnore(overlayInputTransparent())
     lastOverlayDragEndedAt = Date.now()
     if (overlayControlsWindow && !overlayControlsWindow.isDestroyed()) {
       overlayControlsWindow.setOpacity(1)

@@ -29,7 +29,33 @@ export function Overlay() {
   const layoutGeneration = useRef(0)
   const [layoutRevision, setLayoutRevision] = useState(0)
   useEffect(() => {
-    const cancel = () => finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
+    let frame = 0
+    let pending = false
+    const publish = () => {
+      frame = 0
+      if (pending) { pending = false; window.syllable.overlay.pointerMoved() }
+    }
+    const move = () => {
+      if (frame) { pending = true; return }
+      // Do not delay the first entry behind a frame: a quick click/drag must
+      // acquire input before the next native fallback sample.
+      window.syllable.overlay.pointerMoved()
+      frame = requestAnimationFrame(publish)
+    }
+    // Electron forwards mousemove while the native window ignores clicks.
+    // The main process reads the real cursor; no renderer coordinates are trusted.
+    window.addEventListener('mousemove', move, { passive: true })
+    window.addEventListener('mouseleave', move, { passive: true })
+    return () => {
+      window.removeEventListener('mousemove', move); window.removeEventListener('mouseleave', move)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [])
+  useEffect(() => {
+    const cancel = () => {
+      finishPointerDrag(dragRef, () => window.syllable.overlay.endMove())
+      window.syllable.overlay.pointerCaptured(false)
+    }
     window.addEventListener('blur', cancel)
     return () => { window.removeEventListener('blur', cancel); cancel() }
   }, [settings.positionLocked])
@@ -37,6 +63,7 @@ export function Overlay() {
     if (dragRef.current) return
     if (settings.positionLocked || event.button !== 0 || event.clientX < 9 || event.clientY < 9 || event.clientX > window.innerWidth - 9 || event.clientY > window.innerHeight - 9) return
     dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false }
+    window.syllable.overlay.pointerCaptured(true)
     event.currentTarget.setPointerCapture(event.pointerId)
     event.preventDefault()
   }
@@ -52,6 +79,7 @@ export function Overlay() {
   }
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!finishPointerDrag(dragRef, () => window.syllable.overlay.endMove(), event.pointerId)) return
+    window.syllable.overlay.pointerCaptured(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
   useLayoutEffect(() => {

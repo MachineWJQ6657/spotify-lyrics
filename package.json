@@ -1,6 +1,6 @@
 {
   "name": "syllable",
-  "version": "0.4.44",
+  "version": "0.4.45",
   "private": true,
   "description": "A multilingual floating lyrics companion for Spotify",
   "author": "Syllable Contributors",
@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && electron-vite build",
     "dist": "npm run build && electron-builder --win",
     "preview": "electron-vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:repo": "node scripts/verify-repo-clean.cjs"
   },
   "dependencies": {
     "koffi": "^2.16.3",

@@ -11,6 +11,7 @@ interface WindowRegionApi {
   createRectRgn: NativeFunction
   getRegionData: NativeFunction
   deleteObject: NativeFunction
+  getDwmAttribute: NativeFunction
 }
 
 export interface WindowRegionInspection {
@@ -20,6 +21,7 @@ export interface WindowRegionInspection {
   /** Raw Win32 logical units relative to the window's top-left, not its client. */
   rectangles: ShapeRect[]
   regionType?: number
+  cloaked?: number
   error?: string
 }
 
@@ -46,13 +48,15 @@ function loadApi(): WindowRegionApi | null {
     }
     const user32 = koffi.load('user32.dll')
     const gdi32 = koffi.load('gdi32.dll')
+    const dwmapi = koffi.load('dwmapi.dll')
     cachedApi = {
       isWindow: user32.func('int __stdcall IsWindow(intptr_t hwnd)'),
       getDpiForWindow: user32.func('uint32_t __stdcall GetDpiForWindow(intptr_t hwnd)'),
       getWindowRgn: user32.func('int __stdcall GetWindowRgn(intptr_t hwnd, intptr_t region)'),
       createRectRgn: gdi32.func('intptr_t __stdcall CreateRectRgn(int left, int top, int right, int bottom)'),
       getRegionData: gdi32.func('uint32_t __stdcall GetRegionData(intptr_t region, uint32_t size, void *data)'),
-      deleteObject: gdi32.func('int __stdcall DeleteObject(intptr_t object)')
+      deleteObject: gdi32.func('int __stdcall DeleteObject(intptr_t object)'),
+      getDwmAttribute: dwmapi.func('long __stdcall DwmGetWindowAttribute(intptr_t hwnd, uint32_t attribute, void *value, uint32_t size)')
     }
   } catch (error) {
     apiError = error instanceof Error ? error.message : String(error)
@@ -89,13 +93,16 @@ export function inspectWindowRegion(window: BrowserWindow): WindowRegionInspecti
     const hwnd = readHandle(window)
     if (!api.isWindow(hwnd)) return failure('HWND is no longer valid')
     dpi = api.getDpiForWindow(hwnd)
+    // Visibility alone includes windows hidden by the shell/virtual desktop.
+    const cloakData = Buffer.alloc(4)
+    const cloaked = api.getDwmAttribute(hwnd, 14, cloakData, 4) === 0 ? cloakData.readUInt32LE(0) : undefined
     if (!Number.isSafeInteger(dpi) || dpi <= 0) return failure('GetDpiForWindow failed')
     region = api.createRectRgn(0, 0, 0, 0)
     if (!region) return failure('CreateRectRgn failed', dpi)
     const regionType = api.getWindowRgn(hwnd, region)
     if (regionType === 0) {
       if (window.isDestroyed() || !api.isWindow(hwnd)) return failure('HWND disappeared during inspection', dpi)
-      return { ok: true, hasCustomRegion: false, dpi, rectangles: [], regionType }
+      return { ok: true, hasCustomRegion: false, dpi, rectangles: [], regionType, cloaked }
     }
     if (![1, 2, 3].includes(regionType)) return failure('GetWindowRgn returned an invalid region type', dpi)
     const size = api.getRegionData(region, 0, null)
@@ -125,7 +132,7 @@ export function inspectWindowRegion(window: BrowserWindow): WindowRegionInspecti
       if (right <= x || bottom <= y) return failure('GetRegionData contains an empty or inverted rectangle', dpi)
       rectangles.push({ x, y, width: right - x, height: bottom - y })
     }
-    return { ok: true, hasCustomRegion: true, dpi, rectangles, regionType }
+    return { ok: true, hasCustomRegion: true, dpi, rectangles, regionType, cloaked }
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error), dpi)
   } finally {

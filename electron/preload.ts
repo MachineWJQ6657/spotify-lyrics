@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('syllable', {
       return () => ipcRenderer.removeListener('overlay:layout-reset', handler)
     },
     setControlsHover: (hovered: boolean) => ipcRenderer.send('overlay:controls-hover', hovered),
+    pointerMoved: () => ipcRenderer.send('overlay:pointer-move'),
+    pointerCaptured: (active: boolean) => ipcRenderer.send('overlay:pointer-capture', active),
     getBounds: () => ipcRenderer.invoke('overlay:bounds'),
     setSize: (width: number, height: number) => ipcRenderer.invoke('overlay:size', width, height),
     beginMove: () => ipcRenderer.send('overlay:move-start'),

@@ -1,32 +1,9 @@
 export interface ShapeRect { x: number; y: number; width: number; height: number }
 
-/** Window-local DIP geometry; screen coordinates must never enter this shape.
- * [] means unrestricted PAINTING in Electron, not an empty input region.
- * Native mouse-ignore owns click-through; clipping must never hide lyrics. */
-export function overlayShape(width: number, height: number, regions: readonly ShapeRect[], clickThrough: boolean): ShapeRect[] {
-  if (clickThrough) return []
-  if (![width, height].every(Number.isFinite) || width < 1 || height < 1) return []
-  width = Math.floor(width)
-  height = Math.floor(height)
-  const padded = regions.flatMap(region => {
-    if (![region.x, region.y, region.width, region.height].every(Number.isFinite) || region.width <= 0 || region.height <= 0) return []
-    const x = Math.max(0, Math.floor(region.x - 10))
-    const y = Math.max(0, Math.floor(region.y - 8))
-    const right = Math.min(width, Math.ceil(region.x + region.width + 10))
-    const bottom = Math.min(height, Math.ceil(region.y + region.height + 8))
-    // Fully offscreen regions have an empty intersection, not a 1px rectangle
-    // beyond the HWND. This matters while resize and renderer updates race.
-    return right > x && bottom > y ? [{ x, y, width: right - x, height: bottom - y }] : []
-  })
-  // A renderer is allowed to be temporarily unmeasured during monitor wake,
-  // resize or a font swap. An edge-only mask erases all but 8px of the lyrics.
-  if (!padded.length) return []
-  const edgeX = Math.min(8, width)
-  const edgeY = Math.min(8, height)
-  return [...padded,
-    { x: 0, y: 0, width, height: edgeY },
-    { x: 0, y: height - edgeY, width, height: edgeY },
-    { x: 0, y: 0, width: edgeX, height },
-    { x: width - edgeX, y: 0, width: edgeX, height }
-  ]
+/** Electron setShape clips PAINT as well as input. Repeated lyric masks caused
+ * real compositor strips despite correct native region inspection. Painting
+ * is now unconditionally whole-surface; overlay-input owns cursor hit testing.
+ * Keep this signature for the standalone compositor regression fixture. */
+export function overlayShape(_width: number, _height: number, _regions: readonly ShapeRect[], _clickThrough: boolean): ShapeRect[] {
+  return []
 }

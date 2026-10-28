@@ -1,0 +1,6 @@
+#!/bin/sh
+# Refuse accidental publication of local releases, models and test profiles.
+repository_root=$(git rev-parse --show-toplevel) || exit 1
+# Preserve Git's four-field update records on stdin. An index-only check misses
+# a binary that was committed earlier and then deleted in the latest commit.
+exec node "$repository_root/scripts/verify-repo-clean.cjs" --pre-push

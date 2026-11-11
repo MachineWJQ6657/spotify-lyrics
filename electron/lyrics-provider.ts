@@ -1334,6 +1334,35 @@ export function lyricHeaderCompatible(value: string, title: string) {
   return edition === 'unspecified' || edition === recordingEdition(title)
 }
 
+/** True when every word of a Latin title splits into Japanese syllables
+ * ("Haru wo Tsugeru", "Byoushinwo Kamu"), unlike English ("Fig Smoke"). */
+export function looksLikeRomaji(title: string) {
+  const words = title.normalize('NFKC').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+  const syllables = /^(?:(?:ky|gy|sh|ch|ny|hy|by|py|my|ry|ts|j|f|k|g|s|z|t|d|n|h|b|p|m|y|r|w|v)?[aeiou]|n|[kgsztdhbpmrjcf](?=[kgsztdhbpmrjcf]))+$/
+  return words.length > 0 && words.join('').length >= 4 && words.every(word => syllables.test(word))
+}
+
+/** Kana runs of a native title have a fixed romanization, and a romanized
+ * title of the same song contains them in order: 春を告げる → "wo", "geru" in
+ * "haruwotsugeru". Returns null when the native title has no kana to check. */
+export function kanaSkeletonMatches(nativeTitle: string, latinTitle: string): boolean | null {
+  const runs = nativeTitle.normalize('NFKC').match(/[ぁ-ゖァ-ヺー]+/g)
+  if (!runs?.length) return null
+  const target = latinTitle.normalize('NFKC').toLowerCase().replace(/[^a-z]/g, '')
+  let from = 0
+  for (const run of runs) {
+    const romaji = romanizeKanaIdentity(run).toLowerCase().replace(/[^a-z]/g, '')
+    if (!romaji) continue
+    // Romanized titles write particles as spoken and often drop long vowels.
+    const variants = [...new Set([romaji, romaji.replace(/^ha$/, 'wa').replace(/^he$/, 'e').replace(/^wo$/, 'o'),
+      romaji.replace(/ou/g, 'o').replace(/uu/g, 'u')])]
+    const found = variants.map(variant => target.indexOf(variant, from)).filter(index => index >= 0).sort((left, right) => left - right)[0]
+    if (found === undefined) return false
+    from = found + 1
+  }
+  return true
+}
+
 export function weightedScore(candidateTrack: string, candidateArtist: string, candidateDurationMs: number, query: { track: string; artist: string; album?: string; durationMs?: number }, synced: boolean, candidateAlbum = '') {
   if (recordingEdition(`${candidateTrack} ${candidateAlbum}`) !== recordingEdition(`${query.track} ${query.album ?? ''}`)) return 0
   let track = Math.max(scriptAwareSimilarity(candidateTrack, query.track), scriptAwareSimilarity(cleanTrackTitle(candidateTrack), cleanTrackTitle(query.track)))
@@ -1369,6 +1398,17 @@ export function weightedScore(candidateTrack: string, candidateArtist: string, c
   const candidateWriting = titleWriting(cleanTrackTitle(candidateTrack))
   const queryWriting = titleWriting(cleanTrackTitle(query.track))
   const crossScriptTitle = candidateWriting !== 'mixed' && queryWriting !== 'mixed' && candidateWriting !== queryWriting
+  if (track < .3 && crossScriptTitle) {
+    // A romanized title (not an English one) must agree with the native
+    // title's kana: "Haru wo Tsugeru" is 春を告げる, never the same artist's
+    // other song of similar length that the duration rule below would accept.
+    const [native, latin] = candidateWriting === 'cjk' ? [cleanTrackTitle(candidateTrack), cleanTrackTitle(query.track)] : [cleanTrackTitle(query.track), cleanTrackTitle(candidateTrack)]
+    if (looksLikeRomaji(latin)) {
+      const kana = kanaSkeletonMatches(native, latin)
+      if (kana === false) return 0
+      if (kana === true && artist >= .86) track = .8
+    }
+  }
   if (track < .3 && crossScriptTitle && artist >= .86 && query.durationMs && candidateDurationMs && durationDelta <= 2500) {
     // If the artist match exists only after kana transliteration, the exact
     // millisecond duration is a useful release fingerprint. Degrade rapidly as

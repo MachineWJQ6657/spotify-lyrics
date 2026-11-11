@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchLyrics, languageEdition, lyricHeaderCompatible, mergeProviderSet, weightedScore, type LyricsResult } from './lyrics-provider'
+import { fetchLyrics, kanaSkeletonMatches, languageEdition, looksLikeRomaji, lyricHeaderCompatible, mergeProviderSet, weightedScore, type LyricsResult } from './lyrics-provider'
 import { compareOriginalText } from './lyrics-text-reference'
 
 // Synthetic lyrics only: these fixtures exercise identity, not copyrighted text.
@@ -178,5 +178,27 @@ describe('Spotify text evidence is independent from its playback clock', () => {
     const result = mergeProviderSet([reference, wrong, { ...original, syncedLyrics: missingVerse }], 120000)
     expect(result?.syncedLyrics).toBe(missingVerse)
     expect(result?.textReference).toMatchObject({ status: 'partial', matchedLines: 8, referenceLines: 12 })
+  })
+})
+
+describe('romanized Spotify titles versus native provider titles', () => {
+  it('recognizes romaji titles but not English ones', () => {
+    for (const title of ['Haru wo Tsugeru', 'Byoushinwo Kamu', 'Obenkyou Shitoiteyo']) expect(looksLikeRomaji(title)).toBe(true)
+    for (const title of ['Fig Smoke', 'Shout Baby', 'Twilight Line', 'realize']) expect(looksLikeRomaji(title)).toBe(false)
+  })
+
+  it('checks the kana of a native title against its romanization', () => {
+    expect(kanaSkeletonMatches('春を告げる', 'Haru wo Tsugeru')).toBe(true)
+    expect(kanaSkeletonMatches('お勉強しといてよ', 'Obenkyou Shitoiteyo')).toBe(true)
+    expect(kanaSkeletonMatches('きらり', 'Haru wo Tsugeru')).toBe(false)
+    expect(kanaSkeletonMatches('春泥棒', 'Harudorobou')).toBeNull()
+  })
+
+  it('rejects a same-artist song of similar length whose kana disagree, and accepts the real title', () => {
+    const query = { track: 'Haru wo Tsugeru', artist: 'yama', album: 'Haru wo Tsugeru', durationMs: 196_497 }
+    expect(weightedScore('きらり', 'yama', 197_392, query, true, '別のアルバム')).toBe(0)
+    expect(weightedScore('春を告げる', 'yama', 196_497, query, true, '春を告げる')).toBeGreaterThanOrEqual(60)
+    // English titles keep the existing artist+duration behaviour.
+    expect(weightedScore('イチジク煙', 'ZUTOMAYO', 235_233, { track: 'Fig Smoke', artist: 'ZUTOMAYO', durationMs: 235_233 }, true)).toBeGreaterThan(0)
   })
 })

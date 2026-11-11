@@ -321,3 +321,52 @@ it('treats malformed worker output as an error and safely proceeds after confirm
   state.workers[1].emit('message', { output: ['kaze'] })
   expect(await second).toEqual(['kaze'])
 })
+
+it('reuses completed line readings without reloading the dictionary', async () => {
+  const { romanizeLines } = await import('./romanizer')
+  const first = romanizeLines(['晴れ', '雨'])
+  await Promise.resolve()
+  state.workers[0].emit('message', { output: ['hare', 'ame'] })
+  expect(await first).toEqual(['hare', 'ame'])
+  await Promise.resolve()
+  expect(await romanizeLines(['雨', '晴れ'])).toEqual(['ame', 'hare'])
+  expect(state.workers).toHaveLength(1)
+  // A partly new request still runs a worker for the whole snapshot.
+  const mixed = romanizeLines(['晴れ', '雪'])
+  await vi.waitFor(() => expect(state.workers).toHaveLength(2))
+  expect(state.workers[1].options.workerData.lines).toEqual(['晴れ', '雪'])
+  state.workers[1].emit('message', { output: ['hare', 'yuki'] })
+  expect(await mixed).toEqual(['hare', 'yuki'])
+})
+
+it('caches the input snapshot, never a caller array mutated after the request', async () => {
+  const { romanizeLines } = await import('./romanizer')
+  const input = ['二']
+  const pending = romanizeLines(input)
+  input[0] = '変更'
+  await Promise.resolve()
+  state.workers[0].emit('message', { output: ['ni'] })
+  expect(await pending).toEqual(['ni'])
+  await Promise.resolve()
+  const changed = romanizeLines(['変更'])
+  await vi.waitFor(() => expect(state.workers).toHaveLength(2))
+  state.workers[1].emit('message', { output: ['henkou'] })
+  expect(await changed).toEqual(['henkou'])
+})
+
+it('does not cache a short or failed worker answer', async () => {
+  const { romanizeLines } = await import('./romanizer')
+  const short = romanizeLines(['一', '二'])
+  await Promise.resolve()
+  state.workers[0].emit('message', { output: ['ichi'] })
+  expect(await short).toEqual(['ichi'])
+  await Promise.resolve()
+  const again = romanizeLines(['一'])
+  await vi.waitFor(() => expect(state.workers).toHaveLength(2))
+  state.workers[1].emit('message', { error: 'broken' })
+  await expect(again).rejects.toThrow()
+  const third = romanizeLines(['一'])
+  await vi.waitFor(() => expect(state.workers).toHaveLength(3))
+  state.workers[2].emit('message', { output: ['ichi'] })
+  expect(await third).toEqual(['ichi'])
+})

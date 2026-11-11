@@ -1037,6 +1037,49 @@ function searchTimelineVersionDominated(subject: LyricsResult, reference: Lyrics
   return stats.continuity >= .85 && stats.tailCoverage >= .7
 }
 
+/**
+ * When no exact LRCLIB record or Spotify timeline anchors the song, the
+ * quality race picks among search hits by density, so a Kugou file that
+ * splits lines more finely beat the equivalent NetEase entry. NetEase is the
+ * more complete, carefully timed catalogue for this audience and carries its
+ * own translation and romaji on the same rows, which then need no re-timing.
+ * Prefer it whenever it is the same song (near-identical whole text, no less
+ * content), complete, and not contradicted by a timeline quorum.
+ */
+function preferredNeteaseTimeline(base: LyricsResult | null, pool: LyricsResult[], timed: LyricsResult[], durationMs: number) {
+  if (!base || base.source.startsWith('网易云音乐') || base.source.startsWith('Spotify') || base.source.startsWith('LRCLIB · 精确匹配')) return null
+  const netease = bestLyricsCandidate(pool.filter(item => item.source.startsWith('网易云音乐')), durationMs)
+  if (!netease || netease.confidence < base.confidence - 5) return null
+  const stats = timedLyricsStats(netease.syncedLyrics, durationMs)
+  if (stats.lineCount < 4 || stats.continuity < .82 || (durationMs > 0 && stats.tailCoverage < .55)) return null
+  if (isProvenIncomplete(netease, timed) || isTimelineConsensusOutlier(netease, timed)) return null
+  const text = (result: LyricsResult) => timelineRows(result.syncedLyrics).map(row => alignmentText(row.text)).join('')
+  const neteaseText = text(netease), baseText = text(base)
+  if (neteaseText.length < baseText.length * .9 || normalizedTextSimilarity(neteaseText, baseText) < .85) return null
+  // Same words do not prove the same clock. With only two timelines a global
+  // shift cannot be attributed, so keep the race winner unless they agree.
+  const distance = onsetDistance(netease, base)
+  if (distance == null || distance > 600) return null
+  return netease
+}
+
+/**
+ * Median start-time difference between rows that begin the same sentence
+ * (one row's text is a prefix of the other's). Containment matching would let
+ * the second half of a split line pose as the start of a shifted one.
+ */
+function onsetDistance(left: LyricsResult, right: LyricsResult) {
+  const leftRows = timelineRows(left.syncedLyrics).filter(row => row.text.length >= 4)
+  const rightRows = timelineRows(right.syncedLyrics).filter(row => row.text.length >= 4)
+  const differences = (from: typeof leftRows, to: typeof rightRows) => from.flatMap(row => {
+    const starts = to.filter(other => row.text.startsWith(other.text) || other.text.startsWith(row.text))
+    return starts.length ? [Math.min(...starts.map(other => Math.abs(row.timeMs - other.timeMs)))] : []
+  })
+  const all = [...differences(leftRows, rightRows), ...differences(rightRows, leftRows)]
+  if (all.length < Math.max(6, Math.min(leftRows.length, rightRows.length))) return null
+  return median(all)
+}
+
 export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs = 0, preferredScript?: 'ja' | 'han' | 'latin'): LyricsResult | null {
   const normalized = results.flatMap(result => result ? [splitEmbeddedTranslation(result)] : [])
   const spotifyText = normalized.find(item => item.source.startsWith('Spotify')
@@ -1092,7 +1135,7 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   // lyric clock. Returning it as a successful fetch used to poison the
   // in-memory cache after a temporary outage and suppress later provider
   // retries for the rest of the process lifetime.
-  const selectedBase = trustedSpotifyBase ?? qualityBase ?? selectionPool[0]
+  const selectedBase = trustedSpotifyBase ?? preferredNeteaseTimeline(qualityBase, selectionPool, timed, durationMs) ?? qualityBase ?? selectionPool[0]
   if (!selectedBase) {
     // Keep actual original words, but never attach a conflicting community
     // clock or fabricate timestamps. The renderer has a separate untimed view.
@@ -1627,7 +1670,11 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
     const searchError = records.size ? undefined : searchFailure
     if (searchError || exactFailures.length) throw searchError ?? exactFailures[0]
   }
-  return bestLyricsCandidate(candidates, durationMs)
+  const best = bestLyricsCandidate(candidates, durationMs)
+  // A rate-limited or failed /get may have been the timed exact record. Do not
+  // let a search fallback chosen in its absence be cached as the final answer.
+  if (best && exactFailures.length && !exactCandidates.some(item => isTimedLyrics(item.syncedLyrics))) return { ...best, transient: true }
+  return best
 }
 
 /**
@@ -2092,7 +2139,7 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
       ])
     } finally { clearTimeout(providerDeadline) }
     const [spotifyLyricsResult, lrclibResult, neteaseResult, kugouResult] = providerResults
-    const transient = [lrclibResult, neteaseResult, kugouResult].some(result => result.status === 'rejected')
+    const transient = [lrclibResult, neteaseResult, kugouResult].some(result => result.status === 'rejected' || Boolean(result.value?.transient))
     let instrumentalEvidence = false
     const sanitize = (result: LyricsResult | null) => {
       if (result?.instrumental) { instrumentalEvidence = true; return null }

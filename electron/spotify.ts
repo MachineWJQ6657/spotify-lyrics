@@ -31,6 +31,27 @@ export interface PlaybackSnapshot {
   transitionResolved?: boolean
 }
 
+function webItemTrack(item: any): NonNullable<PlaybackSnapshot['track']> {
+  return {
+    id: item.id, name: item.name, artist: item.artists?.map((x: any) => x.name).join(', ') ?? '',
+    album: item.album?.name ?? '', coverUrl: item.album?.images?.[0]?.url ?? '', durationMs: item.duration_ms,
+    isrc: item.external_ids?.isrc, spotifyId: item.id, sourceDurationMs: item.duration_ms
+  }
+}
+
+/**
+ * A queue entry worth prefetching lyrics for. Episodes, local files (no
+ * stable id) and malformed stubs give null; live playback keeps its lenient
+ * mapping above.
+ */
+export function queueTrackFromWebItem(item: any): PlaybackSnapshot['track'] {
+  if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || !item.name.trim()) return null
+  if ((item.type && item.type !== 'track') || item.is_local) return null
+  const durationMs = Number(item.duration_ms)
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null
+  return webItemTrack(item)
+}
+
 export class SpotifyRateLimitError extends Error {
   constructor(public retryAfterMs: number) { super('Spotify 请求过于频繁，已自动降低刷新频率') }
 }
@@ -137,16 +158,35 @@ export class SpotifyService {
     signal.throwIfAborted()
     const item = data.item
     return {
-      track: item ? {
-        id: item.id, name: item.name, artist: item.artists?.map((x: any) => x.name).join(', ') ?? '',
-        album: item.album?.name ?? '', coverUrl: item.album?.images?.[0]?.url ?? '', durationMs: item.duration_ms,
-        isrc: item.external_ids?.isrc, spotifyId: item.id, sourceDurationMs: item.duration_ms
-      } : null,
+      track: item ? webItemTrack(item) : null,
       positionMs: data.progress_ms ?? 0,
       observedAtMs: Math.round((startedAt + receivedAt) / 2),
       isPlaying: Boolean(data.is_playing), deviceName: data.device?.name,
       sampleId: ++this.sampleId, playbackSource: 'web'
     }
+  }
+
+  /**
+   * The upcoming queue item, for lyric prefetching. `Accept-Language` makes
+   * names match the local client (緑黄色社会, not "Ryokuoushoku Shakai").
+   * Returns null on any non-success; prefetching is best effort.
+   */
+  async getQueue(acceptLanguage?: string): Promise<{ current: PlaybackSnapshot['track']; next: PlaybackSnapshot['track'] } | null> {
+    if (!this.session) return null
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new Error('Spotify 队列请求超时')), 6000)
+    try {
+      if (Date.now() > this.session.expiresAt - 60_000) await this.refresh(controller.signal)
+      const request = () => fetch('https://api.spotify.com/v1/me/player/queue', {
+        headers: { authorization: `Bearer ${this.session!.accessToken}`, ...(acceptLanguage ? { 'accept-language': acceptLanguage } : {}) },
+        signal: controller.signal
+      })
+      let response = await request()
+      if (response.status === 401) { await this.refresh(controller.signal); response = await request() }
+      if (!response.ok) return null
+      const data = await response.json() as { currently_playing?: any; queue?: any[] }
+      return { current: queueTrackFromWebItem(data.currently_playing), next: queueTrackFromWebItem(data.queue?.[0]) }
+    } finally { clearTimeout(timer) }
   }
 
   async getAccessToken(): Promise<string | null> {

@@ -27,6 +27,8 @@ import { PhonemeSession } from './audio-sync/phoneme-session'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import { watchWindowVisibility, windowVisible } from './window-visibility'
 import { paintRecovery, waitForFirstPaint, waitForLoad } from './first-paint'
+import { NextTrackPrefetcher } from './next-track-prefetch'
+import { parseLrc } from '../src/lib/lyrics'
 import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -1533,6 +1535,28 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
   return { accepted: true, action: command, pending: false }
 }
 
+// Before the current song ends, fetch and check the next queued song's lyrics
+// (all providers, completeness, language, translation) and warm its romaji,
+// so the song change shows them immediately. Needs the optional Web API
+// connection for the queue; without it nothing changes.
+const nextTrackPrefetcher = new NextTrackPrefetcher({
+  getQueue: () => spotify.getQueue(app.getLocale() || undefined),
+  fetchLyrics: async track => fetchLyrics(track, await spotify.getAccessToken().catch(() => null)),
+  warmRomanization: async result => {
+    // Exactly the lines the renderer will send (same parser, empties kept),
+    // so the per-line cache answers its request without a worker.
+    const lines = parseLrc(result.syncedLyrics ?? '').map(line => line.text)
+    if (!lines.some(Boolean) || !/[぀-ヿ]/.test(lines.join(''))) return
+    // The renderer only generates romaji when the provider's is missing or
+    // too sparse; mirror that so complete NetEase romaji costs nothing.
+    const provided = (result.additionalTracks ?? []).find(track => track.kind === 'romanization')
+    const providedRows = parseLrc(provided?.syncedLyrics ?? '').length
+    if (provided && providedRows >= lines.length * .96) return
+    await romanizeLines(lines)
+  },
+  log: message => qaLog(message)
+})
+
 async function refreshPlayback() {
   const local = localSpotify?.current()
   if (local) {
@@ -1544,6 +1568,7 @@ async function refreshPlayback() {
   await playbackRefreshes.refresh(() => spotify.getPlayback(), snapshot => {
     lastPlayback = snapshot
     broadcast(snapshot)
+    void nextTrackPrefetcher.maybePrefetch(snapshot).catch(() => undefined)
   })
 }
 
@@ -1555,6 +1580,7 @@ async function poll() {
       playbackRefreshes.invalidate()
       if (lastPlayback?.playbackSource !== 'local') { lastPlayback = local; broadcast(local) }
       nextPollMs = 5000
+      if (spotify.isConnected()) void nextTrackPrefetcher.maybePrefetch(local).catch(() => undefined)
     }
     else if (spotify.isConnected()) await refreshPlayback()
   }
@@ -1667,7 +1693,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean }) => {
     const lyricsFetchStartedAt = Date.now()
     qaLog(`lyrics request: ${track?.artist ?? 'unknown'} - ${track?.name ?? 'unknown'}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${track?.sourceDurationMs ?? track?.durationMs ?? 0}`)
-    const result = await fetchLyrics(track, await spotify.getAccessToken().catch(() => null), Boolean(options?.bypassCache))
+    // An explicit retry always asks the providers again.
+    const prefetched = options?.bypassCache ? null : await nextTrackPrefetcher.take(track).catch(() => null)
+    if (prefetched) qaLog(`lyrics: prefetched before the song change (${prefetched.source})`)
+    const result = prefetched ?? await fetchLyrics(track, await spotify.getAccessToken().catch(() => null), Boolean(options?.bypassCache))
     const lyricsDurationMs = track?.sourceDurationMs ?? track?.durationMs
     const stats = timedLyricsStats(result?.syncedLyrics, lyricsDurationMs)
     const durationRatio = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1

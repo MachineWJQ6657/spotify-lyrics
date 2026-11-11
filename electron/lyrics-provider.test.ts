@@ -262,6 +262,26 @@ describe('lyrics provider request budget', () => {
     } finally { vi.unstubAllGlobals() }
   })
 
+  it('does not cache a search fallback chosen because the exact LRCLIB lookups failed', async () => {
+    const synced = Array.from({ length: 12 }, (_, i) => `[00:${String(i * 4 + 1).padStart(2, '0')}.00]search line ${i}`).join('\n')
+    const searchRecord = { id: 990_052, trackName: 'Throttled Song', artistName: 'Throttled Artist', albumName: 'Throttled Album', duration: 50, instrumental: false, syncedLyrics: synced, plainLyrics: 'x' }
+    for (const exactStatus of [500, 404]) {
+      vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input))
+        if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: exactStatus }) : new Response(JSON.stringify([searchRecord]))
+        if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+        if (url.hostname === 'lyrics.kugou.com') return new Response('{"candidates":[]}')
+        return new Response('{"data":{"lists":[]}}')
+      }))
+      try {
+        const result = await fetchLyrics({ id: `qa-lrclib-exact-${exactStatus}`, name: searchRecord.trackName, artist: searchRecord.artistName, album: searchRecord.albumName, durationMs: 50_000, coverUrl: '' }, null, true)
+        expect(result?.syncedLyrics).toBe(synced)
+        // A failed exact lookup leaves the answer provisional; a clean 404 does not.
+        expect(Boolean(result?.transient)).toBe(exactStatus === 500)
+      } finally { vi.unstubAllGlobals() }
+    }
+  })
+
   it('still asks every LRCLIB variant when the precise exact record is missing or plain-only', async () => {
     const synced = Array.from({ length: 12 }, (_, i) => `[00:${String(i * 4).padStart(2, '0')}.00]variant line ${i}`).join('\n')
     const base = { id: 990_051, trackName: 'Variant Song', artistName: 'Variant Artist', albumName: 'Other Album Name', duration: 50, instrumental: false }
@@ -732,6 +752,45 @@ describe('lyrics provider request budget', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('NetEase timeline preference', () => {
+  const stamp = (ms: number) => `[${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(Math.floor(ms % 1000 / 10)).padStart(2, '0')}]`
+  const times = Array.from({ length: 24 }, (_, i) => 10_000 + i * 8_000)
+  const first = (i: number) => `歌詞の第${i}行目`
+  const second = (i: number) => `その${i}番目の続き`
+  const neteaseLrc = (shiftMs = 0, count = 24, text = (i: number) => `${first(i)} ${second(i)}`) => times.slice(0, count).map((t, i) => `${stamp(t + shiftMs)}${text(i)}`).join('\n')
+  const translation = (shiftMs = 0, count = 24) => times.slice(0, count).map((t, i) => `${stamp(t + shiftMs)}第${i}行的中文翻译`).join('\n')
+  const netease = (shiftMs = 0, count = 24, confidence = 100, text?: (i: number) => string): LyricsResult => ({
+    syncedLyrics: neteaseLrc(shiftMs, count, text), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence, matchedDurationMs: 200_000,
+    additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: translation(shiftMs, count), source: '网易云音乐 · 翻译' }]
+  })
+  // The same words, each line split in two: denser, so it wins the quality race.
+  const kugou: LyricsResult = {
+    syncedLyrics: times.flatMap((t, i) => [`${stamp(t)}${first(i)}`, `${stamp(t + 3500)}${second(i)}`]).join('\n'),
+    plainLyrics: null, source: '酷狗音乐 · 搜索候选', confidence: 100, matchedDurationMs: 200_000
+  }
+
+  it('prefers an equivalent complete NetEase timeline and keeps its own translation rows', () => {
+    // Without the preference (NetEase renamed) the denser Kugou file wins.
+    expect(mergeProviderSet([kugou, { ...netease(), source: '其他 · 搜索候选' }], 200_000)?.source).toBe(kugou.source)
+    const merged = mergeProviderSet([kugou, netease()], 200_000)
+    expect(merged?.source).toBe('网易云音乐 · 搜索候选')
+    const zh = merged?.additionalTracks?.find(track => track.kind === 'translation')
+    expect(parseTimedRows(zh?.syncedLyrics)).toHaveLength(24)
+  })
+
+  it('keeps the race winner when NetEase is shifted, incomplete, different, or a weak identity', () => {
+    expect(mergeProviderSet([kugou, netease(3000)], 200_000)?.source).toBe(kugou.source)
+    expect(mergeProviderSet([kugou, netease(0, 18)], 200_000)?.source).toBe(kugou.source)
+    expect(mergeProviderSet([kugou, netease(0, 24, 100, i => `全く違う歌の${i}番目の文章です`)], 200_000)?.source).toBe(kugou.source)
+    expect(mergeProviderSet([kugou, netease(0, 24, 80)], 200_000)?.source).toBe(kugou.source)
+  })
+
+  it('never overrides an exact LRCLIB record', () => {
+    const exact = { ...kugou, source: 'LRCLIB · 精确匹配' }
+    expect(mergeProviderSet([exact, netease()], 200_000)?.source).toBe('LRCLIB · 精确匹配')
   })
 })
 

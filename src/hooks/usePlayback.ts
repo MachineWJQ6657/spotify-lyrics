@@ -20,7 +20,10 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // translation from a proven sibling entry of the same recording.
 // Revision 40 verifies romanized titles against native kana and treats a
 // disagreeing NetEase namesake as a miss for the lyric-text translation lookup.
-const LYRICS_PROVIDER_REVISION = 41
+// Revision 41 stages LRCLIB lookups and asks Kugou's lyric keyword search.
+// Revision 42 prefers an equivalent, complete, same-clock NetEase timeline
+// over a denser search-hit file, keeping its own translation rows.
+const LYRICS_PROVIDER_REVISION = 42
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
 // Revision 2: reading-based long vowels (taiyou), number+counter compounds

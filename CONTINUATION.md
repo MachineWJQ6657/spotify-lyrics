@@ -2,23 +2,36 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.50 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.49-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.51 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.50-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (67 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (69 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
   - Romanized titles are verified against native kana.
   - Instrumentals show 纯音乐.
   - Audit tooling (scratchpad, not committed): bundle `electron/lyrics-provider.ts` with esbuild and run `fetchLyrics` per track **sequentially and paced**. LRCLIB allows a burst of ~20 requests refilled at ~3/s (429 `retry-after: 1`); Kugou `song_search_v2` silently returns an empty list (byte-identical to a real miss) for a large share of unsigned requests. Back-to-back audits measure those limits, not lyric quality (see 0.4.50).
+- **Next-song prefetch (0.4.51, needs the optional Web API connection):** about 60 s before a song ends, `/me/player/queue` gives the next item; its lyrics go through the full pipeline and its generated romaji is cached, so the song change shows them at once. The user's normal profile is **not** connected yet (no `session.json`); without it nothing changes.
 - **Romaji:** generated romaji matches NetEase human romaji on 89.8% of 3,022 lines (`ROMANIZATION_REVISION` 3).
 - **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-11 / 0.4.51 deployed: NetEase-first timeline, next-song prefetch, romaji cache
+
+- `release/current` = **0.4.51** (asar SHA256 `63430291604a1705e96ca0fb83ec1676f5179e28e72e1c651474e9c2a66eea0b`, verifier 69/69). Rollback: `release/current-0.4.50-backup-20261111`; the 0.4.49 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0451`. Provider revision **42**. 1011 tests pass.
+- **NetEase-first timeline** (user: NetEase's library is more complete and better). `preferredNeteaseTimeline` replaces a non-exact base (Kugou or LRCLIB search hit) with the NetEase entry when it is the same song (alignment-text similarity >= 0.85, no less content), complete, not proven incomplete or a consensus outlier, within 5 identity points, and on the same clock: `onsetDistance` (rows that begin the same sentence) median <= 600 ms. Containment-based `timelineDistance` was fooled by split lines: a 3 s shifted NetEase file looked aligned because Kugou's second half-line sat 3.5 s later. Exact LRCLIB records and Spotify timelines are never overridden.
+  - Audit vs 0.4.50 (159 songs, paced): 18 songs moved to NetEase; Chinese coverage better on 5, slightly lower on 1 (夏霞 1.00 → 0.97, NetEase's own translation skips a line); no new missing/transient results. Playlist zh mean 0.988 → 0.989.
+- **Next-song prefetch** (`electron/next-track-prefetch.ts`): when connected and the local song is <= 60 s from its end (SMTC duration, which in a Mix context is the hand-off point), one `/me/player/queue` call with `Accept-Language` = app locale (names then match SMTC: 緑黄色社会, not "Ryokuoushoku Shakai"). Skips when the Web API is playing something else (another device), the queue is empty, repeat-one, episodes/local files; retries a transient result once after 15 s. `lyrics:fetch` takes a prefetched result for the same recording (title + duration ±2 s + artist or album, or title + artist + album when Mix durations differ) that is timed and not transient; an explicit retry bypasses it.
+  - End-to-end (isolated profile with a plain QA session, Mix playlist started 50 s before a song end): dev and packaged builds both logged `lyrics prefetch: next=… usable=true … translation:zh-Hans` and, at the change, `prefetched before the song change` with **elapsed 0 ms** (was 1.3–3.4 s); the window showed original + romaji + Chinese.
+- **Romaji cache:** `romanizeLines` caches completed per-line readings (LRU 4000; snapshot of the input; short/failed answers never cached) and returns the shared job promise as before. Prefetch warms it with the exact renderer lines when the provider romaji is missing or sparse.
+- **Partial LRCLIB failure:** when a /get lookup fails (429/5xx/timeout) and no timed exact record was found, the result is now `transient` (not cached, retried) instead of persisting a search fallback. Found in the e2e run right after an audit.
+- **SMTC vs Web API durations in a Mix context differ by several seconds** (修羅 235.6 vs 233.1 s, 花も騒めく 216.8 vs 220.7 s): SMTC reports the Mix hand-off point. Positions still match audio (earlier ±11 ms measurement). Consequence: LRCLIB's precise /get (±2 s) misses during Mix playback, so most Mix songs still query every variant; prefetch hides that latency.
+- Bundling note: an exported `remainingMs` collided with a local in `vocal-sync.ts` and made the bundler rename it, failing the `boundedReadingFallback` text check; renamed to `playbackRemainingMs`.
 
 ## 2026-11-11 / 0.4.50 deployed: provider request budget (LRCLIB throttling, Kugou silent empties)
 

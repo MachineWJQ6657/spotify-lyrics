@@ -166,9 +166,42 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
 }
 
 /** Kuromoji's expanded dictionary is released as soon as the task finishes. */
-export function romanizeLines(lines: string[]): Promise<string[]> {
-  return analyze('romanize', lines)
+// Romanization is a pure per-line function (furigana is applied per line), so
+// a completed line can be reused. Each job otherwise reloads the expanded
+// Kuromoji dictionary; caching lets a next-song prefetch make the visible
+// romaji instant at the song change. Bounded LRU; failures are never cached.
+const ROMANIZED_LINE_LIMIT = 4000
+const romanizedLines = new Map<string, string>()
+
+function rememberRomanized(line: string, value: string) {
+  romanizedLines.delete(line)
+  romanizedLines.set(line, value)
+  if (romanizedLines.size > ROMANIZED_LINE_LIMIT) romanizedLines.delete(romanizedLines.keys().next().value!)
 }
+
+export function romanizeLines(lines: string[]): Promise<string[]> {
+  if (lines.length && lines.every(line => romanizedLines.has(line))) {
+    return Promise.resolve(lines.map(line => {
+      const value = romanizedLines.get(line)!
+      rememberRomanized(line, value)
+      return value
+    }))
+  }
+  // Return the shared job itself (callers rely on identical concurrent
+  // requests coalescing); cache as a side effect. A short or malformed answer
+  // must not shift readings onto the wrong lines, so only a complete
+  // one-to-one result is remembered.
+  // Snapshot: a caller may reuse/mutate its array before the job resolves.
+  const snapshot = [...lines]
+  const task = analyze('romanize', snapshot)
+  task.then(output => {
+    if (output.length === snapshot.length) snapshot.forEach((line, index) => rememberRomanized(line, output[index] ?? ''))
+  }, () => undefined)
+  return task
+}
+
+/** Test hook: forget cached readings. */
+export function clearRomanizedLineCache() { romanizedLines.clear() }
 
 /** Word order is authoritative; Kuromoji's word_position is deliberately omitted. */
 export function analyzeJapaneseLines(lines: string[], options?: { signal?: AbortSignal }): Promise<JapaneseWord[][]> {

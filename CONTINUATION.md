@@ -2,7 +2,7 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.48 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.47-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.49 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.48-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
@@ -17,8 +17,17 @@
 - **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
-- **Electron stays 44.2.0:** 44.11.1 (npm audit fix) made `--syllable-qa-view=overlay-startup` fail first paint and then hang (watchdog never fired) in 2/3 runs; 44.2.0 passed 3/3 under identical conditions. 0.4.49 was not deployed and the upgrade was reverted. Bisect before upgrading.
+- **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-11 / 0.4.49 deployed: overlay shows even when ready-to-show never arrives
+
+- `release/current` = **0.4.49** (asar SHA256 `16168981348bf2456bdbe9effa262482058767be736b23ece43dbc1a7e9fcc6b`, verifier 66/66, Electron 44.2.0). Profile backup: `.qa-user-data-preupdate-0449`.
+- Reproduced "desktop overlay broken after restart": start with the overlay hidden, then toggle it on via `window.syllable.overlay.show()` over CDP (the user cannot be driven by computer-use). Deployed 0.4.48 failed **1/6** (`overlay show failed: no first painted frame`, show() → false for the session).
+- Fix: `paintRecovery()` (`electron/first-paint.ts`) presents a loaded, healthy renderer after the bounded wait and reloads only a crashed, failed or still-loading one, confirmed by `waitForLoad` (`did-finish-load`).
+- Result: fixed dev build 8/8 shown, packaged candidate 6/6 shown, including 3 runs where ready-to-show was missed. After showing, the hit regions immediately reflect the 3 rendered rows, so the window is not blank.
+- Disabling `CalculateNativeWinOcclusion` made the missed paint *more* frequent (5/6 vs 1/6), so occlusion tracking is not the trigger.
+- Scripts (scratchpad): `qa-late-show.sh`, `qa-overlay-shown.sh`, `qa-overlay-runs.sh`.
 
 ## 2026-11-11 / 0.4.48 deployed: romanized-title identity, namesake-aware translation lookup
 

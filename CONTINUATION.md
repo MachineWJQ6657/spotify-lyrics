@@ -17,6 +17,7 @@
 - **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
+- **Electron stays 44.2.0:** 44.11.1 (npm audit fix) made `--syllable-qa-view=overlay-startup` fail first paint and then hang (watchdog never fired) in 2/3 runs; 44.2.0 passed 3/3 under identical conditions. 0.4.49 was not deployed and the upgrade was reverted. Bisect before upgrading.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
 
 ## 2026-11-11 / 0.4.48 deployed: romanized-title identity, namesake-aware translation lookup

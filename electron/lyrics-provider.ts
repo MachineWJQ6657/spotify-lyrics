@@ -1487,7 +1487,9 @@ export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutM
   throw lastError
 }
 
-export async function searchLyrics(query: { track: string; artist: string; album?: string; durationMs?: number }, signal?: AbortSignal): Promise<LyricsCandidate[]> {
+type LrcLibQuery = { track: string; artist: string; album?: string; durationMs?: number }
+
+function lrclibSearchVariants(query: LrcLibQuery) {
   const cleanedTrack = cleanTrackTitle(query.track)
   const cleanedArtist = primaryArtist(query.artist)
   const variants = [
@@ -1499,40 +1501,54 @@ export async function searchLyrics(query: { track: string; artist: string; album
   // Mixed-script localized artist names can hide the exact release entirely.
   // Title-only retrieval still passes the strict identity/edition scorer.
   if (HAN.test(cleanedArtist) && /[a-z]{3}/i.test(cleanedArtist)) variants.push(new URLSearchParams({ track_name: query.track }))
-  const uniqueVariants = [...new Map(variants.map(params => [params.toString(), params])).values()]
-  const settled = await Promise.allSettled(uniqueVariants.map(async params => {
+  return [...new Map(variants.map(params => [params.toString(), params])).values()]
+}
+
+async function lrclibSearchRecords(variants: URLSearchParams[], records: Map<number, LrcLibRecord>, signal?: AbortSignal) {
+  const settled = await Promise.allSettled(variants.map(async params => {
     const response = await fetchWithTimeout(`${LRCLIB_API}/search?${params}`, { headers }, 4200, 2, signal)
     if (!response.ok) throw new Error(`歌词搜索暂时不可用 (${response.status})`)
     return await response.json() as LrcLibRecord[]
   }))
-  const records = new Map<number, LrcLibRecord>()
   for (const result of settled) if (result.status === 'fulfilled') for (const item of result.value) records.set(item.id, item)
+  return settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')?.reason as unknown
+}
+
+async function broadenLrcLibSearch(records: Map<number, LrcLibRecord>, query: LrcLibQuery, signal?: AbortSignal) {
   // Spotify romanization may join particles (Byoushinwo vs Byoushin wo).
   // Broaden retrieval only when empty/all-parallel, using artist + one stable
   // title word. Rank against the FULL original query, never the short token.
-  if (!records.size || [...records.values()].every(item => !isTimedLyrics(item.syncedLyrics) || hasParallelLyricRows(item.syncedLyrics))) {
-    const words = cleanedTrack.match(/[a-z]{4,}/gi) ?? []
-    if (words.length >= 2) {
-      const params = new URLSearchParams({ artist_name: cleanedArtist, track_name: words.at(-1)! })
-      try {
-        const response = await fetchWithTimeout(`${LRCLIB_API}/search?${params}`, { headers }, 2200, 0, signal)
-        if (response.ok) for (const item of await response.json() as LrcLibRecord[]) records.set(item.id, item)
-      } catch { /* Optional retrieval must not discard completed results. */ }
-    }
-  }
-  if (!records.size) {
-    const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-    if (failure) throw failure.reason
-  }
+  if (records.size && [...records.values()].some(item => isTimedLyrics(item.syncedLyrics) && !hasParallelLyricRows(item.syncedLyrics))) return
+  const words = cleanTrackTitle(query.track).match(/[a-z]{4,}/gi) ?? []
+  if (words.length < 2) return
+  const params = new URLSearchParams({ artist_name: primaryArtist(query.artist), track_name: words.at(-1)! })
+  try {
+    const response = await fetchWithTimeout(`${LRCLIB_API}/search?${params}`, { headers }, 2200, 0, signal)
+    if (response.ok) for (const item of await response.json() as LrcLibRecord[]) records.set(item.id, item)
+  } catch { /* Optional retrieval must not discard completed results. */ }
+}
+
+function rankLrcLibRecords(records: Map<number, LrcLibRecord>, query: LrcLibQuery) {
   return [...records.values()].map(item => candidate(item, query)).sort((a, b) => b.score - a.score).slice(0, 16)
+}
+
+export async function searchLyrics(query: LrcLibQuery, signal?: AbortSignal): Promise<LyricsCandidate[]> {
+  const records = new Map<number, LrcLibRecord>()
+  const failure = await lrclibSearchRecords(lrclibSearchVariants(query), records, signal)
+  await broadenLrcLibSearch(records, query, signal)
+  if (!records.size && failure) throw failure
+  return rankLrcLibRecords(records, query)
 }
 
 async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal?: AbortSignal): Promise<LyricsResult | null> {
   const durationMs = referenceDurationMs(track)
-  const candidates: LyricsResult[] = []
-  let searchError: unknown
+  const query: LrcLibQuery = { track: track.name, artist: track.artist, album: track.album, durationMs }
+  const exactCandidates: LyricsResult[] = []
+  const exactFailures: unknown[] = []
+  const records = new Map<number, LrcLibRecord>()
+  let searchFailure: unknown
   let instrumentalRecord = false
-  const exactQueries = [
+  const exactQueries = [...new Map([
     new URLSearchParams({ artist_name: track.artist, track_name: track.name, album_name: track.album, duration: String(Math.round(durationMs / 1000)) }),
     new URLSearchParams({ artist_name: track.artist, track_name: track.name, duration: String(Math.round(durationMs / 1000)) }),
     new URLSearchParams({ artist_name: primaryArtist(track.artist), track_name: cleanTrackTitle(track.name), duration: String(Math.round(durationMs / 1000)) }),
@@ -1541,53 +1557,89 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
     // value from hiding an otherwise exact LRCLIB record.
     new URLSearchParams({ artist_name: track.artist, track_name: track.name, ...(track.album ? { album_name: track.album } : {}) }),
     new URLSearchParams({ artist_name: primaryArtist(track.artist), track_name: cleanTrackTitle(track.name) })
-  ]
-  const [exactResults, searched] = await Promise.all([
-    Promise.allSettled([...new Map(exactQueries.map(query => [query.toString(), query])).values()].map(async query => {
-      const response = await fetchWithTimeout(`${LRCLIB_API}/get?${query}`, { headers }, 4200, 2, signal)
-      if (response.ok) {
-        const data = await response.json() as LrcLibRecord
-        // Cleaned /get variants may strip "Live" or "Acoustic". An HTTP
-        // exact hit does not override a contradictory recording edition.
-        if (recordingEdition(`${data.trackName ?? ''} ${data.albumName ?? ''}`)
-          !== recordingEdition(`${track.name} ${track.album}`)) return null
-        // /get is a retrieval method, not permission to ignore contradictory
-        // response metadata. Apply the same artist identity gate as search.
-        if (weightedScore(data.trackName ?? '', data.artistName ?? '', Math.round(data.duration * 1000),
-          { track: track.name, artist: track.artist, album: track.album, durationMs }, Boolean(data.syncedLyrics), data.albumName ?? '') === 0) return null
-        // A same-artist, near-duration response can still be a different song.
-        // Exact authority requires the actual returned title (or its cleaned /
-        // deterministic kana spelling) to agree. A title inferred only from
-        // album + duration is a search hypothesis, never a 100-point /get hit.
-        const returnedTitleIdentity = Math.max(scriptAwareSimilarity(data.trackName ?? '', track.name),
-          scriptAwareSimilarity(cleanTrackTitle(data.trackName ?? ''), cleanTrackTitle(track.name)))
-        if (returnedTitleIdentity < .98) return null
-        if (!lyricHeaderCompatible(data.syncedLyrics ?? data.plainLyrics ?? '', track.name)) return null
-        if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
-        // A 200 record without text is LRCLIB's instrumental entry. It is a
-        // definitive answer, not an outage: throwing here used to mark every
-        // instrumental as transient, so it was never cached and kept retrying.
-        if (data.instrumental) instrumentalRecord = true
-        return null
-      }
-      if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)
+  ].map(params => [params.toString(), params])).values()]
+  const exactLookup = async (params: URLSearchParams) => {
+    const response = await fetchWithTimeout(`${LRCLIB_API}/get?${params}`, { headers }, 4200, 2, signal)
+    if (response.ok) {
+      const data = await response.json() as LrcLibRecord
+      // Cleaned /get variants may strip "Live" or "Acoustic". An HTTP
+      // exact hit does not override a contradictory recording edition.
+      if (recordingEdition(`${data.trackName ?? ''} ${data.albumName ?? ''}`)
+        !== recordingEdition(`${track.name} ${track.album}`)) return null
+      // /get is a retrieval method, not permission to ignore contradictory
+      // response metadata. Apply the same artist identity gate as search.
+      if (weightedScore(data.trackName ?? '', data.artistName ?? '', Math.round(data.duration * 1000),
+        query, Boolean(data.syncedLyrics), data.albumName ?? '') === 0) return null
+      // A same-artist, near-duration response can still be a different song.
+      // Exact authority requires the actual returned title (or its cleaned /
+      // deterministic kana spelling) to agree. A title inferred only from
+      // album + duration is a search hypothesis, never a 100-point /get hit.
+      const returnedTitleIdentity = Math.max(scriptAwareSimilarity(data.trackName ?? '', track.name),
+        scriptAwareSimilarity(cleanTrackTitle(data.trackName ?? ''), cleanTrackTitle(track.name)))
+      if (returnedTitleIdentity < .98) return null
+      if (!lyricHeaderCompatible(data.syncedLyrics ?? data.plainLyrics ?? '', track.name)) return null
+      if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
+      // A 200 record without text is LRCLIB's instrumental entry. It is a
+      // definitive answer, not an outage: throwing here used to mark every
+      // instrumental as transient, so it was never cached and kept retrying.
+      if (data.instrumental) instrumentalRecord = true
       return null
-    })),
-    searchLyrics({ track: track.name, artist: track.artist, album: track.album, durationMs }, signal).catch(error => { searchError = error; return [] })
-  ])
-  for (const result of exactResults) if (result.status === 'fulfilled' && result.value) candidates.push(result.value)
-  const fallback = searched
+    }
+    if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)
+    return null
+  }
+  const runStage = async (exact: URLSearchParams[], searches: URLSearchParams[]) => {
+    const [exactResults, failure] = await Promise.all([
+      Promise.allSettled(exact.map(exactLookup)),
+      lrclibSearchRecords(searches, records, signal)
+    ])
+    for (const result of exactResults) {
+      if (result.status === 'rejected') exactFailures.push(result.reason)
+      else if (result.value) exactCandidates.push(result.value)
+    }
+    searchFailure ??= failure
+  }
+  // LRCLIB allows a burst of about 20 requests, refilled at about 3 per
+  // second. Sending all ~7 lookups per song exhausted it after three quick
+  // song changes: every later lookup then waited out two 429 retry rounds
+  // (~2.4 s) or failed outright and fell back to a weaker provider. The full
+  // /get (title, artist, album, duration) is the most specific query and, in
+  // a corpus sample, hit whenever any variant hit. Ask it plus one title +
+  // artist search first; the other variants only run when that does not
+  // yield a healthy synced exact record.
+  const searches = lrclibSearchVariants(query)
+  const firstSearch = searches.find(params => params.has('track_name') && params.has('artist_name') && !params.has('album_name')) ?? searches[0]
+  await runStage(exactQueries.slice(0, 1), [firstSearch])
+  const settled = exactCandidates.some(item => isTimedLyrics(item.syncedLyrics) && !hasParallelLyricRows(item.syncedLyrics)
+    && durationPlausibleForPlayback(item, durationMs) && lrclibTimelineHealthy(item, durationMs))
+  if (!settled) {
+    await runStage(exactQueries.slice(1), searches.filter(params => params !== firstSearch))
+    await broadenLrcLibSearch(records, query, signal)
+  }
+  const fallback = rankLrcLibRecords(records, query)
     .filter(item => isTimedLyrics(item.syncedLyrics) && item.score >= 55 && lyricHeaderCompatible(item.syncedLyrics ?? '', track.name))
     .map(item => ({ syncedLyrics: item.syncedLyrics, plainLyrics: item.plainLyrics, source: 'LRCLIB · 搜索候选', confidence: item.score, matchedDurationMs: item.durationMs } satisfies LyricsResult))
-  candidates.push(...fallback)
+  const candidates = [...exactCandidates, ...fallback]
   if (!candidates.length && instrumentalRecord) {
     return { syncedLyrics: null, plainLyrics: null, source: 'LRCLIB · 纯音乐', confidence: 100, instrumental: true }
   }
   if (!candidates.length) {
-    const exactFailure = exactResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-    if (searchError || exactFailure) throw searchError ?? exactFailure!.reason
+    const searchError = records.size ? undefined : searchFailure
+    if (searchError || exactFailures.length) throw searchError ?? exactFailures[0]
   }
   return bestLyricsCandidate(candidates, durationMs)
+}
+
+/**
+ * The inverse of the "top tier looks truncated" test in bestLyricsCandidate.
+ * Keep the gap condition: ignoring it (most songs have a long interlude) let
+ * 109/201 corpus songs stop after two requests, but 10 of them then chose a
+ * different same-song upload than the full variant set would. Only songs that
+ * would not reopen the quality race may skip the remaining variants.
+ */
+function lrclibTimelineHealthy(item: LyricsResult, durationMs: number) {
+  const stats = timedLyricsStats(item.syncedLyrics, durationMs)
+  return stats.lineCount >= 4 && stats.excessiveGapMs <= 0 && stats.continuity >= .82 && (durationMs <= 0 || stats.tailCoverage >= .55)
 }
 
 function neteaseDuration(song: NeteaseSong) { return song.duration ?? song.dt ?? 0 }
@@ -1779,6 +1831,126 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
 
 async function fetchKugou(track: NonNullable<PlaybackSnapshot['track']>, signal?: AbortSignal): Promise<LyricsResult | null> {
   const durationMs = referenceDurationMs(track)
+  // songsearch.kugou.com silently answers unsigned clients with an empty list
+  // (byte-identical to a genuine miss) for a large share of requests, even at
+  // one query every six seconds, so a Kugou-only song was often cached as "no
+  // lyrics". The lyrics service's own keyword search is not throttled and
+  // returns lyric candidates with title, singer and duration directly. Ask it
+  // first; the file-hash route remains as a fallback.
+  let keywordFailure: unknown
+  try {
+    const byKeyword = await fetchKugouByKeyword(track, durationMs, signal)
+    if (byKeyword) return byKeyword
+  } catch (error) {
+    if (signal?.aborted) throw error
+    keywordFailure = error
+  }
+  let byHash: LyricsResult | null
+  try { byHash = await fetchKugouByFileHash(track, durationMs, signal) }
+  catch (error) { throw keywordFailure ?? error }
+  if (!byHash && keywordFailure) throw keywordFailure
+  return byHash
+}
+
+function kugouCandidateAccepted(candidate: KugouLyricCandidate, track: NonNullable<PlaybackSnapshot['track']>, fallbackSong: string, durationMs: number) {
+  return (!candidate.song || recordingEdition(candidate.song) === recordingEdition(track.name))
+    && (!candidate.singer || weightedScore(candidate.song || fallbackSong, candidate.singer,
+      candidate.duration ?? 0, { track: track.name, artist: track.artist, durationMs }, true) > 0)
+}
+
+async function downloadKugouCandidate(candidate: KugouLyricCandidate, track: NonNullable<PlaybackSnapshot['track']>, header: { name: string; artist: string }, signal?: AbortSignal) {
+  if (!candidate?.id || !candidate.accesskey) return null
+  const download = new URLSearchParams({ ver: '1', client: 'pc', id: String(candidate.id), accesskey: candidate.accesskey, fmt: 'lrc', charset: 'utf8' })
+  const downloadResponse = await fetchWithTimeout(`${KUGOU_LYRICS_API}/download?${download}`, { headers }, 4200, 2, signal)
+  if (!downloadResponse.ok) {
+    if (isTransientProviderStatus(downloadResponse.status)) throw new Error(`酷狗歌词下载暂时不可用 (${downloadResponse.status})`)
+    return null
+  }
+  const downloadPayload = await downloadResponse.json() as { content?: string }
+  const syncedLyrics = downloadPayload.content ? Buffer.from(downloadPayload.content, 'base64').toString('utf8').replace(/^﻿/, '').trim() : null
+  if (!syncedLyrics || !isTimedLyrics(syncedLyrics)) return null
+  if (!lyricHeaderCompatible(syncedLyrics, track.name)) return null
+  // Some search hits omit the edition while the downloaded file names it.
+  // Only early track-header evidence qualifies; ordinary sung lyrics do not.
+  const headerEdition = parseTimedRows(syncedLyrics).filter(row => row.timeMs <= 5000
+    && (row.text.includes(' - ') || /^\s*(?:title|曲名|歌曲)\s*[:：]/i.test(row.text)))
+    .map(row => recordingEdition(row.text)).find(edition => edition !== 'unspecified')
+  if (headerEdition && headerEdition !== recordingEdition(`${track.name} ${track.album}`)) return null
+  if (kugouTitleTagNamesOtherVersion(syncedLyrics, track)) return null
+  return stripTimedTrackMetadata(syncedLyrics, header)
+}
+
+/**
+ * Kugou files name their recording in an untimed `[ti:]` tag. A hash hit for
+ * あたらよ「10月無口な君を忘れる」 downloaded "[ti:… (Piano ver.)]", 10 s
+ * longer than the Spotify release, which won the merge and lost the
+ * translation. Reject a file whose tag names a version descriptor that the
+ * Spotify title and album do not contain.
+ */
+export function kugouTitleTagNamesOtherVersion(lrc: string, track: { name: string; album?: string }) {
+  const tagged = lrc.match(/^\s*\[ti:([^\]]*)\]/im)?.[1]?.trim()
+  if (!tagged) return false
+  const VERSION = /\bver(?:sion)?\b|バージョン|piano|ピアノ|acoustic|アコースティック|\blive\b|ライブ|remix|リミックス|instrumental|inst\.|karaoke|カラオケ|伴奏|off\s*vocal|orchestra|オーケストラ|弾き語り|demo/
+  const descriptors = (value: string) => {
+    const normalized = value.normalize('NFKC').toLowerCase()
+    return [...[...normalized.matchAll(/[([【]([^\])】]+)[)\]】]/g)].map(match => match[1]), ...normalized.split(/\s+[-–—]\s+/).slice(1)]
+      .map(text => text.trim()).filter(text => VERSION.test(text))
+  }
+  const wanted = descriptors(`${track.name} ${track.album ?? ''}`).join(' ')
+  return descriptors(tagged).some(text => !wanted.includes(text))
+}
+
+async function fetchKugouByKeyword(track: NonNullable<PlaybackSnapshot['track']>, durationMs: number, signal?: AbortSignal): Promise<LyricsResult | null> {
+  const query = { track: track.name, artist: track.artist, durationMs }
+  // The lyric search is literal about keyword shape: "ヨルシカ - 藍二乗"
+  // finds nothing while "藍二乗 ヨルシカ" does, so ask both shapes. It does
+  // not resolve Latin artist aliases (Atarayo for あたらよ); those still reach
+  // the alias-aware song search below.
+  const keywords = [...new Set([`${track.artist} - ${track.name}`, `${track.name} ${track.artist}`,
+    `${cleanTrackTitle(track.name)} ${primaryArtist(track.artist)}`])]
+  const settled = await Promise.allSettled(keywords.map(async keyword => {
+    const search = new URLSearchParams({ ver: '1', man: 'yes', client: 'pc', keyword, duration: String(Math.round(durationMs)), hash: '' })
+    const response = await fetchWithTimeout(`${KUGOU_LYRICS_API}/search?${search}`, { headers }, 4200, 2, signal)
+    if (!response.ok) {
+      if (isTransientProviderStatus(response.status)) throw new Error(`酷狗歌词搜索暂时不可用 (${response.status})`)
+      return []
+    }
+    return (await response.json() as { candidates?: KugouLyricCandidate[] }).candidates ?? []
+  }))
+  const byId = new Map<string, KugouLyricCandidate>()
+  for (const result of settled) {
+    if (result.status === 'fulfilled') for (const item of result.value) if (item.id && !byId.has(String(item.id))) byId.set(String(item.id), item)
+  }
+  if (!byId.size) {
+    const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure) throw failure.reason
+    return null
+  }
+  // Keyword hits carry their own title and singer: require the same identity
+  // score the song search uses (>= 58), never only Kugou's own ranking.
+  const ranked = [...byId.values()]
+    .filter(item => item.song && item.singer && kugouCandidateAccepted(item, track, item.song, durationMs))
+    .map(item => ({ item, score: weightedScore(item.song!, item.singer!, item.duration ?? 0, query, true) }))
+    .filter(entry => entry.score >= 58)
+    .sort((left, right) => right.score - left.score
+      || Math.abs((left.item.duration ?? 0) - durationMs) - Math.abs((right.item.duration ?? 0) - durationMs))
+    .slice(0, 3)
+  const downloads = await Promise.allSettled(ranked.map(async ({ item, score }) => {
+    const syncedLyrics = await downloadKugouCandidate(item, track, { name: item.song!, artist: item.singer! }, signal)
+    return syncedLyrics
+      ? { syncedLyrics, plainLyrics: null, source: '酷狗音乐 · 搜索候选', confidence: score, matchedDurationMs: item.duration ?? 0 } satisfies LyricsResult
+      : null
+  }))
+  const results = downloads.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
+  if (!results.length) {
+    const failure = downloads.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure) throw failure.reason
+    return null
+  }
+  return bestLyricsCandidate(results, durationMs)
+}
+
+async function fetchKugouByFileHash(track: NonNullable<PlaybackSnapshot['track']>, durationMs: number, signal?: AbortSignal): Promise<LyricsResult | null> {
   const searches = [...new Set([`${track.name} ${track.artist}`, `${cleanTrackTitle(track.name)} ${primaryArtist(track.artist)}`])]
   const settled = await Promise.allSettled(searches.map(async keyword => {
     const query = new URLSearchParams({ keyword, page: '1', pagesize: '12', platform: 'WebFilter' })
@@ -1798,46 +1970,26 @@ async function fetchKugou(track: NonNullable<PlaybackSnapshot['track']>, signal?
     score: weightedScore(song.SongName, song.SingerName, (song.Duration ?? 0) * 1000, { track: track.name, artist: track.artist, durationMs }, true)
   })).sort((a, b) => b.score - a.score)
   const detailResults = await Promise.allSettled(ranked.filter(item => item.score >= 58).slice(0, 5).map(async match => {
-      const search = new URLSearchParams({ ver: '1', man: 'yes', client: 'pc', hash: match.song.FileHash })
-      const lyricResponse = await fetchWithTimeout(`${KUGOU_LYRICS_API}/search?${search}`, { headers }, 4200, 2, signal)
-      if (!lyricResponse.ok) {
-        if (isTransientProviderStatus(lyricResponse.status)) throw new Error(`酷狗歌词搜索暂时不可用 (${lyricResponse.status})`)
-        return null
-      }
-      const lyricPayload = await lyricResponse.json() as { candidates?: KugouLyricCandidate[] }
-      const lyricCandidates = (lyricPayload.candidates ?? []).filter(candidate => (!candidate.song
-        || recordingEdition(candidate.song) === recordingEdition(track.name))
-        && (!candidate.singer || weightedScore(candidate.song || match.song.SongName, candidate.singer,
-          candidate.duration ?? 0, { track: track.name, artist: track.artist, durationMs }, true) > 0)).sort((a, b) => {
-        const left = Math.abs((a.duration ?? 0) - durationMs)
-        const right = Math.abs((b.duration ?? 0) - durationMs)
-        return left - right
-      }).slice(0, 3)
-      for (const lyricCandidate of lyricCandidates) {
-      if (!lyricCandidate?.id || !lyricCandidate.accesskey) continue
-      const download = new URLSearchParams({ ver: '1', client: 'pc', id: String(lyricCandidate.id), accesskey: lyricCandidate.accesskey, fmt: 'lrc', charset: 'utf8' })
-      const downloadResponse = await fetchWithTimeout(`${KUGOU_LYRICS_API}/download?${download}`, { headers }, 4200, 2, signal)
-      if (!downloadResponse.ok) {
-        if (isTransientProviderStatus(downloadResponse.status)) throw new Error(`酷狗歌词下载暂时不可用 (${downloadResponse.status})`)
-        continue
-      }
-      const downloadPayload = await downloadResponse.json() as { content?: string }
-      const syncedLyrics = downloadPayload.content ? Buffer.from(downloadPayload.content, 'base64').toString('utf8').replace(/^\uFEFF/, '').trim() : null
-      if (!isTimedLyrics(syncedLyrics)) continue
-      if (!lyricHeaderCompatible(syncedLyrics!, track.name)) continue
-      // Some search hits omit the edition while the downloaded file names it.
-      // Only early track-header evidence qualifies; ordinary sung lyrics do not.
-      const headerEdition = parseTimedRows(syncedLyrics).filter(row => row.timeMs <= 5000
-        && (row.text.includes(' - ') || /^\s*(?:title|曲名|歌曲)\s*[:：]/i.test(row.text)))
-        .map(row => recordingEdition(row.text)).find(edition => edition !== 'unspecified')
-      if (headerEdition && headerEdition !== recordingEdition(`${track.name} ${track.album}`)) continue
+    const search = new URLSearchParams({ ver: '1', man: 'yes', client: 'pc', hash: match.song.FileHash })
+    const lyricResponse = await fetchWithTimeout(`${KUGOU_LYRICS_API}/search?${search}`, { headers }, 4200, 2, signal)
+    if (!lyricResponse.ok) {
+      if (isTransientProviderStatus(lyricResponse.status)) throw new Error(`酷狗歌词搜索暂时不可用 (${lyricResponse.status})`)
+      return null
+    }
+    const lyricPayload = await lyricResponse.json() as { candidates?: KugouLyricCandidate[] }
+    const lyricCandidates = (lyricPayload.candidates ?? [])
+      .filter(candidate => kugouCandidateAccepted(candidate, track, match.song.SongName, durationMs))
+      .sort((a, b) => Math.abs((a.duration ?? 0) - durationMs) - Math.abs((b.duration ?? 0) - durationMs))
+      .slice(0, 3)
+    for (const lyricCandidate of lyricCandidates) {
+      const syncedLyrics = await downloadKugouCandidate(lyricCandidate, track, { name: match.song.SongName, artist: match.song.SingerName }, signal)
+      if (!syncedLyrics) continue
       return {
-        syncedLyrics: stripTimedTrackMetadata(syncedLyrics, { name: match.song.SongName, artist: match.song.SingerName }),
-        plainLyrics: null, source: '酷狗音乐 · 搜索候选', confidence: match.score,
+        syncedLyrics, plainLyrics: null, source: '酷狗音乐 · 搜索候选', confidence: match.score,
         matchedDurationMs: lyricCandidate.duration || (match.song.Duration ?? 0) * 1000
       } satisfies LyricsResult
-      }
-      return null
+    }
+    return null
   }))
   const results = detailResults.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
   if (!results.length) {

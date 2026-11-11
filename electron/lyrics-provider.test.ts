@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { lyricHeaderCompatible, hasParallelLyricRows, recordingEdition, repairRepeatedWords } from './lyrics-provider'
+import { lyricHeaderCompatible, hasParallelLyricRows, recordingEdition, repairRepeatedWords, kugouTitleTagNamesOtherVersion } from './lyrics-provider'
 import { alignSupplementalTimeline, withSiblingTranslation, isInstrumentalPlaceholder, cleanTrackTitle, durationPlausibleForPlayback, fetchLyrics, fetchWithTimeout, isSpotifySyncedLyricsType, isTimedLyrics, lyricsCacheKey, mergeProviderResults, mergeProviderSet, parseTimedRows, primaryArtist, repairBoundedGaps, spotifyLinesToLrc, splitEmbeddedTranslation, stripTimedTrackMetadata, timedLyricsStats, weightedScore, type LyricsResult } from './lyrics-provider'
 
 const timed: LyricsResult = {
@@ -239,6 +239,119 @@ describe('lyrics provider request budget', () => {
     } finally { vi.unstubAllGlobals() }
   })
 
+  it('asks LRCLIB only the precise exact query and one search when that record is a healthy synced match', async () => {
+    const synced = Array.from({ length: 12 }, (_, i) => `[01:${String(i * 4).padStart(2, '0')}.00]budget line ${i}`).join('\n').replace(/\[01:/g, '[00:')
+    const record = { id: 990_050, trackName: 'Budget Song', artistName: 'Budget Artist', albumName: 'Budget Album', duration: 50, instrumental: false, syncedLyrics: synced, plainLyrics: 'budget' }
+    const lrclib: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'lrclib.net') {
+        lrclib.push(`${url.pathname} ${url.search}`)
+        return url.pathname.endsWith('/get') ? new Response(JSON.stringify(record)) : new Response('[]')
+      }
+      if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-lrclib-budget', name: record.trackName, artist: record.artistName, album: record.albumName, durationMs: 50_000, coverUrl: '' }, null, true)
+      expect(result?.source).toBe('LRCLIB · 精确匹配')
+      expect(result?.syncedLyrics).toBe(synced)
+      expect(lrclib).toHaveLength(2)
+      expect(lrclib.some(call => call.startsWith('/api/get') && call.includes('album_name=') && call.includes('duration='))).toBe(true)
+      expect(lrclib.some(call => call.startsWith('/api/search') && !call.includes('album_name='))).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('still asks every LRCLIB variant when the precise exact record is missing or plain-only', async () => {
+    const synced = Array.from({ length: 12 }, (_, i) => `[00:${String(i * 4).padStart(2, '0')}.00]variant line ${i}`).join('\n')
+    const base = { id: 990_051, trackName: 'Variant Song', artistName: 'Variant Artist', albumName: 'Other Album Name', duration: 50, instrumental: false }
+    for (const precise of ['missing', 'plain'] as const) {
+      const lrclib: string[] = []
+      vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input))
+        if (url.hostname === 'lrclib.net') {
+          lrclib.push(`${url.pathname} ${url.search}`)
+          if (url.pathname.endsWith('/search')) return new Response('[]')
+          const isPrecise = url.searchParams.has('album_name') && url.searchParams.has('duration')
+          if (!isPrecise) return new Response(JSON.stringify({ ...base, syncedLyrics: synced, plainLyrics: 'variant' }))
+          return precise === 'missing' ? new Response('', { status: 404 }) : new Response(JSON.stringify({ ...base, syncedLyrics: null, plainLyrics: 'variant plain only' }))
+        }
+        if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+        return new Response('{"data":{"lists":[]}}')
+      }))
+      try {
+        const result = await fetchLyrics({ id: `qa-lrclib-variants-${precise}`, name: base.trackName, artist: base.artistName, album: 'Spotify Album Name', durationMs: 50_000, coverUrl: '' }, null, true)
+        expect(result?.syncedLyrics).toBe(synced)
+        expect(lrclib.length).toBeGreaterThan(4)
+      } finally { vi.unstubAllGlobals() }
+    }
+  })
+
+  it('finds Kugou lyrics through the lyric keyword search without the throttled song search', async () => {
+    const synced = Array.from({ length: 12 }, (_, i) => `[00:${String(i * 4 + 2).padStart(2, '0')}.00]酷狗のテスト歌詞 ${i}`).join('\n')
+    const calls: string[] = []
+    const candidates = [
+      { id: '9001', accesskey: 'wrong-singer', singer: 'Unrelated Singer', song: 'Kugou Only Song', duration: 50_000 },
+      { id: '9002', accesskey: 'right', singer: 'Kugou Artist', song: 'Kugou Only Song', duration: 50_000 }
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      calls.push(`${url.hostname}${url.pathname}`)
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+      if (url.hostname === 'lyrics.kugou.com' && url.pathname === '/search') {
+        expect(url.searchParams.get('keyword')).toContain('Kugou Only Song')
+        expect(url.searchParams.get('duration')).toBe('50000')
+        return new Response(JSON.stringify({ candidates }))
+      }
+      if (url.hostname === 'lyrics.kugou.com' && url.pathname === '/download') {
+        const content = url.searchParams.get('accesskey') === 'right' ? synced : '[00:01.00]別の歌\n[00:09.00]別の歌詞'
+        return new Response(JSON.stringify({ content: Buffer.from(content).toString('base64') }))
+      }
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-kugou-keyword', name: 'Kugou Only Song', artist: 'Kugou Artist', album: 'Kugou Album', durationMs: 50_000, coverUrl: '' }, null, true)
+      expect(result?.source).toBe('酷狗音乐 · 搜索候选')
+      expect(result?.syncedLyrics).toBe(synced)
+      expect(result?.transient).toBeUndefined()
+      expect(calls).not.toContain('songsearch.kugou.com/song_search_v2')
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('rejects a Kugou file whose title tag names a version the Spotify release does not', () => {
+    const piano = '[ti:10月無口な君を忘れる (Piano ver.)]\n[00:02.70]おはよ朝だよ'
+    expect(kugouTitleTagNamesOtherVersion(piano, { name: '10月無口な君を忘れる', album: '10月無口な君を忘れる' })).toBe(true)
+    expect(kugouTitleTagNamesOtherVersion(piano, { name: '10月無口な君を忘れる (Piano ver.)', album: '' })).toBe(false)
+    expect(kugouTitleTagNamesOtherVersion(piano, { name: '10月無口な君を忘れる - Piano ver.', album: '' })).toBe(false)
+    expect(kugouTitleTagNamesOtherVersion('[ti:雪国]\n[00:01.00]line', { name: '雪国', album: '幻燈' })).toBe(false)
+    expect(kugouTitleTagNamesOtherVersion('[ti:爆弾魔 (Re-Recording)]\n[00:01.00]line', { name: '爆弾魔 - Re-Recording', album: '' })).toBe(false)
+    expect(kugouTitleTagNamesOtherVersion('[ti:Song (Live)]\n[00:01.00]line', { name: 'Song', album: 'Album' })).toBe(true)
+    expect(kugouTitleTagNamesOtherVersion('[00:01.00]no title tag', { name: 'Song', album: '' })).toBe(false)
+  })
+
+  it('falls back to the Kugou file-hash route when the keyword search has no acceptable candidate', async () => {
+    const synced = Array.from({ length: 12 }, (_, i) => `[00:${String(i * 4 + 2).padStart(2, '0')}.00]ハッシュのテスト歌詞 ${i}`).join('\n')
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      calls.push(`${url.hostname}${url.pathname}`)
+      if (url.hostname === 'lrclib.net') return url.pathname.endsWith('/get') ? new Response('', { status: 404 }) : new Response('[]')
+      if (url.hostname === 'music.163.com') return new Response('{"result":{"songs":[]}}')
+      if (url.hostname === 'songsearch.kugou.com') return new Response(JSON.stringify({ data: { lists: [{ FileHash: 'hash-1', SongName: 'Hash Song', SingerName: 'Hash Artist', Duration: 50 }] } }))
+      if (url.hostname === 'lyrics.kugou.com' && url.pathname === '/search') {
+        return new Response(JSON.stringify({ candidates: url.searchParams.get('hash') ? [{ id: '7', accesskey: 'hash-key', duration: 50_000 }] : [] }))
+      }
+      if (url.hostname === 'lyrics.kugou.com' && url.pathname === '/download') return new Response(JSON.stringify({ content: Buffer.from(synced).toString('base64') }))
+      return new Response('{"data":{"lists":[]}}')
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'qa-kugou-hash-fallback', name: 'Hash Song', artist: 'Hash Artist', album: 'Hash Album', durationMs: 50_000, coverUrl: '' }, null, true)
+      expect(result?.syncedLyrics).toBe(synced)
+      expect(calls).toContain('songsearch.kugou.com/song_search_v2')
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('rejects contradictory lyric-candidate singer metadata even after a matching song hash', async () => {
     const original = '[00:05.00]correct synthetic phrase\n[00:35.00]second correct phrase\n[01:10.00]third correct phrase\n[01:35.00]last correct phrase'
     const downloads: string[] = []
@@ -344,6 +457,7 @@ describe('lyrics provider request budget', () => {
       if (url.includes('lrclib.net')) return new Response('[]')
       if (url.includes('music.163.com')) return new Response('{"result":{"songs":[]}}')
       if (url.includes('songsearch.kugou.com')) return new Response('{"data":{"lists":[]}}')
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error('unexpected test URL')
     }))
     try {
@@ -397,6 +511,7 @@ describe('lyrics provider request budget', () => {
         return new Response(JSON.stringify({ result: { songs: [] } }), { status: 200 })
       }
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -441,6 +556,7 @@ describe('lyrics provider request budget', () => {
           : new Response('', { status: 503 })
       }
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -467,6 +583,7 @@ describe('lyrics provider request budget', () => {
         { id: 77, name: record.trackName, duration: 90_000, artists: [{ name: record.artistName }], album: { name: record.albumName } }] } }), { status: 200 })
       if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: '[00:05.00]纯音乐，请欣赏' } }), { status: 200 })
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -489,6 +606,7 @@ describe('lyrics provider request budget', () => {
         { id: 78, name: record.trackName, duration: 90_000, artists: [{ name: record.artistName }], album: { name: record.albumName } }] } }), { status: 200 })
       if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: words } }), { status: 200 })
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     }))
     try {
@@ -523,6 +641,7 @@ describe('lyrics provider request budget', () => {
         if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: lrc(neteaseLines) },
           tlyric: { lyric: lrc(neteaseLines.map((_, index) => `译文${index}`)) } }), { status: 200 })
         if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+        if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
         throw new Error(`unexpected provider URL: ${url}`)
       })
       vi.stubGlobal('fetch', fetchMock)
@@ -564,6 +683,7 @@ describe('lyrics provider request budget', () => {
         return new Response(JSON.stringify({ lrc: { lyric: lrc(texts) }, tlyric: { lyric: lrc(texts.map((_, index) => `${right ? '正确' : '错误'}译文${index}`)) } }), { status: 200 })
       }
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     }))
     try {
@@ -590,6 +710,7 @@ describe('lyrics provider request budget', () => {
       if (url.includes('lrclib.net/api/search')) return new Response('[]', { status: 200 })
       if (url.includes('music.163.com')) return new Response(JSON.stringify({ result: { songs: [] } }), { status: 200 })
       if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      if (url.includes('lyrics.kugou.com/search')) return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
       throw new Error(`unexpected provider URL: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)

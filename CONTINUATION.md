@@ -2,23 +2,37 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.49 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.48-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.50 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.49-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>` (66 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (67 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
   - Romanized titles are verified against native kana.
   - Instrumentals show 纯音乐.
-  - Audit tooling (scratchpad, not committed): bundle `electron/lyrics-provider.ts` with esbuild and run `fetchLyrics` per track **sequentially**; concurrency trips LRCLIB/NetEase rate limits.
+  - Audit tooling (scratchpad, not committed): bundle `electron/lyrics-provider.ts` with esbuild and run `fetchLyrics` per track **sequentially and paced**. LRCLIB allows a burst of ~20 requests refilled at ~3/s (429 `retry-after: 1`); Kugou `song_search_v2` silently returns an empty list (byte-identical to a real miss) for a large share of unsigned requests. Back-to-back audits measure those limits, not lyric quality (see 0.4.50).
 - **Romaji:** generated romaji matches NetEase human romaji on 89.8% of 3,022 lines (`ROMANIZATION_REVISION` 3).
 - **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-11 / 0.4.50 deployed: provider request budget (LRCLIB throttling, Kugou silent empties)
+
+- `release/current` = **0.4.50** (asar SHA256 `7e06f8cc00c6306910c9c7b9bb264bf8310d397f4644f50aa6d1a64112dba623`, verifier 67/67, Electron 44.2.0). Rollback: `release/current-0.4.49-backup-20261111`; the 0.4.48 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0450`. Packaged smoke test (isolated profile, 8 forced back-to-back fetches over CDP): 8/8 found with Chinese translation, none transient. With the strict LRCLIB stop rule most songs still send 7 requests, so rapid skipping can still hit 429 (2.5 s); see TODO.
+- Cold lyric fetches took ~2.5 s on most songs. Tracing showed no slow HTTP request: LRCLIB answered our ~7 parallel lookups per song with **429** after about three quick song changes (burst ~20, refill ~3/s), so each later lookup waited two retry rounds or failed and fell back to a weaker provider.
+  - `fetchLrcLib` is now staged: the precise `/get` (title, artist, album, duration) plus one title + artist `/search` first; the other `/get` and search variants run only when that does not give a synced exact record that would not reopen the quality race (`lrclibTimelineHealthy`, the inverse of the "top tier looks truncated" test). `searchLyrics` (manual search UI) is unchanged, now built from the same helpers.
+  - Corpus A/B (201 songs: Mix playlist, play history, saved library; paced, 0 throttled): **200/201 identical**; the one difference is 風を食む (創作 edition, 265.9 s) now taking the 266 s 創作 record instead of the 269 s single. Requests 1433 → 1290 (29 songs stop after 2).
+  - Not shipped: also ignoring long interludes in the stop rule would stop 109/201 songs after 2 requests, but 10 then chose a different same-song upload (`ab-lrclib-relaxed.mjs`). Needs per-case review before it can save more requests.
+- Kugou: `songsearch.kugou.com/song_search_v2` returns an empty list for ~40% of requests even at one query every 6 s, and the response is byte-identical to a genuine miss, so Kugou-only songs were often cached as "no lyrics". `lyrics.kugou.com/search?keyword=&duration=` is not throttled (45 rapid queries consistent) and returns lyric candidates with title, singer and duration.
+  - `fetchKugou` asks that keyword search first (shapes "artist - title", "title artist", cleaned; it is literal about shape), applies the same edition gate and identity score >= 58, downloads the top 3 in parallel and runs `bestLyricsCandidate`. The old file-hash route remains the fallback; it is the only one that resolves Latin artist aliases (Atarayo for あたらよ, yama's romanized titles).
+  - A Kugou hash hit named "(Piano ver.)" only in its untimed `[ti:]` tag (10 s longer than the release) and won the merge without a translation. `kugouTitleTagNamesOtherVersion` rejects a file whose tag names a version descriptor absent from the Spotify title/album (all 107 keyword-found songs kept).
+  - Corpus A/B (157 songs): found 57 → 107; every new result matches the NetEase reference text (none < 0.5, median 1.0). The 6 "found → null" rows were alias songs whose fallback was throttled because the old route had just run; rechecked alone, 4/6 found and the remaining 2 depend on the same throttled song search as before.
+- End-to-end A/B (60 songs, old vs new `fetchLyrics`): 50 identical, 0 transient, 0 null. The rest: 風を食む edition fix, and songs without an LRCLIB exact record where the now-available Kugou timeline wins the existing quality race (NetEase translation re-timed onto it).
+- `LYRICS_PROVIDER_REVISION` 41 refreshes automatic documents. Verifier check `providerRequestBudget` (67 checks). 988 tests pass.
 
 ## 2026-11-11 / 0.4.49 deployed: overlay shows even when ready-to-show never arrives
 

@@ -71,6 +71,16 @@ describe('Japanese readings composed before romanization', () => {
     // An independent auxiliary verb such as いる stays a separate word.
     expect(romanizeJapaneseWords([v('見', 'ミ'), { surface_form: 'て', reading: 'テ', pronunciation: 'テ', pos: '助詞', pos_detail_1: '接続助詞' }, v('い', 'イ', '非自立'), aux('た', 'タ')], toRomaji)).toBe('mite ita')
   })
+  it('keeps lexicalized particles, loanword digraphs and lyric readings readable', () => {
+    expect(romanizeJapaneseWords([{ surface_form: '実は', reading: 'ジツハ', pronunciation: 'ジツワ', pos: '接続詞' }], toRomaji)).toBe('jitsuwa')
+    expect(romanizeJapaneseWords([{ surface_form: 'ヴィヴァーチェ', pos: '名詞' }], toRomaji)).toBe('vivaache')
+    expect(romanizeJapaneseWords([{ surface_form: 'ドゥドゥルルル', pos: '名詞' }, { surface_form: 'パーティー', reading: 'パーティー', pos: '名詞' }], toRomaji)).toBe('dudurururu paatii')
+    expect(romanizeJapaneseWords([read('春風', 'シュンプウ', 'シュンプー'), read('の', 'ノ', 'ノ', '助詞')], toRomaji)).toBe('harukaze no')
+    expect(romanizeJapaneseWords([read('夏', 'ナツ'), { surface_form: '風', reading: 'フウ', pronunciation: 'フー', pos: '名詞', pos_detail_1: '接尾' }], toRomaji)).toBe('natsukaze')
+    expect(romanizeJapaneseWords([read('獣', 'シシ'), read('の', 'ノ', 'ノ', '助詞'), read('他', 'タ'), read('に', 'ニ', 'ニ', '助詞')], toRomaji)).toBe('kemono no hoka ni')
+    // A kanji the dictionary cannot read is never printed inside the romaji line.
+    expect(romanizeJapaneseWords([{ surface_form: '騒', pos: '名詞' }, read('めき', 'メキ', 'メキ', '動詞')], toRomaji)).not.toMatch(/\p{Script=Han}/u)
+  })
   it('uses printed furigana as the reading of the preceding kanji', () => {
     expect(applyFuriganaReadings('翅（はね）を広げてた')).toBe('はねを広げてた')
     expect(applyFuriganaReadings('明日は辛(つら)くはないか')).toBe('明日はつらくはないか')

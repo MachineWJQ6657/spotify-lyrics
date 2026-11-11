@@ -43,7 +43,7 @@ const checks = {
   translationAlignmentVariants: main.includes('SPELLING_VARIANTS') && main.includes('FURIGANA_READING') && main.includes('uniqueGrouping'),
   siblingAndTextTranslation: main.includes('function withSiblingTranslation(') && main.includes('function enrichTranslationByLyricText(') && /type: ["']1006["']/.test(main),
   instrumentalIsDefinitive: main.includes('function isInstrumentalPlaceholder('),
-  romanizationRevision2: renderer.includes('ROMANIZATION_REVISION = 2') && main.includes('furiganaReadings') && main.includes('ヒトリ'),
+  romanizationRevision3: renderer.includes('ROMANIZATION_REVISION = 3') && main.includes('furiganaReadings') && main.includes('ヒトリ') && main.includes('ハルカゼ'),
   displayLayoutRecovery: main.includes('class OverlayLayoutGate') && main.includes('display-metrics-changed') && main.includes('overlay:layout-reset') && renderer.includes('onLayoutReset'),
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
   exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),

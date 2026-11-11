@@ -23,7 +23,9 @@ const LYRICS_PROVIDER_REVISION = 39
 // refetching correct originals/translations or overwriting provider romaji.
 // Revision 2: reading-based long vowels (taiyou), number+counter compounds
 // (hitori), the 々 iteration mark and a few standalone kanji readings.
-export const ROMANIZATION_REVISION = 2
+// Revision 3: lexicalized wa (jitsuwa), loanword digraphs (fa/ti/du/vi),
+// common lyric readings (harukaze, karada, kemono) and no raw kanji in romaji.
+export const ROMANIZATION_REVISION = 3
 // Maps a provider context to the retry token of its one allowed automatic
 // recovery generation. Token ownership prevents a stale async continuation
 // from clearing (or re-arming) a newer generation's guard.

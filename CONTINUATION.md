@@ -1,5 +1,14 @@
 # Syllable continuation checkpoint
 
+## 2026-11-11 / 0.4.48 deployed: romanized-title identity, namesake-aware translation lookup
+
+- `release/current` = **0.4.48** (asar SHA256 `3fc77787c8cfed677fc2ad628f9ebeb664168ff86242ed4a52bb3337bca1f797`, verifier 66/66). Rollback is `release/current-0.4.47-backup-20261111`; the 0.4.46 backup is in the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0448`. Provider revision **40** refreshes automatic documents.
+- Found by auditing the user's saved library (42 docs; read from a copied profile through a sandboxed renderer): 3 songs without translation. "Haru wo Tsugeru / yama" had NetEase pick **another yama song** on artist + duration (text similarity 0.07). The merge discarded it, but its presence suppressed the lyric-text lookup.
+  - The lookup gate is now "NetEase text disagrees with the chosen original" (≥0.75 similarity counts as agreement).
+  - `weightedScore`: when the Latin title `looksLikeRomaji`, the native title's kana must appear in order (`kanaSkeletonMatches`; 春を告げる ↔ "wo", "geru"). A mismatch rejects; a match gives title evidence. English titles (Fig Smoke, Shout Baby) are unchanged.
+  - Result: Haru wo Tsugeru NetEase pick 0.07 → 0.97, and Kugou now finds it too. All 3 library songs now have translations.
+- 981 tests pass. Candidate smoke-tested in an isolated profile over CDP: Haru wo Tsugeru shows the right lyrics + romaji + Chinese.
+
 ## 2026-11-11 / 0.4.47 deployed: confirmed instrumentals, romaji revision 3
 
 - `release/current` = **0.4.47** (asar SHA256 `cbb3430a6a217734855a2d3e5408935f18ef916b3f83328141cc6e904d3e5170`, verifier 66/66). Rollback is `release/current-0.4.46-backup-20261111`. The 0.4.45 backup went to the Recycle Bin. The profile was backed up after a clean stop to `.qa-user-data-preupdate-0447`.

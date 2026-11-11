@@ -26,7 +26,7 @@ import { LocalCtc } from './audio-sync/local-ctc'
 import { PhonemeSession } from './audio-sync/phoneme-session'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import { watchWindowVisibility, windowVisible } from './window-visibility'
-import { waitForFirstPaint } from './first-paint'
+import { paintRecovery, waitForFirstPaint, waitForLoad } from './first-paint'
 import type { VocalCapture } from '../src/lib/vocal-sync-types'
 
 // All three windows load the same trusted local renderer. Reusing one renderer
@@ -1272,10 +1272,22 @@ function createWindows() {
   const firstPaint = waitForFirstPaint(overlayWindow)
   overlayFirstPaintReady = firstPaint.then(async painted => {
     if (painted || quitting || !overlayWindow || overlayWindow.isDestroyed()) return painted
-    qaLog('overlay first paint failed; retrying renderer once')
-    const retryPaint = waitForFirstPaint(overlayWindow)
+    const contents = overlayWindow.webContents
+    const recovery = paintRecovery({ destroyed: overlayWindow.isDestroyed(), crashed: contents.isCrashed(),
+      loading: contents.isLoading(), url: contents.getURL() })
+    if (recovery === 'show') {
+      // ready-to-show intermittently never arrives for this hidden transparent
+      // window even though its renderer loaded and laid out the lyrics. It is
+      // emitted once per window, so it cannot be re-armed: present the loaded
+      // renderer (visible windows paint) instead of hiding it for the session.
+      qaLog('overlay ready-to-show not observed; renderer loaded, presenting it')
+      return true
+    }
+    if (recovery === 'give-up') return false
+    qaLog('overlay first paint failed; reloading renderer once')
+    const reloaded = waitForLoad(overlayWindow)
     void overlayWindow.loadURL(rendererUrl('#/overlay')).catch(error => qaLog(`overlay load retry failed: ${String(error)}`))
-    return retryPaint
+    return reloaded
   })
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
   bindRenderVisibility(overlayWindow)

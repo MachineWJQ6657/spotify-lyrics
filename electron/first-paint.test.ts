@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { waitForFirstPaint } from './first-paint'
+import { paintRecovery, waitForFirstPaint, waitForLoad } from './first-paint'
 
 function fixture() {
   return Object.assign(new EventEmitter(), { isDestroyed: (): boolean => false, webContents: new EventEmitter() })
@@ -54,5 +54,26 @@ describe('first transparent-window paint barrier', () => {
     const destroyed = fixture()
     destroyed.isDestroyed = () => true
     expect(await waitForFirstPaint(destroyed)).toBe(false)
+  })
+  it('presents a loaded renderer whose ready-to-show never came, reloads only a broken one', () => {
+    const healthy = { destroyed: false, crashed: false, loading: false, url: 'file:///index.html#/overlay' }
+    expect(paintRecovery(healthy)).toBe('show')
+    expect(paintRecovery({ ...healthy, crashed: true })).toBe('reload')
+    expect(paintRecovery({ ...healthy, loading: true })).toBe('reload')
+    expect(paintRecovery({ ...healthy, url: '' })).toBe('reload')
+    expect(paintRecovery({ ...healthy, destroyed: true })).toBe('give-up')
+  })
+  it('confirms a reload by did-finish-load, which every navigation emits', async () => {
+    const window = fixture(), pending = waitForLoad(window)
+    window.webContents.emit('did-finish-load')
+    expect(await pending).toBe(true)
+    expect(window.webContents.eventNames()).toEqual([])
+    vi.useFakeTimers()
+    const silent = fixture(), timedOut = waitForLoad(silent, 300)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(await timedOut).toBe(false)
+    const crashed = fixture(), gone = waitForLoad(crashed)
+    crashed.webContents.emit('render-process-gone')
+    expect(await gone).toBe(false)
   })
 })

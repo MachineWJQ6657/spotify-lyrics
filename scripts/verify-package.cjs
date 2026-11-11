@@ -83,7 +83,7 @@ const checks = {
   trayIconAssets: ['icon.ico', 'icon.png'].every(name => fs.existsSync(path.join(directory, 'resources', name))),
   secondaryContrast: /-webkit-text-stroke:\s*1\.5px #121212/.test(rendererCss) && rendererCss.includes('.no-background.effect-none .overlay-secondary'),
   overlayStartupBarrier: main.includes('overlayRendererReady, overlaySettingsReady') && main.includes('overlay:restore') && renderer.includes('receivedSettings'),
-  overlayFirstPaintBarrier: main.includes('overlayFirstPaintReady') && main.includes('function waitForFirstPaint(') && main.includes('retrying renderer once'),
+  overlayFirstPaintBarrier: main.includes('overlayFirstPaintReady') && main.includes('function waitForFirstPaint(') && main.includes('function paintRecovery(') && main.includes('function waitForLoad(') && main.includes('reloading renderer once'),
   lockedFullWindowPassthrough: main.includes('setIgnoreMouseEvents(value, { forward: true })') && main.includes('overlay:movable-changed'),
   finalBoundsFlush: main.includes('Final overlay bounds save failed:') && main.includes('session.flushStorageData()'),
   lockedOverlayRecovery: main.includes('function recoverOverlayControls()') && main.includes('function sampleTransparentHover(') && main.includes('CommandOrControl+Alt+U') && renderer.includes('解锁并显示控制栏'),

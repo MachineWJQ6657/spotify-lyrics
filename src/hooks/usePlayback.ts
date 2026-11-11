@@ -18,7 +18,9 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // Revision 39 re-aligns translations across furigana, transcription variants,
 // split/merged rows and interlude rows, and borrows a missing NetEase
 // translation from a proven sibling entry of the same recording.
-const LYRICS_PROVIDER_REVISION = 39
+// Revision 40 verifies romanized titles against native kana and treats a
+// disagreeing NetEase namesake as a miss for the lyric-text translation lookup.
+const LYRICS_PROVIDER_REVISION = 40
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
 // Revision 2: reading-based long vowels (taiyou), number+counter compounds

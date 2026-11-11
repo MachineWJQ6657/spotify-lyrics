@@ -400,7 +400,8 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           }
           const emptyDocument: LyricsDocument = {
             trackId: latestTrack.id, track: latestTrack, tracks: [], updatedAt: Date.now(),
-            providerRevision: result?.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext
+            providerRevision: result?.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext,
+            ...(result?.instrumental && !result.transient ? { instrumental: true } : {})
           }
           if (result?.transient) commit(emptyDocument, true)
           else {

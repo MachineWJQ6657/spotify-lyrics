@@ -20,6 +20,8 @@ export interface LyricsResult {
   additionalTracks?: SupplementalLyrics[]
   /** At least one community provider failed or exceeded this request budget. */
   transient?: boolean
+  /** A verified provider record says this recording has no vocals/lyrics. */
+  instrumental?: boolean
 }
 
 export interface LyricsCandidate {
@@ -1489,6 +1491,7 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
   const durationMs = referenceDurationMs(track)
   const candidates: LyricsResult[] = []
   let searchError: unknown
+  let instrumentalRecord = false
   const exactQueries = [
     new URLSearchParams({ artist_name: track.artist, track_name: track.name, album_name: track.album, duration: String(Math.round(durationMs / 1000)) }),
     new URLSearchParams({ artist_name: track.artist, track_name: track.name, duration: String(Math.round(durationMs / 1000)) }),
@@ -1524,6 +1527,7 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
         // A 200 record without text is LRCLIB's instrumental entry. It is a
         // definitive answer, not an outage: throwing here used to mark every
         // instrumental as transient, so it was never cached and kept retrying.
+        if (data.instrumental) instrumentalRecord = true
         return null
       }
       if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)
@@ -1536,6 +1540,9 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
     .filter(item => isTimedLyrics(item.syncedLyrics) && item.score >= 55 && lyricHeaderCompatible(item.syncedLyrics ?? '', track.name))
     .map(item => ({ syncedLyrics: item.syncedLyrics, plainLyrics: item.plainLyrics, source: 'LRCLIB · 搜索候选', confidence: item.score, matchedDurationMs: item.durationMs } satisfies LyricsResult))
   candidates.push(...fallback)
+  if (!candidates.length && instrumentalRecord) {
+    return { syncedLyrics: null, plainLyrics: null, source: 'LRCLIB · 纯音乐', confidence: 100, instrumental: true }
+  }
   if (!candidates.length) {
     const exactFailure = exactResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (searchError || exactFailure) throw searchError ?? exactFailure!.reason
@@ -1894,8 +1901,10 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
     } finally { clearTimeout(providerDeadline) }
     const [spotifyLyricsResult, lrclibResult, neteaseResult, kugouResult] = providerResults
     const transient = [lrclibResult, neteaseResult, kugouResult].some(result => result.status === 'rejected')
+    let instrumentalEvidence = false
     const sanitize = (result: LyricsResult | null) => {
-      if (result && isInstrumentalPlaceholder(result.syncedLyrics ?? result.plainLyrics)) return null
+      if (result?.instrumental) { instrumentalEvidence = true; return null }
+      if (result && isInstrumentalPlaceholder(result.syncedLyrics ?? result.plainLyrics)) { instrumentalEvidence = true; return null }
       return result?.syncedLyrics
         ? { ...result, syncedLyrics: stripTimedTrackMetadata(result.syncedLyrics, track) }
         : result
@@ -1953,7 +1962,11 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
       ? { ...merged, ...(transient ? { transient: true } : {}) }
       : transient
         ? { syncedLyrics: null, plainLyrics: null, source: '歌词源暂时不可用', confidence: 0, transient: true }
-        : null
+        // Only when no provider offered any lyric at all: a provider's
+        // instrumental tag never hides real words from another provider.
+        : instrumentalEvidence
+          ? { syncedLyrics: null, plainLyrics: null, source: '纯音乐', confidence: 100, instrumental: true }
+          : null
     // Never let a temporary provider outage permanently cache away a language
     // track or a more reliable timing quorum. The renderer may display this
     // partial generation immediately and schedules one bounded retry.

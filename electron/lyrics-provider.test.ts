@@ -475,6 +475,27 @@ describe('lyrics provider request budget', () => {
         album: record.albumName, coverUrl: '', durationMs: 90_000 }, null, true)
       expect(result?.syncedLyrics ?? null).toBeNull()
       expect(result?.transient).toBeUndefined()
+      expect(result?.instrumental).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    // An instrumental tag on one provider never hides real words from another.
+    const words = '[00:05.00]本当の歌詞の一行目\n[00:30.00]本当の歌詞の二行目\n[01:00.00]本当の歌詞の三行目\n[01:20.00]本当の歌詞の四行目'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(record), { status: 200 })
+      if (url.includes('lrclib.net/api/search')) return new Response('[]', { status: 200 })
+      if (url.includes('music.163.com/api/search')) return new Response(JSON.stringify({ result: { songs: [
+        { id: 78, name: record.trackName, duration: 90_000, artists: [{ name: record.artistName }], album: { name: record.albumName } }] } }), { status: 200 })
+      if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: words } }), { status: 200 })
+      if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      throw new Error(`unexpected provider URL: ${url}`)
+    }))
+    try {
+      const sung = await fetchLyrics({ id: 'local-instrumental-tag-conflict', name: record.trackName, artist: record.artistName,
+        album: record.albumName, coverUrl: '', durationMs: 90_000 }, null, true)
+      expect(sung?.syncedLyrics).toContain('本当の歌詞の四行目')
+      expect(sung?.instrumental).toBeUndefined()
     } finally {
       vi.unstubAllGlobals()
     }

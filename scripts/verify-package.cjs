@@ -42,7 +42,7 @@ const checks = {
   providerRevision39: renderer.includes('LYRICS_PROVIDER_REVISION = 39') && main.includes('searchTimelineVersionDominated'),
   translationAlignmentVariants: main.includes('SPELLING_VARIANTS') && main.includes('FURIGANA_READING') && main.includes('uniqueGrouping'),
   siblingAndTextTranslation: main.includes('function withSiblingTranslation(') && main.includes('function enrichTranslationByLyricText(') && /type: ["']1006["']/.test(main),
-  instrumentalIsDefinitive: main.includes('function isInstrumentalPlaceholder('),
+  instrumentalIsDefinitive: main.includes('function isInstrumentalPlaceholder(') && main.includes('instrumentalRecord') && renderer.includes('歌词源确认这首歌没有歌词'),
   romanizationRevision3: renderer.includes('ROMANIZATION_REVISION = 3') && main.includes('furiganaReadings') && main.includes('ヒトリ') && main.includes('ハルカゼ'),
   displayLayoutRecovery: main.includes('class OverlayLayoutGate') && main.includes('display-metrics-changed') && main.includes('overlay:layout-reset') && renderer.includes('onLayoutReset'),
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),

@@ -14,3 +14,13 @@ it('renders untimed original as readable text without an active-line or follow c
   expect(html).not.toContain('lyric-group active')
   expect(html).not.toContain('回到当前歌词')
 })
+
+it('shows a confirmed instrumental as such, without a retry prompt', () => {
+  const html = renderToStaticMarkup(<LyricsStage document={{ trackId: 'fixture-instrumental', tracks: [], instrumental: true }}
+    positionMs={1000} enabled={['ja']} romanization={false} onRetry={() => {}} />)
+  expect(html).toContain('纯音乐')
+  expect(html).not.toContain('重新匹配歌词')
+  const missing = renderToStaticMarkup(<LyricsStage document={{ trackId: 'fixture-missing', tracks: [] }}
+    positionMs={1000} enabled={['ja']} romanization={false} onRetry={() => {}} />)
+  expect(missing).toContain('重新匹配歌词')
+})

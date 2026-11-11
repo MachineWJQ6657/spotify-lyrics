@@ -101,6 +101,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       </div>
     </div>
   </div>
+  if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>纯音乐</h3><p>歌词源确认这首歌没有歌词。</p></div>
   if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配，或导入本地 LRC。</p>{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}</div>
 
   return <div className={`lyrics-stage-shell ${calibrating ? 'is-calibrating' : ''}`}>

@@ -24,6 +24,8 @@ export interface LyricsDocument {
   providerContext?: string
   /** Tracks whose text/timing was explicitly supplied or edited by the user. */
   userEditedTrackIds?: string[]
+  /** Providers confirm the recording is instrumental; nothing to retry. */
+  instrumental?: boolean
 }
 
 export interface TrackInfo {

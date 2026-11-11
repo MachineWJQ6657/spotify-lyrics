@@ -91,7 +91,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="检测到转场元数据，但其时间坐标未经声音验证；不据此加速或平移歌词。Spotify 自带歌词也可能与人声不同步。"><Sparkles size={13} />{mixLabel}</span>}<span title="来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验"><Cloud size={13} />{sourceLabel(activeLyrics?.tracks[0]?.source ?? 'Searching')}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="检测到转场元数据，但其时间坐标未经声音验证；不据此加速或平移歌词。Spotify 自带歌词也可能与人声不同步。"><Sparkles size={13} />{mixLabel}</span>}<span title="来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验"><Cloud size={13} />{sourceLabel(activeLyrics?.tracks[0]?.source ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : 'Searching'))}</span><span><Languages size={13} />{activeLyrics?.tracks.length ?? 0} tracks</span><button title="搜索、编辑与校时" onClick={openEditor}><PencilLine size={16} /></button></div>
         </div>
         <div className="lyric-card">
           <div className="ambient ambient-one" /><div className="ambient ambient-two" />

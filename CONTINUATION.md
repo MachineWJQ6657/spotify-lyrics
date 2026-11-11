@@ -1,5 +1,12 @@
 # Syllable continuation checkpoint
 
+## 2026-11-11 / 0.4.47 deployed: confirmed instrumentals, romaji revision 3
+
+- `release/current` = **0.4.47** (asar SHA256 `cbb3430a6a217734855a2d3e5408935f18ef916b3f83328141cc6e904d3e5170`, verifier 66/66). Rollback is `release/current-0.4.46-backup-20261111`. The 0.4.45 backup went to the Recycle Bin. The profile was backed up after a clean stop to `.qa-user-data-preupdate-0447`.
+- Instrumentals: LRCLIB's verified `instrumental` record, or a provider "纯音乐" notice, now produce `instrumental: true` when no provider has any lyric. The lyric view shows 纯音乐 instead of "暂时没有同步歌词 / 重新匹配歌词", and the source badge reads 纯音乐 (or 未找到歌词 for a definitive miss) instead of "Searching". Verified on 10 instrumental interludes from the user's play history; a sung track is unaffected. The candidate was smoke-tested in an isolated profile over CDP.
+- Romaji revision 3 (commit e671e02): lexicalized wa (実は→jitsuwa), loanword digraphs (ファ/ティ/ドゥ/ヴィ), common lyric readings (春風 harukaze, 身体 karada, 獣 kemono …), and no raw kanji in romaji. NetEase agreement 0.885 → 0.898.
+- Spotify state: no Mix recipe key (`speed_automation`, `fade_in_cuepoint`, `fade_overlap`) exists anywhere on disk outside the encrypted audio cache. A passive recorder (session scratchpad `ab/passive-mix.cjs`, ≤4 captures of 75 s, 6 h) waits for a user-started MixedPlaylist transition. `ab/tempo.cjs` estimates the incoming track's rate profile without a reference: an onset-autocorrelation template plus a Viterbi smooth-ramp path. Validation: a synthetic 0.954→1.0 ramp was estimated at 0.946→1.0 with ~1.28 s lag (true 1.03 s); a real no-ramp transition gave 61 ms.
+
 ## 2026-11-11 / 0.4.46 deployed: translation + romaji quality, instrumentals, Spotify state change
 
 - Work moved from Codex to Claude Code. **0.4.46 is deployed** to `release/current/Syllable.exe` (asar SHA256 `3afeba4cf049e8e5233eecb2a5889590f12a3a2f54be096032aac87cc23c9c4f`); `scripts/verify-package.cjs` passes **66/66**, including new checks for revision 39, the alignment variants, sibling/lyric-text translation, instrumental handling and romanization revision 2.

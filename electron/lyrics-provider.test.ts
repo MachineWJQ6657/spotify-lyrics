@@ -541,6 +541,41 @@ describe('lyrics provider request budget', () => {
     expect(unrelated?.additionalTracks?.some(extra => extra.kind === 'translation') ?? false).toBe(false)
   })
 
+  it('treats a NetEase same-artist namesake with different words as a miss and looks up by sung text', async () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `春を告げるテストの歌詞その${'一二三四五六七八九十'[index]}番目`)
+    const other = Array.from({ length: 10 }, (_, index) => `まったく別の曲のテスト歌詞${index}行目です`)
+    const lrc = (texts: string[]) => texts.map((text, index) => `[00:${String(5 + index * 5).padStart(2, '0')}.00]${text}`).join('\n')
+    const record = { id: 990_045, trackName: 'Romanized Spring', artistName: 'Same Artist', albumName: 'Romanized Spring',
+      duration: 100, instrumental: false, syncedLyrics: lrc(lines), plainLyrics: lines.join('\n') }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(record), { status: 200 })
+      if (url.includes('lrclib.net/api/search')) return new Response('[]', { status: 200 })
+      if (url.includes('music.163.com/api/search')) {
+        const type = new URLSearchParams(String(init?.body ?? '')).get('type')
+        // Identity search returns a different song by the same artist with a near duration.
+        return new Response(JSON.stringify({ result: { songs: type === '1006'
+          ? [{ id: 502, name: '春を告げる', duration: 100_200, artists: [{ name: '同じ歌手' }], album: { name: '春を告げる' } }]
+          : [{ id: 901, name: 'Romanized Spring', duration: 100_300, artists: [{ name: 'Same Artist' }], album: { name: 'Other' } }] } }), { status: 200 })
+      }
+      if (url.includes('music.163.com/api/song/lyric')) {
+        const right = url.includes('id=502')
+        const texts = right ? lines : other
+        return new Response(JSON.stringify({ lrc: { lyric: lrc(texts) }, tlyric: { lyric: lrc(texts.map((_, index) => `${right ? '正确' : '错误'}译文${index}`)) } }), { status: 200 })
+      }
+      if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      throw new Error(`unexpected provider URL: ${url}`)
+    }))
+    try {
+      const result = await fetchLyrics({ id: 'local-namesake-gate', name: record.trackName, artist: record.artistName,
+        album: record.albumName, coverUrl: '', durationMs: 100_000 }, null, true)
+      expect(result?.syncedLyrics).toContain(lines[9])
+      const translation = result?.additionalTracks?.find(extra => extra.kind === 'translation')
+      expect(translation?.syncedLyrics).toContain('正确译文9')
+      expect(translation?.syncedLyrics).not.toContain('错误')
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('lets an explicit retry bypass a stable cached provider match', async () => {
     let version = 'first cached lyric'
     const record = {

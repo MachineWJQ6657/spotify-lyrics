@@ -1956,7 +1956,13 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
     const mergedSet = mergeProviderSet([spotifyLyrics, primary, supplemental, fallback], durationMs, preferredScript)
     // Only a NetEase identity miss (romanized title/artist) warrants a lyric-text
     // lookup; a found NetEase entry already had its sibling entries checked.
-    const neteaseMissed = neteaseResult.status === 'fulfilled' && !neteaseResult.value
+    // A NetEase hit whose words disagree with the chosen original is a miss
+    // too: a romanized title ("Haru wo Tsugeru") can match another song by the
+    // same artist on duration alone, and the merge rightly discards it.
+    const joinedText = (lrc: string | null | undefined) => parseTimedRows(lrc).map(row => alignmentText(row.text)).join('')
+    const neteaseAgrees = Boolean(supplemental?.syncedLyrics && mergedSet?.syncedLyrics
+      && normalizedTextSimilarity(joinedText(supplemental.syncedLyrics), joinedText(mergedSet.syncedLyrics)) >= .75)
+    const neteaseMissed = neteaseResult.status === 'fulfilled' && !neteaseAgrees
     const merged = neteaseMissed ? await enrichTranslationByLyricText(mergedSet, durationMs) : mergedSet
     const result = merged
       ? { ...merged, ...(transient ? { transient: true } : {}) }

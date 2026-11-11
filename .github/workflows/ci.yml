@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Native Spotify/SMTC bindings (koffi, libspotifyctl) and window-region
+    # code are Windows-only, so the suite runs on a Windows runner.
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck and build
+        run: npm run build
+      - name: Unit and integration tests (online/live tests stay opt-in)
+        run: npm test
+      - name: No release artifacts, recordings or models in the index
+        run: npm run verify:repo

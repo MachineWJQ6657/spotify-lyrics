@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { lyricHeaderCompatible, hasParallelLyricRows, recordingEdition, repairRepeatedWords } from './lyrics-provider'
-import { alignSupplementalTimeline, cleanTrackTitle, durationPlausibleForPlayback, fetchLyrics, fetchWithTimeout, isSpotifySyncedLyricsType, isTimedLyrics, lyricsCacheKey, mergeProviderResults, mergeProviderSet, parseTimedRows, primaryArtist, repairBoundedGaps, spotifyLinesToLrc, splitEmbeddedTranslation, stripTimedTrackMetadata, timedLyricsStats, weightedScore, type LyricsResult } from './lyrics-provider'
+import { alignSupplementalTimeline, withSiblingTranslation, isInstrumentalPlaceholder, cleanTrackTitle, durationPlausibleForPlayback, fetchLyrics, fetchWithTimeout, isSpotifySyncedLyricsType, isTimedLyrics, lyricsCacheKey, mergeProviderResults, mergeProviderSet, parseTimedRows, primaryArtist, repairBoundedGaps, spotifyLinesToLrc, splitEmbeddedTranslation, stripTimedTrackMetadata, timedLyricsStats, weightedScore, type LyricsResult } from './lyrics-provider'
 
 const timed: LyricsResult = {
   syncedLyrics: '[00:01.00]line', plainLyrics: 'line', source: 'timed', confidence: 92,
@@ -456,6 +456,70 @@ describe('lyrics provider request budget', () => {
     }
   })
 
+  it('treats an instrumental as a definitive no-lyrics answer, not an outage or a lyric', async () => {
+    const record = { id: 990_043, trackName: 'Quiet Interlude', artistName: 'Interlude Artist', albumName: 'Interlude Album',
+      duration: 90, instrumental: true, syncedLyrics: null, plainLyrics: null }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(record), { status: 200 })
+      if (url.includes('lrclib.net/api/search')) return new Response('[]', { status: 200 })
+      if (url.includes('music.163.com/api/search')) return new Response(JSON.stringify({ result: { songs: [
+        { id: 77, name: record.trackName, duration: 90_000, artists: [{ name: record.artistName }], album: { name: record.albumName } }] } }), { status: 200 })
+      if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: '[00:05.00]纯音乐，请欣赏' } }), { status: 200 })
+      if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+      throw new Error(`unexpected provider URL: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const result = await fetchLyrics({ id: 'local-instrumental', name: record.trackName, artist: record.artistName,
+        album: record.albumName, coverUrl: '', durationMs: 90_000 }, null, true)
+      expect(result?.syncedLyrics ?? null).toBeNull()
+      expect(result?.transient).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(isInstrumentalPlaceholder('[00:05.00]纯音乐，请欣赏')).toBe(true)
+    expect(isInstrumentalPlaceholder('[00:05.00]此歌曲为没有填词的纯音乐，请您欣赏')).toBe(true)
+    expect(isInstrumentalPlaceholder('[00:05.00]本当の歌詞\n[00:10.00]二行目')).toBe(false)
+  })
+
+  it('finds a translation by sung text when Spotify shows a romanized title and artist', async () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `合成されたテストの歌詞その${'一二三四五六七八九十'[index]}番目`)
+    const lrc = (texts: string[]) => texts.map((text, index) => `[00:${String(5 + index * 5).padStart(2, '0')}.00]${text}`).join('\n')
+    const record = { id: 990_044, trackName: 'Romanized Title', artistName: 'Romanized Artist', albumName: 'Romanized Album',
+      duration: 100, instrumental: false, syncedLyrics: lrc(lines), plainLyrics: lines.join('\n') }
+    const run = async (neteaseLines: string[]) => {
+      const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('lrclib.net/api/get')) return new Response(JSON.stringify(record), { status: 200 })
+        if (url.includes('lrclib.net/api/search')) return new Response('[]', { status: 200 })
+        if (url.includes('music.163.com/api/search')) {
+          const type = new URLSearchParams(String(init?.body ?? '')).get('type')
+          return new Response(JSON.stringify({ result: { songs: type === '1006'
+            ? [{ id: 501, name: '日本語の題名', duration: 100_500, artists: [{ name: '日本語の歌手' }], album: { name: '日本語のアルバム' } }]
+            : [] } }), { status: 200 })
+        }
+        if (url.includes('music.163.com/api/song/lyric')) return new Response(JSON.stringify({ lrc: { lyric: lrc(neteaseLines) },
+          tlyric: { lyric: lrc(neteaseLines.map((_, index) => `译文${index}`)) } }), { status: 200 })
+        if (url.includes('songsearch.kugou.com')) return new Response(JSON.stringify({ data: { lists: [] } }), { status: 200 })
+        throw new Error(`unexpected provider URL: ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      try {
+        return await fetchLyrics({ id: `local-romanized-${neteaseLines[0]}`, name: record.trackName, artist: record.artistName,
+          album: record.albumName, coverUrl: '', durationMs: 100_000 }, null, true)
+      } finally { vi.unstubAllGlobals() }
+    }
+    const found = await run(lines)
+    const translation = found?.additionalTracks?.find(extra => extra.kind === 'translation')
+    expect(translation?.source).toBe('网易云音乐 · 翻译（按歌词匹配）')
+    expect(translation?.syncedLyrics?.split('\n')).toHaveLength(10)
+    expect(found?.transient).toBeUndefined()
+    // A song that merely shares one line is not the same recording.
+    const unrelated = await run(lines.map((line, index) => index === 3 ? line : `まったく別の曲の歌詞${index}行目です`))
+    expect(unrelated?.additionalTracks?.some(extra => extra.kind === 'translation') ?? false).toBe(false)
+  })
+
   it('lets an explicit retry bypass a stable cached provider match', async () => {
     let version = 'first cached lyric'
     const record = {
@@ -750,6 +814,88 @@ describe('lyrics provider merging', () => {
     expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe('[00:03.00]第一句完整翻译\n[00:07.00]第一句完整翻译\n[00:14.00]下一句')
     const splitTranslation = { ...translated, syncedLyrics: '[00:01.00]上半译文\n[00:05.00]下半译文\n[00:12.00]下一句' }
     expect(alignSupplementalTimeline(splitTranslation, owner, base).syncedLyrics).toBe('[00:03.00]上半译文\n[00:07.00]下半译文\n[00:14.00]下一句')
+  })
+
+  it('keeps merged-sentence translations next to an instrumental row', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]始まりの一句\n[00:10.00]合わせた前半 合わせた後半\n[00:30.00]間奏の後の前半 間奏の後の後半\n[00:50.00]終わりの一句', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    // LRCLIB keeps every phrase on its own row and marks the interlude with ♪,
+    // which normalizes to empty text on both sides of the merged sentences.
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:01.10]始まりの一句\n[00:10.10]合わせた前半\n[00:12.00]合わせた後半\n[00:20.00]♪\n[00:30.10]間奏の後の前半\n[00:38.00]間奏の後の後半\n[00:50.10]終わりの一句', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:10.00]前半译文 后半译文\n[00:30.00]间奏后前半 间奏后后半\n[00:50.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe(
+      '[00:01.10]开头\n[00:10.10]前半译文 后半译文\n[00:12.00]前半译文 后半译文\n[00:30.10]间奏后前半 间奏后后半\n[00:38.00]间奏后前半 间奏后后半\n[00:50.10]结尾')
+  })
+
+  it('aligns translations across furigana readings and small transcription variants', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]始まりの一句です\n[00:08.00]海月（くらげ）のような月が光った\n[00:16.00]僕は一人だと思っていた\n[00:24.00]終わりの一句です', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:01.20]始まりの一句です\n[00:08.20]海月のような月が光った\n[00:16.20]僕は1人だと思っていた\n[00:24.20]終わりの一句です', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:08.00]像水母一样的月亮\n[00:16.00]我以为只有我一个\n[00:24.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe(
+      '[00:01.20]开头\n[00:08.20]像水母一样的月亮\n[00:16.20]我以为只有我一个\n[00:24.20]结尾')
+  })
+
+  it('treats kana/kanji spellings of the same sung word as the same row', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]始まりの一句です\n[00:08.00]僕ら皆レプリカだ\n[00:12.00]さよなら以外全部塵\n[00:20.00]終わりの一句です', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:01.20]始まりの一句です\n[00:08.20]僕らみんなレプリカだ\n[00:12.20]サヨナラ以外全部ゴミ\n[00:20.20]終わりの一句です', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:08.00]我们都是复制品\n[00:12.00]除了再见全是垃圾\n[00:20.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe(
+      '[00:01.20]开头\n[00:08.20]我们都是复制品\n[00:12.20]除了再见全是垃圾\n[00:20.20]结尾')
+  })
+
+  it('maps split provider phrases onto one base row even when neither half anchors alone', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]始まりの一句です\n[00:08.00]大人になるまでほら\n[00:11.00]背伸びしたままで\n[00:20.00]終わりの一句です', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:01.20]始まりの一句です\n[00:08.20]大人になるまでほら、背伸びしたままで\n[00:20.20]終わりの一句です', source: 'LRCLIB' }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:08.00]在长大之前\n[00:11.00]一直踮着脚\n[00:20.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe(
+      '[00:01.20]开头\n[00:08.20]在长大之前\n[00:11.20]一直踮着脚\n[00:20.20]结尾')
+  })
+
+  it('maps a back-to-back repeated merged chorus onto its phrase rows in order', () => {
+    const owner: LyricsResult = { syncedLyrics: [
+      '[00:01.00]始まりの一句です', '[00:10.00]連れて行くから こっちにおいで', '[00:14.00]離さないなら 許してあげる',
+      '[00:20.00]連れて行くから こっちにおいで', '[00:24.00]離さないなら 許してあげる', '[00:40.00]終わりの一句です'].join('\n'),
+    plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, source: 'LRCLIB', syncedLyrics: [
+      '[00:01.10]始まりの一句です', '[00:10.10]連れて行くから', '[00:12.00]こっちにおいで', '[00:14.10]離さないなら', '[00:16.00]許してあげる',
+      '[00:20.10]連れて行くから', '[00:22.00]こっちにおいで', '[00:24.10]離さないなら', '[00:26.00]許してあげる', '[00:40.10]終わりの一句です'].join('\n') }
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:10.00]带你走 过来吧\n[00:14.00]不放手的话 就原谅你\n[00:20.00]带你走 过来吧\n[00:24.00]不放手的话 就原谅你\n[00:40.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe([
+      '[00:01.10]开头', '[00:10.10]带你走 过来吧', '[00:12.00]带你走 过来吧', '[00:14.10]不放手的话 就原谅你', '[00:16.00]不放手的话 就原谅你',
+      '[00:20.10]带你走 过来吧', '[00:22.00]带你走 过来吧', '[00:24.10]不放手的话 就原谅你', '[00:26.00]不放手的话 就原谅你', '[00:40.10]结尾'].join('\n'))
+  })
+
+  it('borrows a translation from a proven sibling entry of the same recording only', () => {
+    const lines = Array.from({ length: 12 }, (_, index) => `テストの原文を歌っている番号${index}`)
+    const lrc = (offsetMs: number) => lines.map((text, index) => {
+      const ms = 2000 + index * 10_000 + offsetMs
+      return `[${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms % 60000 / 1000)).padStart(2, '0')}.${String(Math.floor(ms % 1000 / 10)).padStart(2, '0')}]${text}`
+    }).join('\n')
+    const chosen: LyricsResult = { syncedLyrics: lrc(0), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: 90, matchedDurationMs: 130_000 }
+    const translation = lines.map((_, index) => `[00:${String(2 + index * 10 + 1).padStart(2, '0')}.00]译文${index}`).filter((_, index) => index < 6).join('\n')
+    const sibling: LyricsResult = { syncedLyrics: lrc(1000), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: 85, matchedDurationMs: 130_500,
+      additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation', source: '网易云音乐 · 翻译', syncedLyrics: translation }] }
+    const borrowed = withSiblingTranslation(chosen, [chosen, sibling])
+    expect(borrowed?.additionalTracks?.[0].source).toBe('网易云音乐 · 翻译（同曲其他条目）')
+    expect(borrowed?.additionalTracks?.[0].syncedLyrics?.split('\n')[0]).toBe('[00:02.00]译文0')
+    // A different song (unrelated text) or a different-length edit lends nothing.
+    const otherSong = { ...sibling, syncedLyrics: sibling.syncedLyrics!.replace(/テストの原文を歌っている/g, 'まったく別の曲の歌詞') }
+    expect(withSiblingTranslation(chosen, [otherSong])?.additionalTracks).toBeUndefined()
+    expect(withSiblingTranslation(chosen, [{ ...sibling, matchedDurationMs: 140_000 }])?.additionalTracks).toBeUndefined()
+  })
+
+  it('repeats a merged translation when its phrases cannot be proven one-to-one', () => {
+    const owner: LyricsResult = { syncedLyrics: '[00:01.00]始まりの一句\n[00:10.00]合わせた前半 合わせた後半\n[00:50.00]終わりの一句', plainLyrics: null, source: '网易云音乐', confidence: 90 }
+    const base: LyricsResult = { ...owner, syncedLyrics: '[00:01.10]始まりの一句\n[00:10.10]合わせた前半\n[00:12.00]合わせた後半\n[00:20.00]♪\n[00:50.10]終わりの一句', source: 'LRCLIB' }
+    // One translated sentence without a phrase boundary stays whole on both rows.
+    const translated = { language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: owner.source,
+      syncedLyrics: '[00:01.00]开头\n[00:10.00]一整句译文\n[00:50.00]结尾' }
+    expect(alignSupplementalTimeline(translated, owner, base).syncedLyrics).toBe(
+      '[00:01.10]开头\n[00:10.10]一整句译文\n[00:12.00]一整句译文\n[00:50.10]结尾')
   })
 
   it('does not guess which repeated split chorus owns a translation without surrounding anchors', () => {

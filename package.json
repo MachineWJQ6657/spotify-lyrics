@@ -1,6 +1,6 @@
 {
   "name": "syllable",
-  "version": "0.4.45",
+  "version": "0.4.46",
   "private": true,
   "description": "A multilingual floating lyrics companion for Spotify",
   "author": "Syllable Contributors",
@@ -68,7 +68,10 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "target": ["nsis", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "nsis": {
       "artifactName": "Syllable-${version}-Setup.${ext}",

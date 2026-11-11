@@ -255,6 +255,15 @@ export function isTimedLyrics(value: string | null | undefined) {
   return Boolean(value && /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?]/.test(value))
 }
 
+/** NetEase/Kugou publish "纯音乐，请欣赏" as the only line of an instrumental.
+ * It is a provider notice, not lyrics, and must never become the original. */
+const INSTRUMENTAL_NOTICE = /纯音乐|請欣賞|请欣赏|没有填词|沒有填詞|instrumental/i
+export function isInstrumentalPlaceholder(value: string | null | undefined) {
+  const rows = parseTimedRows(value)
+  const plain = rows.length ? rows.map(row => row.text) : (value ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  return plain.length > 0 && plain.length <= 3 && plain.every(line => INSTRUMENTAL_NOTICE.test(line))
+}
+
 export function timedLyricsStats(value: string | null | undefined, durationMs = 0) {
   // Decorative ♪ / separator rows may legitimately render during an
   // instrumental break, but they are not evidence that a provider covers the
@@ -307,6 +316,26 @@ function lyricQuality(result: LyricsResult, durationMs = 0) {
   return Math.min(stats.lineCount, 70) * 1.65 + stats.tailCoverage * 42 + stats.continuity * 35 + result.confidence * .22 + trustedTimelineBonus + exactMetadataBonus - tailPenalty - durationPenalty
 }
 
+/** Bracketed kana after a word is a furigana reading, not sung text. */
+const FURIGANA_READING = /[（(][\u3040-\u30ffー・]+[)）]/g
+
+/** Providers write the same sung word in kana or kanji. These canonical
+ * spellings are used only to decide which rows correspond, never displayed. */
+const SPELLING_VARIANTS: Array<[RegExp, string]> = [
+  [/皆/g, 'みんな'], [/塵/g, 'ごみ'], [/為/g, 'ため'], [/真面/g, 'まとも'], [/貴方/g, 'あなた'],
+  [/何処/g, 'どこ'], [/此処/g, 'ここ'], [/其処/g, 'そこ'], [/何時/g, 'いつ'], [/1人/g, 'ひとり'], [/2人/g, 'ふたり'], [/一人/g, 'ひとり'], [/独り/g, 'ひとり'],
+  [/二人/g, 'ふたり'], [/僕等/g, 'ぼくら'], [/僕ら/g, 'ぼくら'], [/君等/g, 'きみら'], [/事/g, 'こと'], [/物/g, 'もの'],
+  [/想い出/g, 'おもいで'], [/思い出/g, 'おもいで'], [/無い/g, 'ない'], [/無く/g, 'なく'], [/良い/g, 'いい']
+]
+
+function alignmentText(text: string) {
+  let value = text.replace(FURIGANA_READING, '').normalize('NFKC')
+  for (const [pattern, canonical] of SPELLING_VARIANTS) value = value.replace(pattern, canonical)
+  // Katakana and hiragana spellings of one word (サヨナラ/さよなら) compare equal.
+  value = value.replace(/[ァ-ヶ]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60))
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
 function timelineRows(value: string | null | undefined) {
   return parseTimedRows(value).flatMap(row => row.normalizedText.length >= 3
     ? [{ timeMs: row.timeMs, text: row.normalizedText, rawText: row.text }]
@@ -348,11 +377,13 @@ type MissingBlock = {
   referenceRows: ReturnType<typeof timelineRows>
 }
 
-function lcsTimelineAnchors(subjectRows: ReturnType<typeof timelineRows>, referenceRows: ReturnType<typeof timelineRows>) {
+type AlignmentRow = ReturnType<typeof timelineRows>[number]
+
+function lcsTimelineAnchors(subjectRows: AlignmentRow[], referenceRows: AlignmentRow[], compatible = rowsCompatible) {
   const table = Array.from({ length: subjectRows.length + 1 }, () => new Uint16Array(referenceRows.length + 1))
   for (let subjectIndex = subjectRows.length - 1; subjectIndex >= 0; subjectIndex -= 1) {
     for (let referenceIndex = referenceRows.length - 1; referenceIndex >= 0; referenceIndex -= 1) {
-      table[subjectIndex][referenceIndex] = rowsCompatible(subjectRows[subjectIndex], referenceRows[referenceIndex])
+      table[subjectIndex][referenceIndex] = compatible(subjectRows[subjectIndex], referenceRows[referenceIndex])
         ? table[subjectIndex + 1][referenceIndex + 1] + 1
         : Math.max(table[subjectIndex + 1][referenceIndex], table[subjectIndex][referenceIndex + 1])
     }
@@ -361,7 +392,7 @@ function lcsTimelineAnchors(subjectRows: ReturnType<typeof timelineRows>, refere
   let subjectIndex = 0
   let referenceIndex = 0
   while (subjectIndex < subjectRows.length && referenceIndex < referenceRows.length) {
-    if (rowsCompatible(subjectRows[subjectIndex], referenceRows[referenceIndex])
+    if (compatible(subjectRows[subjectIndex], referenceRows[referenceIndex])
       && table[subjectIndex][referenceIndex] === table[subjectIndex + 1][referenceIndex + 1] + 1) {
       anchors.push({ subjectIndex, referenceIndex })
       subjectIndex += 1
@@ -590,58 +621,123 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
   if (owner === base || !owner.syncedLyrics || !base.syncedLyrics) return track
   // Keep short original rows too: they can own real translations even though
   // they are intentionally excluded from whole-song similarity scoring.
-  const rows = (lrc: string) => parseTimedRows(lrc).map(row => ({ timeMs: row.timeMs, text: row.normalizedText, rawText: row.text }))
+  // Alignment text ignores furigana readings that only one provider prints,
+  // e.g. "海月（くらげ）" versus "海月"; display text is never changed here.
+  const rows = (lrc: string) => parseTimedRows(lrc).map(row => ({ timeMs: row.timeMs, text: alignmentText(row.text), rawText: row.text }))
   const ownerRows = rows(owner.syncedLyrics)
   const baseRows = rows(base.syncedLyrics)
+  // Providers transcribe the same sung line with small differences (1人/一人,
+  // 思い出/想い出, だろう/だろ). Bigram similarity accepts those variants while
+  // the monotonic LCS still keeps repeated choruses in order.
+  const alignable = (left: AlignmentRow, right: AlignmentRow) => rowsCompatible(left, right)
+    || (Math.min(left.text.length, right.text.length) >= 6 && normalizedTextSimilarity(left.text, right.text) >= .8)
+  const sameText = (joined: string, target: string) => joined === target
+    || (Math.min(joined.length, target.length) >= 8 && normalizedTextSimilarity(joined, target) >= .85)
   // Repeated choruses require a globally monotonic alignment. The previous
   // greedy matcher fell back to an earlier target when a unique verse appeared
   // after an extra repeated line, producing a backwards translation timeline.
-  const anchors = lcsTimelineAnchors(ownerRows, baseRows).map(anchor => ({
+  const anchors = lcsTimelineAnchors(ownerRows, baseRows, alignable).map(anchor => ({
     ...anchor,
     sourceMs: ownerRows[anchor.subjectIndex].timeMs,
     targetMs: baseRows[anchor.referenceIndex].timeMs
   }))
   type SupplementalAnchor = typeof anchors[number] & { targetIndices?: number[] }
   const byOwner = new Map<number, SupplementalAnchor>(anchors.map(anchor => [anchor.subjectIndex, anchor]))
+  // Prefer exact ordered-text proof; accept a near-identical grouping only
+  // when it is the single candidate between the surrounding anchors.
+  const uniqueGrouping = <T,>(candidates: Array<{ value: T; exact: boolean }>) => {
+    const exact = candidates.filter(candidate => candidate.exact)
+    const pool = exact.length ? exact : candidates
+    return pool.length === 1 ? pool[0].value : null
+  }
+  const mapGroup = (start: number, end: number, referenceIndex: number) => {
+    if (Array.from({ length: end - start + 1 }, (_, offset) => byOwner.get(start + offset))
+      .some(existing => existing && existing.referenceIndex !== referenceIndex)) return
+    for (let index = start; index <= end; index += 1) {
+      byOwner.set(index, { subjectIndex: index, referenceIndex, sourceMs: ownerRows[start].timeMs, targetMs: baseRows[referenceIndex].timeMs })
+    }
+  }
   // A base row may combine several provider rows. Recover those translations
   // only when the complete ordered original text proves the grouping, not
-  // merely because the timestamps happen to be nearby.
-  for (const anchor of anchors) {
-    for (let start = Math.max(0, anchor.subjectIndex - 3); start <= anchor.subjectIndex; start += 1) {
-      for (let end = anchor.subjectIndex; end < Math.min(ownerRows.length, start + 4); end += 1) {
-        if (start === end) continue
-        const group = ownerRows.slice(start, end + 1)
-        if (group.map(row => row.text).join('') !== baseRows[anchor.referenceIndex].text) continue
-        if (group.some((_, offset) => {
-          const existing = byOwner.get(start + offset)
-          return existing && existing.referenceIndex !== anchor.referenceIndex
-        })) continue
-        for (let index = start; index <= end; index += 1) {
-          byOwner.set(index, { ...anchor, subjectIndex: index, sourceMs: ownerRows[start].timeMs })
-        }
+  // merely because the timestamps happen to be nearby. The grouping is found
+  // between the surrounding anchors, whether or not one of its rows is itself
+  // an anchor (a half sentence is usually too short to anchor on its own).
+  for (let referenceIndex = 0; referenceIndex < baseRows.length; referenceIndex += 1) {
+    if (!baseRows[referenceIndex].text) continue
+    const own = anchors.filter(anchor => anchor.referenceIndex === referenceIndex)
+    const before = anchors.filter(anchor => anchor.referenceIndex < referenceIndex).at(-1)
+    const after = anchors.find(anchor => anchor.referenceIndex > referenceIndex)
+    const low = Math.max((before?.subjectIndex ?? -1) + 1, own.length ? own[0].subjectIndex - 3 : 0)
+    const high = Math.min(after?.subjectIndex ?? ownerRows.length, own.length ? own[0].subjectIndex + 4 : ownerRows.length)
+    const candidates: Array<{ value: [number, number]; exact: boolean }> = []
+    for (let start = low; start < high; start += 1) {
+      // Empty rows (instrumental "♪", blank separators) contribute no text,
+      // so a group may not begin or end on one: that would only duplicate a
+      // shorter proven grouping and make the proof look ambiguous.
+      if (!ownerRows[start].text) continue
+      for (let end = start + 1; end < Math.min(high, start + 4); end += 1) {
+        if (!ownerRows[end].text) continue
+        if (own.length && (own[0].subjectIndex < start || own[0].subjectIndex > end)) continue
+        const joined = ownerRows.slice(start, end + 1).map(row => row.text).join('')
+        if (sameText(joined, baseRows[referenceIndex].text)) candidates.push({ value: [start, end], exact: joined === baseRows[referenceIndex].text })
       }
     }
+    const group = uniqueGrouping(candidates)
+    if (group) mapGroup(group[0], group[1], referenceIndex)
   }
   // Inverse grouping: a translation of one complete provider sentence can
   // cover several displayed phrases, but only after exact ordered-text proof.
   // Bound candidates by surrounding monotonic anchors to disambiguate choruses.
   for (let ownerIndex = 0; ownerIndex < ownerRows.length; ownerIndex += 1) {
+    if (!ownerRows[ownerIndex].text) continue
     const before = anchors.filter(anchor => anchor.subjectIndex < ownerIndex).at(-1)
     const after = anchors.find(anchor => anchor.subjectIndex > ownerIndex)
-    const candidates: number[][] = []
+    const candidates: Array<{ value: number[]; exact: boolean }> = []
     for (let start = (before?.referenceIndex ?? -1) + 1; start < (after?.referenceIndex ?? baseRows.length); start += 1) {
+      // An instrumental "♪" row normalizes to empty text. Letting a candidate
+      // start or end on it produced a second, textually identical candidate,
+      // so every merged sentence next to an interlude lost its translation.
+      if (!baseRows[start].text) continue
       for (let end = start + 1; end < Math.min(start + 4, after?.referenceIndex ?? baseRows.length); end += 1) {
-        if (baseRows.slice(start, end + 1).map(row => row.text).join('') === ownerRows[ownerIndex].text) {
-          candidates.push(Array.from({ length: end - start + 1 }, (_, index) => start + index))
+        if (!baseRows[end].text) continue
+        const joined = baseRows.slice(start, end + 1).map(row => row.text).join('')
+        if (sameText(joined, ownerRows[ownerIndex].text)) {
+          candidates.push({ value: Array.from({ length: end - start + 1 }, (_, index) => start + index).filter(index => baseRows[index].text),
+            exact: joined === ownerRows[ownerIndex].text })
         }
       }
     }
-    if (candidates.length !== 1) continue
-    const targetIndices = candidates[0]
+    const targetIndices = uniqueGrouping(candidates)
+    if (!targetIndices) continue
     byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex: targetIndices[0], sourceMs: ownerRows[ownerIndex].timeMs,
       targetMs: baseRows[targetIndices[0]].timeMs, targetIndices })
   }
-    const ownerAt = (sourceMs: number) => {
+  // A chorus repeated back-to-back as merged rows ("A B", "C D", "A B", "C D")
+  // leaves every inverse candidate ambiguous. Split multi-phrase provider rows
+  // into phrases and align the whole phrase sequence monotonically instead; a
+  // row is mapped only when each of its phrases lands on consecutive base rows.
+  const phrases = ownerRows.flatMap((row, ownerIndex) => {
+    const parts = row.rawText.trim().split(/\s+/).map(alignmentText).filter(Boolean)
+    return (parts.length > 1 ? parts : [row.text]).map(text => ({ timeMs: row.timeMs, text, rawText: row.rawText, ownerIndex }))
+  })
+  if (phrases.length > ownerRows.length) {
+    const targets = new Map<number, number[]>()
+    for (const anchor of lcsTimelineAnchors(phrases, baseRows, alignable)) {
+      const ownerIndex = phrases[anchor.subjectIndex].ownerIndex
+      targets.set(ownerIndex, [...(targets.get(ownerIndex) ?? []), anchor.referenceIndex])
+    }
+    for (const [ownerIndex, indices] of targets) {
+      if (byOwner.has(ownerIndex)) continue
+      const expected = phrases.filter(phrase => phrase.ownerIndex === ownerIndex).length
+      if (expected < 2 || indices.length !== expected) continue
+      const consecutive = indices.every((index, position) => position === 0
+        || baseRows.slice(indices[position - 1] + 1, index).every(row => !row.text))
+      if (!consecutive) continue
+      byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex: indices[0], sourceMs: ownerRows[ownerIndex].timeMs,
+        targetMs: baseRows[indices[0]].timeMs, targetIndices: indices })
+    }
+  }
+  const ownerAt = (sourceMs: number) => {
     let ownerIndex = -1
     for (let index = 0; index < ownerRows.length; index += 1) {
       if (ownerRows[index].timeMs === sourceMs) return index
@@ -656,23 +752,25 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     const index = ownerAt(row.timeMs)
     translationCounts.set(index, (translationCounts.get(index) ?? 0) + 1)
   }
-  const remap = (sourceMs: number): number[] => {
+  const remap = (sourceMs: number, text: string): Array<{ timeMs: number; text: string }> => {
     const ownerIndex = ownerAt(sourceMs)
     const anchor = byOwner.get(ownerIndex)
     if (!anchor) return []
+    // The whole sentence translation is shown on every phrase row it covers.
+    // Do not split "译文A 译文B" by spaces: translators often reorder clauses
+    // (Japanese→Chinese), so the first half need not belong to the first row.
     if (anchor.targetIndices && translationCounts.get(ownerIndex) === 1 && Math.abs(sourceMs - anchor.sourceMs) <= 200) {
-      return anchor.targetIndices.map(index => baseRows[index].timeMs)
+      return anchor.targetIndices.map(index => ({ timeMs: baseRows[index].timeMs, text }))
     }
     // A translated phrase belongs to its original provider row, not the
     // nearest shared anchor. Never extrapolate a divergent verse from a
     // whole-song median offset or snap an extra chorus to the beginning.
     const mapped = anchor.targetMs + sourceMs - anchor.sourceMs
     const targetEnd = baseRows[(anchor.targetIndices?.at(-1) ?? anchor.referenceIndex) + 1]?.timeMs
-    return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? [mapped] : []
+    return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? [{ timeMs: mapped, text }] : []
   }
-  const syncedLyrics = translatedRows.flatMap(row => {
-    return remap(row.timeMs).map(timeMs => ({ timeMs, text: row.text }))
-  }).sort((left, right) => left.timeMs - right.timeMs)
+  const syncedLyrics = translatedRows.flatMap(row => remap(row.timeMs, row.text))
+    .sort((left, right) => left.timeMs - right.timeMs)
     .map(row => `${lrcTimestamp(row.timeMs)}${row.text}`).join('\n')
   const alignedTo = base.source.startsWith('Spotify') ? 'Spotify' : '主歌词'
   return { ...track, syncedLyrics, source: `${track.source} · 对齐${alignedTo}时轴` }
@@ -1423,6 +1521,10 @@ async function fetchLrcLib(track: NonNullable<PlaybackSnapshot['track']>, signal
         if (returnedTitleIdentity < .98) return null
         if (!lyricHeaderCompatible(data.syncedLyrics ?? data.plainLyrics ?? '', track.name)) return null
         if (data.syncedLyrics || data.plainLyrics) return { syncedLyrics: isTimedLyrics(data.syncedLyrics) ? data.syncedLyrics : null, plainLyrics: data.plainLyrics || data.syncedLyrics, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: Math.round(data.duration * 1000) } satisfies LyricsResult
+        // A 200 record without text is LRCLIB's instrumental entry. It is a
+        // definitive answer, not an outage: throwing here used to mark every
+        // instrumental as transient, so it was never cached and kept retrying.
+        return null
       }
       if (response.status !== 404) throw new Error(`LRCLIB 暂时不可用 (${response.status})`)
       return null
@@ -1454,8 +1556,106 @@ function neteaseAttribution(song: NeteaseSong) {
     .filter(Boolean).join(' / ')
 }
 
+/**
+ * NetEase often lists one recording several times (the official album plus
+ * compilations such as "Rising Hits Mix"). Selection can prefer a denser
+ * compilation upload that lacks the Chinese translation the official entry
+ * carries. Borrow it only from a proven sibling — duration within 3 s and
+ * near-identical original text — re-timed onto the selected timeline.
+ */
+export function withSiblingTranslation(chosen: LyricsResult | null, candidates: LyricsResult[]): LyricsResult | null {
+  if (!chosen?.syncedLyrics || chosen.additionalTracks?.some(extra => extra.kind === 'translation')) return chosen
+  const joined = (lrc: string | null | undefined) => parseTimedRows(lrc).map(row => alignmentText(row.text)).join('')
+  const chosenText = joined(chosen.syncedLyrics)
+  const siblings = candidates.flatMap(candidate => {
+    const translation = candidate.additionalTracks?.find(extra => extra.kind === 'translation' && extra.language.startsWith('zh'))
+    if (!translation || !candidate.syncedLyrics || candidate.syncedLyrics === chosen.syncedLyrics) return []
+    if (candidate.matchedDurationMs && chosen.matchedDurationMs && Math.abs(candidate.matchedDurationMs - chosen.matchedDurationMs) > 3000) return []
+    const similarity = normalizedTextSimilarity(chosenText, joined(candidate.syncedLyrics))
+    return similarity >= .75 ? [{ candidate, translation, similarity }] : []
+  }).sort((left, right) => right.similarity - left.similarity)
+  for (const { candidate, translation } of siblings) {
+    const aligned = alignSupplementalTimeline(translation, candidate, chosen)
+    const alignedRows = parseTimedRows(aligned.syncedLyrics).length
+    if (alignedRows >= Math.max(3, parseTimedRows(translation.syncedLyrics).length * .6)) {
+      return { ...chosen, additionalTracks: [...(chosen.additionalTracks ?? []), { ...aligned, source: '网易云音乐 · 翻译（同曲其他条目）' }] }
+    }
+  }
+  return chosen
+}
+
+/**
+ * Spotify often shows a Japanese song under an English/romanized title and
+ * artist ("Shout Baby / Ryokuoushoku Shakai", "Fig Smoke / ZUTOMAYO"). LRCLIB
+ * may still match it exactly while NetEase lists it as 緑黄色社会 / イチジク煙,
+ * so the identity search finds no Chinese translation. When a trusted timed
+ * original exists without any translation, search NetEase by two distinctive
+ * sung lines and accept a candidate only on near-identical whole-song text and
+ * a compatible duration. Failure is silent and never marks the result transient.
+ */
+export async function enrichTranslationByLyricText(result: LyricsResult | null, durationMs = 0): Promise<LyricsResult | null> {
+  if (!result?.syncedLyrics || !isTimedLyrics(result.syncedLyrics)) return result
+  if (result.additionalTracks?.some(extra => extra.kind === 'translation')) return result
+  const rows = parseTimedRows(result.syncedLyrics)
+  const script = dominantLyricScript(rows)
+  if (script === 'han' || script === 'other' || rows.length < 6) return result
+  const baseText = rows.map(row => alignmentText(row.text)).join('')
+  const counts = new Map<string, number>()
+  for (const row of rows) counts.set(row.normalizedText, (counts.get(row.normalizedText) ?? 0) + 1)
+  const distinctive = rows.filter(row => row.normalizedText.length >= 8 && counts.get(row.normalizedText) === 1)
+  const probes = [distinctive[Math.floor(distinctive.length / 3)], distinctive[Math.floor(distinctive.length * 2 / 3)]]
+    .filter((row, index, all): row is TimedLyricsRow => Boolean(row) && all.indexOf(row) === index)
+  if (!probes.length) return result
+  const controller = new AbortController()
+  const deadline = setTimeout(() => controller.abort(), 4000)
+  try {
+    const songs = new Map<number, NeteaseSong>()
+    await Promise.allSettled(probes.map(async probe => {
+      const form = new URLSearchParams({ s: probe.text, type: '1006', limit: '8', offset: '0' })
+      const response = await fetchWithTimeout(`${NETEASE_API}/search/get`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://music.163.com/' }, body: form
+      }, 3500, 0, controller.signal)
+      if (!response.ok) return
+      const payload = await response.json() as { result?: { songs?: NeteaseSong[] } }
+      for (const song of payload.result?.songs ?? []) songs.set(song.id, song)
+    }))
+    const reference = durationMs || result.matchedDurationMs || 0
+    const ranked = [...songs.values()]
+      .filter(song => !reference || !neteaseDuration(song) || Math.abs(neteaseDuration(song) - reference) <= 15_000)
+      .sort((left, right) => Math.abs(neteaseDuration(left) - reference) - Math.abs(neteaseDuration(right) - reference))
+      .slice(0, 4)
+    const candidates = (await Promise.allSettled(ranked.map(async song => {
+      const response = await fetchWithTimeout(`${NETEASE_API}/song/lyric?id=${song.id}&lv=-1&tv=-1&rv=-1`, { headers: { ...headers, Referer: 'https://music.163.com/' } }, 3500, 0, controller.signal)
+      if (!response.ok) return null
+      const lyrics = await response.json() as NeteaseLyrics
+      const original = lyrics.lrc?.lyric?.trim() || null
+      if (!isTimedLyrics(original) || !isTimedLyrics(lyrics.tlyric?.lyric) || isInstrumentalPlaceholder(original)) return null
+      const similarity = normalizedTextSimilarity(baseText, parseTimedRows(original).map(row => alignmentText(row.text)).join(''))
+      return similarity >= .75 ? { song, lyrics, original: original!, similarity } : null
+    }))).flatMap(settled => settled.status === 'fulfilled' && settled.value ? [settled.value] : [])
+      .sort((left, right) => right.similarity - left.similarity)
+    const best = candidates[0]
+    if (!best) return result
+    const owner: LyricsResult = { syncedLyrics: best.original, plainLyrics: null, source: '网易云音乐 · 歌词匹配', confidence: 80, matchedDurationMs: neteaseDuration(best.song) }
+    const extras: SupplementalLyrics[] = []
+    const translation = alignSupplementalTimeline({ language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: best.lyrics.tlyric!.lyric!, source: '网易云音乐 · 翻译' }, owner, result)
+    if (parseTimedRows(translation.syncedLyrics).length >= Math.max(3, rows.length * .4)) extras.push({ ...translation, source: '网易云音乐 · 翻译（按歌词匹配）' })
+    const hasRomanization = result.additionalTracks?.some(extra => extra.kind === 'romanization')
+    if (extras.length && !hasRomanization && script === 'ja' && isTimedLyrics(best.lyrics.romalrc?.lyric)) {
+      const romaji = alignSupplementalTimeline({ language: 'romaji', label: 'Romaji', kind: 'romanization', syncedLyrics: best.lyrics.romalrc!.lyric!, source: '网易云音乐 · 罗马音' }, owner, result)
+      if (parseTimedRows(romaji.syncedLyrics).length >= Math.max(3, rows.length * .4)) extras.push({ ...romaji, source: '网易云音乐 · 罗马音（按歌词匹配）' })
+    }
+    return extras.length ? { ...result, additionalTracks: [...(result.additionalTracks ?? []), ...extras] } : result
+  } catch {
+    return result
+  } finally {
+    clearTimeout(deadline)
+  }
+}
+
 async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signal?: AbortSignal): Promise<LyricsResult | null> {
   const durationMs = referenceDurationMs(track)
+  const allDetails: LyricsResult[] = []
   const collect = async (searches: string[], limit: number) => {
     const settled = await Promise.allSettled([...new Set(searches)].map(async search => {
       const form = new URLSearchParams({ s: search, type: '1', limit: String(limit), offset: '0' })
@@ -1485,7 +1685,7 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
       const lyrics = await lyricsResponse.json() as NeteaseLyrics
       const originalValue = lyrics.lrc?.lyric?.trim() || null
       const original = isTimedLyrics(originalValue) ? originalValue : null
-      if (!original) return null
+      if (!original || isInstrumentalPlaceholder(original)) return null
       if (!lyricHeaderCompatible(original, track.name)) return null
       const additionalTracks: SupplementalLyrics[] = []
       if (isTimedLyrics(lyrics.romalrc?.lyric)) additionalTracks.push({ language: 'romaji', label: 'Romaji', kind: 'romanization', syncedLyrics: lyrics.romalrc!.lyric!, source: '网易云音乐 · 罗马音' })
@@ -1493,6 +1693,7 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
       return { syncedLyrics: original, plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: match.score, matchedDurationMs: neteaseDuration(match.song), additionalTracks } satisfies LyricsResult
     }))
     const details = detailResults.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
+    allDetails.push(...details)
     if (!details.length) {
       const failure = detailResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (failure) throw failure.reason
@@ -1511,7 +1712,7 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
   // endpoint by more than ordinary provider rounding. This costs one request
   // only on ambiguous releases and avoids baking a 2s version offset into the
   // lyric clock before cross-provider alignment even begins.
-  if (primary && primary.confidence >= 88 && primaryDurationDelta <= 1200) return primary
+  if (primary && primary.confidence >= 88 && primaryDurationDelta <= 1200) return withSiblingTranslation(primary, allDetails)
   // Localized titles can share no text at all (for example an English Spotify
   // title versus a Japanese provider title). A weak normal-query result can
   // also be an unrelated exact-Latin cover whose album contains the query.
@@ -1519,12 +1720,12 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
   // Script-aware identity plus the duration fingerprint keeps this bounded.
   const artistSearches = [track.artist, primaryArtist(track.artist)].filter(Boolean)
   try {
-    return bestLyricsCandidate([...primaryCandidates, ...await collect(artistSearches, 50)], durationMs) ?? primary
+    return withSiblingTranslation(bestLyricsCandidate([...primaryCandidates, ...await collect(artistSearches, 50)], durationMs) ?? primary, allDetails)
   } catch (error) {
     // The first-stage result is already useful. If the shared provider budget
     // expires during the optional ambiguity search, preserve it instead of
     // turning a completed NetEase timeline into a total provider failure.
-    if (signal?.aborted) return primary
+    if (signal?.aborted) return withSiblingTranslation(primary, allDetails)
     throw error
   }
 }
@@ -1693,9 +1894,12 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
     } finally { clearTimeout(providerDeadline) }
     const [spotifyLyricsResult, lrclibResult, neteaseResult, kugouResult] = providerResults
     const transient = [lrclibResult, neteaseResult, kugouResult].some(result => result.status === 'rejected')
-    const sanitize = (result: LyricsResult | null) => result?.syncedLyrics
-      ? { ...result, syncedLyrics: stripTimedTrackMetadata(result.syncedLyrics, track) }
-      : result
+    const sanitize = (result: LyricsResult | null) => {
+      if (result && isInstrumentalPlaceholder(result.syncedLyrics ?? result.plainLyrics)) return null
+      return result?.syncedLyrics
+        ? { ...result, syncedLyrics: stripTimedTrackMetadata(result.syncedLyrics, track) }
+        : result
+    }
     const spotifyLyrics = sanitize(spotifyLyricsResult.status === 'fulfilled' ? spotifyLyricsResult.value : null)
     const primary = sanitize(lrclibResult.status === 'fulfilled' ? lrclibResult.value : null)
     const supplemental = sanitize(neteaseResult.status === 'fulfilled' ? neteaseResult.value : null)
@@ -1740,7 +1944,11 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
       })), null, 2))
     }
     const preferredScript = KANA.test(track.name) ? 'ja' : undefined
-    const merged = mergeProviderSet([spotifyLyrics, primary, supplemental, fallback], durationMs, preferredScript)
+    const mergedSet = mergeProviderSet([spotifyLyrics, primary, supplemental, fallback], durationMs, preferredScript)
+    // Only a NetEase identity miss (romanized title/artist) warrants a lyric-text
+    // lookup; a found NetEase entry already had its sibling entries checked.
+    const neteaseMissed = neteaseResult.status === 'fulfilled' && !neteaseResult.value
+    const merged = neteaseMissed ? await enrichTranslationByLyricText(mergedSet, durationMs) : mergedSet
     const result = merged
       ? { ...merged, ...(transient ? { transient: true } : {}) }
       : transient

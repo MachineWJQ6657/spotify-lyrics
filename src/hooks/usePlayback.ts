@@ -15,10 +15,15 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // releases whose producer credit exists only in album aliases.
 // Revision 38 rejects namesakes with conflicting artists and unrelated same-
 // script titles that formerly entered a wide quality pool after long gaps.
-const LYRICS_PROVIDER_REVISION = 38
+// Revision 39 re-aligns translations across furigana, transcription variants,
+// split/merged rows and interlude rows, and borrows a missing NetEase
+// translation from a proven sibling entry of the same recording.
+const LYRICS_PROVIDER_REVISION = 39
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
-export const ROMANIZATION_REVISION = 1
+// Revision 2: reading-based long vowels (taiyou), number+counter compounds
+// (hitori), the 々 iteration mark and a few standalone kanji readings.
+export const ROMANIZATION_REVISION = 2
 // Maps a provider context to the retry token of its one allowed automatic
 // recovery generation. Token ownership prevents a stale async continuation
 // from clearing (or re-arming) a newer generation's guard.

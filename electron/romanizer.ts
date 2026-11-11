@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
-import { romanizeJapaneseWords } from './japanese-romaji'
+import { applyFuriganaReadings, romanizeJapaneseWords } from './japanese-romaji'
 
 const nodeRequire = createRequire(import.meta.url)
 export interface JapaneseWord {
@@ -72,6 +72,7 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
       const AnalyzerModule = require(workerData.analyzerPath)
       const KuromojiAnalyzer = AnalyzerModule.default || AnalyzerModule
       const romanizeWords = (${romanizeJapaneseWords.toString()})
+      const furiganaReadings = (${applyFuriganaReadings.toString()})
 
       ;(async () => {
         const analyzer = new KuromojiAnalyzer()
@@ -79,7 +80,9 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
         const toRomaji = workerData.mode === 'romanize' ? require(workerData.wanakanaPath).toRomaji : undefined
         const output = []
         for (const line of workerData.lines) {
-          const tokens = await analyzer.parse(line)
+          // Only romanization reads the provider's printed furigana; analysis
+          // keeps the original surface text for position-sensitive consumers.
+          const tokens = await analyzer.parse(workerData.mode === 'romanize' ? furiganaReadings(line) : line)
           if (workerData.mode === 'analyze') {
             output.push(tokens.map(token => ({
               surface_form: token.surface_form,

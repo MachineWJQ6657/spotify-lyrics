@@ -13,7 +13,7 @@ function Switch({ value, onChange, label, disabled = false }: { value: boolean; 
   return <button disabled={disabled} aria-label={label} aria-pressed={value} className={`switch ${value ? 'on' : ''}`} onClick={() => onChange(!value)}><i /></button>
 }
 
-export const SettingsPanel = memo(function SettingsPanel() {
+export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCollapse?: () => void }) {
   const connected = useAppStore(state => state.connected)
   const localConnected = useAppStore(state => state.localConnected)
   const demoMode = useAppStore(state => state.demoMode)
@@ -84,7 +84,7 @@ export const SettingsPanel = memo(function SettingsPanel() {
   }
 
   return <aside className="settings-panel">
-    <div className="panel-heading"><div><span>NOW PLAYING VIEW</span><h2>歌词与悬浮窗</h2></div><SlidersHorizontal size={19} /></div>
+    <div className="panel-heading"><div><span>NOW PLAYING VIEW</span><h2>歌词与悬浮窗</h2></div>{onCollapse ? <button className="panel-collapse" title="收起设置面板，歌词区更宽" aria-label="收起设置面板" onClick={onCollapse}><SlidersHorizontal size={19} /></button> : <SlidersHorizontal size={19} />}</div>
     <section>
       <label className="setting-label">歌词语言 <small>可多选</small></label>
       <div className="language-grid">{languageOptions.map(item => {

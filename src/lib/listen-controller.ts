@@ -49,6 +49,20 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
 
 let active: { target: ListenTarget; stop: () => Promise<void> } | null = null
 let starting = false
+// Which song is being listened to right now, for the "listening…" hint.
+let listeningTrack: string | null = null
+const listeningSubscribers = new Set<() => void>()
+function setListeningTrack(trackId: string | null) {
+  if (listeningTrack === trackId) return
+  listeningTrack = trackId
+  listeningSubscribers.forEach(listener => listener())
+}
+/** Track id whose audio is being captured for calibration, else null. */
+export function listeningTrackId() { return listeningTrack }
+export function subscribeListening(listener: () => void) {
+  listeningSubscribers.add(listener)
+  return () => { listeningSubscribers.delete(listener) }
+}
 let available: boolean | null = null
 let unsubscribe: (() => void) | null = null
 
@@ -86,6 +100,7 @@ async function begin(target: ListenTarget) {
     if (stopped) return
     stopped = true
     if (active?.target === target) active = null
+    if (listeningTrack === target.trackId) setListeningTrack(null)
     processor?.disconnect()
     stream?.getTracks().forEach(track => track.stop())
     await context?.close().catch(() => {})
@@ -108,6 +123,7 @@ async function begin(target: ListenTarget) {
     processor = new AudioWorkletNode(audio, 'syllable-audio-capture')
     audio.createMediaStreamSource(captured).connect(processor)
     processor.connect(audio.destination) // The worklet outputs silence.
+    setListeningTrack(target.trackId)
     const timeline = new CaptureTimeline()
     let processing = false
     let blocks = 0

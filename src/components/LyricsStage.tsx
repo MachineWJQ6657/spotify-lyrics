@@ -1,11 +1,13 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, LocateFixed, Music2, RefreshCw } from 'lucide-react'
+import { AlertCircle, LocateFixed, Music2, Play, RefreshCw, Search } from 'lucide-react'
 import type { LyricLine, LyricTrack, LyricsDocument } from '../types'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from '../lib/lyrics'
 import { lyricScrollTarget } from '../lib/lyrics-scroll'
 
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
-  onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string }
+  onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
+  /** Click a line to play from it; `seekLabel` names the song time it jumps to. */
+  onSeekLine?: (line: LyricLine) => void; seekLabel?: (line: LyricLine) => string; onSearch?: () => void }
 
 interface LineGroupProps {
   line: LyricLine
@@ -16,21 +18,31 @@ interface LineGroupProps {
   positionMs?: number
   secondary: Array<{ track: LyricTrack; line: LyricLine }>
   onHeard?: (index: number) => void
+  onSeek?: (index: number) => void
+  seekLabel?: string
 }
 
-const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard }: LineGroupProps) {
+const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard, onSeek, seekLabel }: LineGroupProps) {
   const baseClass = language === 'ja' ? 'japanese-grid' : language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
-  return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''}`}>
+  const seekable = Boolean(onSeek && !onHeard)
+  return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''} ${seekable ? 'seekable' : ''}`}
+    title={seekable && seekLabel ? `从 ${seekLabel} 播放这一句` : undefined}
+    onClick={seekable ? () => {
+      // Selecting text with the mouse also ends in a click; that is not a seek.
+      if (window.getSelection()?.toString()) return
+      onSeek!(index)
+    } : undefined}>
     <div lang={language === 'ja' ? 'ja' : language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`lyric-primary ${active ? 'karaoke-line' : ''} ${baseClass}`}>{line.words?.length ? line.words.map((word, wordIndex) => <span className={positionMs >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line.text || <Music2 size={22} />}</div>
     {secondary.map(({ track, line: sibling }) => {
       const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
       return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`lyric-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling.text}</div>
     })}
+    {seekable && seekLabel && <span className="lyric-seek-hint" aria-hidden="true"><Play size={10} fill="currentColor" />{seekLabel}</span>}
     {onHeard && <button className="lyric-heard-button" aria-label={`将第 ${index + 1} 行设为现在开始`} onClick={() => onHeard(index)}>这句现在开始</button>}
   </div>
 })
 
-export function LyricsStage({ document, positionMs, enabled, romanization, onRetry, onHeardLine, onClearCalibration, calibrationLabel }: Props) {
+export function LyricsStage({ document, positionMs, enabled, romanization, onRetry, onHeardLine, onClearCalibration, calibrationLabel, onSeekLine, seekLabel, onSearch }: Props) {
   const tracks = useMemo(() => visibleTracks(document, enabled, romanization), [document, enabled, romanization])
   const base = tracks.find(track => track.kind === 'original') ?? tracks[0]
   const active = base ? activeLineIndex(base.lines, positionMs) : -1
@@ -57,6 +69,12 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     } catch (error) { setCalibrationError(error instanceof Error ? error.message : String(error)) }
   }, [base, onHeardLine])
   useEffect(() => { setCalibrating(false); setCalibrationError('') }, [document?.trackId, base?.id])
+  const seekLine = useCallback((index: number) => {
+    const line = base?.lines[index]
+    if (!line || !onSeekLine) return
+    onSeekLine(line)
+    setFollowing(true)
+  }, [base, onSeekLine])
 
   const centerActive = useCallback((behavior: ScrollBehavior = 'auto') => {
     const viewport = viewportRef.current
@@ -101,8 +119,8 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       </div>
     </div>
   </div>
-  if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>纯音乐</h3><p>歌词源确认这首歌没有歌词。</p></div>
-  if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配，或导入本地 LRC。</p>{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}</div>
+  if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>纯音乐</h3><p>歌词源确认这首歌没有歌词。</p>{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />不是纯音乐？手动搜索</button>}</div>
+  if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配、换个关键词手动搜索，或把 LRC 文件拖进窗口。</p><div className="empty-actions">{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />手动搜索</button>}</div></div>
 
   return <div className={`lyrics-stage-shell ${calibrating ? 'is-calibrating' : ''}`}>
     {base.kind === 'original' && (onHeardLine || calibrationLabel) && <div className="lyrics-calibration-bar">
@@ -129,6 +147,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
           key={`${line.startMs}-${index}`} line={line} language={base.language} index={index} secondary={secondary}
           active={index === active} past={index < active} positionMs={index === active && line.words?.length ? positionMs : undefined}
           onHeard={calibrating && onHeardLine ? markHeard : undefined}
+          onSeek={onSeekLine ? seekLine : undefined} seekLabel={onSeekLine && seekLabel ? seekLabel(line) : undefined}
         />)}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import type { LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
+import type { LyricLine, LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
 import { usePosition } from '../hooks/usePosition'
 import { displayedLyricPosition } from '../lib/session-calibration'
 import { LyricsStage } from './LyricsStage'
@@ -16,11 +16,13 @@ function useLyricPosition({ playback, document, offsetMs, sessionCalibration }: 
 // Keep high-frequency clock updates below the app shell. Settings, library,
 // navigation and title artwork should not render on every progress tick.
 export function ClockedLyricsStage(props: ClockProps & { enabled: string[]; romanization: boolean; onRetry?: () => void;
-  onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string }) {
+  onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
+  onSeekLine?: (line: LyricLine) => void; seekLabel?: (line: LyricLine) => string; onSearch?: () => void }) {
   recordSurfaceRender('lyrics')
   const positionMs = useLyricPosition(props)
   return <LyricsStage document={props.document} positionMs={positionMs} enabled={props.enabled} romanization={props.romanization} onRetry={props.onRetry}
-    onHeardLine={props.playback?.isPlaying ? props.onHeardLine : undefined} onClearCalibration={props.onClearCalibration} calibrationLabel={props.calibrationLabel} />
+    onHeardLine={props.playback?.isPlaying ? props.onHeardLine : undefined} onClearCalibration={props.onClearCalibration} calibrationLabel={props.calibrationLabel}
+    onSeekLine={props.playback?.track ? props.onSeekLine : undefined} seekLabel={props.seekLabel} onSearch={props.onSearch} />
 }
 
 export function ClockedPlayerBar({ playback, demoMode }: { playback: PlaybackSnapshot | null; demoMode: boolean }) {

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { sourceLabel } from '../lib/source-label'
 import { Clock3, Download, Languages, LoaderCircle, Plus, Save, Search, Trash2, WandSparkles, X } from 'lucide-react'
 import type { LyricsCandidate, LyricTrack } from '../types'
 import { detectLyricsLanguage, makeRomanizedTrack, makeTrack, serializeLrc } from '../lib/lyrics'
 import { formatTime } from '../lib/clock'
+import { activeLineIndex } from '../lib/lyrics'
 import { useAppStore } from '../store/useAppStore'
 import { languagePresentation, scriptPresentation } from '../lib/script'
 
@@ -12,9 +13,31 @@ function editableTime(ms: number) {
   const seconds = ((ms % 60_000) / 1000).toFixed(2).padStart(5, '0')
   return `${minutes}:${seconds}`
 }
-function parseEditableTime(value: string) {
-  const match = value.match(/^(\d+):([0-5]?\d(?:\.\d{1,3})?)$/)
-  return match ? Number(match[1]) * 60_000 + Number(match[2]) * 1000 : null
+export function parseEditableTime(value: string) {
+  const match = value.trim().match(/^(\d+):([0-5]?\d(?:\.\d{1,3})?)$/)
+  return match ? Math.round(Number(match[1]) * 60_000 + Number(match[2]) * 1000) : null
+}
+
+/**
+ * Typing a time passes through invalid text ("1:2", "1:"), so the field keeps
+ * its own draft and commits on Enter or blur; Escape or an invalid value
+ * restores the stored time.
+ */
+function TimeInput({ ms, onCommit }: { ms: number; onCommit(value: number): void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const invalid = draft !== null && parseEditableTime(draft) === null
+  const commit = () => {
+    const value = draft === null ? null : parseEditableTime(draft)
+    if (value !== null && value !== ms) onCommit(value)
+    setDraft(null)
+  }
+  return <input className={invalid ? 'invalid' : ''} value={draft ?? editableTime(ms)} aria-label="开始时间（分:秒）" title="格式 分:秒，例如 1:23.45；回车确认"
+    onFocus={event => event.currentTarget.select()}
+    onChange={event => setDraft(event.target.value)} onBlur={commit}
+    onKeyDown={event => {
+      if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() }
+      if (event.key === 'Escape') { event.stopPropagation(); setDraft(null); window.setTimeout(() => (event.target as HTMLInputElement).blur()) }
+    }} />
 }
 
 export function LyricsEditor({ positionMs }: { positionMs: number }) {
@@ -35,6 +58,18 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
   }, [editorOpen])
 
   const active = useMemo(() => lyrics?.tracks.find(track => track.id === activeId) ?? lyrics?.tracks[0], [lyrics, activeId])
+  const playingIndex = active ? activeLineIndex(active.lines, positionMs) : -1
+  const listRef = useRef<HTMLDivElement>(null)
+  // Open at the line being sung instead of the top of a long file. The clock
+  // starts at 0 when the dialog mounts, so wait for the first real position;
+  // afterwards the list stays where the user scrolls it.
+  const pendingScroll = useRef(true)
+  useEffect(() => { pendingScroll.current = true }, [editorOpen, active?.id])
+  useEffect(() => {
+    if (!editorOpen || !pendingScroll.current || playingIndex < 0) return
+    pendingScroll.current = false
+    listRef.current?.querySelector<HTMLElement>(`[data-row="${playingIndex}"]`)?.scrollIntoView({ block: 'center' })
+  }, [editorOpen, playingIndex])
   const trackQueryPresentation = scriptPresentation(query.track, query.artist)
   const artistQueryPresentation = scriptPresentation(query.artist, query.track)
   if (!editorOpen) return null
@@ -84,7 +119,7 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
         <button onClick={() => setEditorOpen(false)}><X size={18} /></button>
       </header>
       <div className="editor-search">
-        <div><Search size={14} /><input {...trackQueryPresentation} value={query.track} onChange={event => setQuery({ ...query, track: event.target.value })} placeholder="歌曲名" /><input {...artistQueryPresentation} value={query.artist} onChange={event => setQuery({ ...query, artist: event.target.value })} placeholder="艺人" /></div>
+        <div><Search size={14} /><input {...trackQueryPresentation} value={query.track} onChange={event => setQuery({ ...query, track: event.target.value })} onKeyDown={event => { if (event.key === 'Enter' && !searching) void search() }} placeholder="歌曲名" /><input {...artistQueryPresentation} value={query.artist} onChange={event => setQuery({ ...query, artist: event.target.value })} onKeyDown={event => { if (event.key === 'Enter' && !searching) void search() }} placeholder="艺人" /></div>
         <button onClick={() => void search()} disabled={searching}>{searching ? <LoaderCircle className="spin-icon" size={14} /> : <Search size={14} />}搜索候选</button>
       </div>
       <div className="candidate-strip">{results.map(item => <button key={item.id} onClick={() => void applyCandidate(item)}><strong {...scriptPresentation(item.trackName, item.artistName)}>{item.trackName}</strong><span><span {...scriptPresentation(item.artistName, item.trackName)}>{item.artistName}</span> · {formatTime(item.durationMs)}</span><i>待核验</i></button>)}</div>
@@ -101,9 +136,9 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
       <div className="editor-body">
         {!active ? <div className="editor-empty"><Languages size={28} /><h3>还没有歌词轨道</h3><p>在上方搜索同步歌词，或回到主界面导入 LRC。</p></div> : <>
           <div className="editor-columns"><span>#</span><span>时间</span><span>歌词文本</span><span /></div>
-          <div className="line-editor-list">{active.lines.map((line, index) => <div className="line-editor-row" key={`${line.startMs}-${index}`}>
+          <div ref={listRef} className="line-editor-list">{active.lines.map((line, index) => <div data-row={index} className={`line-editor-row ${index === playingIndex ? 'playing' : ''}`} key={`${line.startMs}-${index}`}>
             <span className="line-number">{String(index + 1).padStart(2, '0')}</span>
-            <div className="time-editor"><Clock3 size={12} /><input value={editableTime(line.startMs)} onChange={event => { const value = parseEditableTime(event.target.value); if (value !== null) updateLyricLine(active.id, index, { startMs: value }) }} /></div>
+            <div className="time-editor"><Clock3 size={12} /><TimeInput ms={line.startMs} onCommit={value => updateLyricLine(active.id, index, { startMs: value })} /></div>
             <input className={`text-editor ${languagePresentation(active.language).className}`} lang={languagePresentation(active.language).lang} value={line.text} placeholder={active.kind === 'translation' ? '输入这一行的翻译…' : '歌词文本'} onChange={event => updateLyricLine(active.id, index, { text: event.target.value })} />
             <button className="stamp-button" title="设为当前播放时间" onClick={() => updateLyricLine(active.id, index, { startMs: positionMs })}><WandSparkles size={13} />取当前</button>
           </div>)}</div>

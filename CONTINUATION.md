@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.53 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.52-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.54 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.53-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (72 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (75 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -20,7 +20,18 @@
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
+- **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.54 deployed: interaction and layout polish
+
+- `release/current` = **0.4.54** (asar SHA256 `fc088dba9e7b3a6f48bcacb7379ea8d427f24f7931256a815116203ab4732f49`, verifier 75/75, 1067 tests). Rollback: `release/current-0.4.53-backup-20261112`; the 0.4.52 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0454`.
+- **Click a lyric line to play from it.** `lyricSeekTarget` (`src/lib/seek.ts`) inverts `calibratedPosition`: the line at `startMs` shows at Spotify position `startMs + offset` (per-song manual or listened offset). Session calibrations and audio anchors end at a seek, so they are deliberately not inverted. Hovering a line shows the target time; a mouse text selection is not a seek. Verified in the app: clicking a 0:15 line put Spotify at 15.36 s (read back over the Web API).
+- **Keyboard** (`PlayerBar`): Space play/pause, ←/→ ±5 s, skipped for inputs, buttons, sliders and while the editor is open (`isShortcutTarget`).
+- **Timing status** on the lyrics card (`src/lib/timing-status.ts`): session calibration → audio anchor → manual offset → listened offset → "正在听音校准…" (`listen-controller` now publishes `listeningTrackId` / `subscribeListening` while capture runs) → SPOTIFY TIMELINE.
+- **Layout:** header badges stay on one row (source ellipsized, labeled 编辑 button); single-album names are not repeated; the settings panel collapses to a 52 px rail (localStorage `syllable-ui-panel-collapsed`, per window, not synced); the title bar names the current view; the listening switch no longer shrinks (`.switch { flex-shrink: 0 }`). New rules are one block at the end of `src/styles.css`.
+- **Library:** filter (NFKC, case and space folding), 6 s undo after delete (`restoreLibraryDocument`, no-op when the song was saved again meanwhile), timing tags.
+- **Editor:** Enter searches; time fields keep a draft and commit on Enter/blur (the old controlled input rejected every partial value, so times could only be pasted whole); the playing row is highlighted and scrolled to once the clock reports a position.
 
 ## 2026-11-12 / 0.4.53 deployed: listening calibration for Chinese and English lyrics
 

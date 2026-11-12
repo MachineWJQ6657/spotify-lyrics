@@ -33,6 +33,8 @@ interface AppState {
   /** Stores an automatic listening calibration for a song (current view and library). */
   setListenedOffset(trackId: string, value: ListenedOffset | null): void
   deleteLibraryDocument(trackId: string): void
+  /** Puts a just-deleted document back (library undo). */
+  restoreLibraryDocument(document: LyricsDocument): void
   retryCurrentLyrics(): void
   /** Re-runs provider lookup without deleting the last usable document. */
   retryTransientLyrics(): void
@@ -262,6 +264,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     delete library[trackId]
     return { library }
   }),
+  restoreLibraryDocument: document => set(state => state.library[document.trackId] ? {} : { library: putLibraryDocument(state.library, document) }),
   retryCurrentLyrics: () => set(state => {
     const trackId = state.playback?.track?.id
     if (!trackId) return { lyricsRetryToken: state.lyricsRetryToken + 1, lyrics: null }

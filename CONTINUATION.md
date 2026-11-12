@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.55 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.54-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.56 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.55-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (76 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (77 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -24,13 +24,27 @@
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
 
+## 2026-11-12 / 0.4.56 deployed: GPU at ~20% while listening
+
+- `release/current` = **0.4.56** (asar SHA256 `0541b90a4eb7d40523e371592b9375067c6dd741f4da24e02171004715886e35`, verifier 77/77, 1069 tests). Rollback: `release/current-0.4.55-backup-20261112`; the 0.4.54 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0456`.
+- **Bisected over CDP** in the isolated dev instance with automatic listening off. Each stage was started by hand from the renderer and the process CPU was sampled for 20 s (`scratchpad/cpu-dev.ps1`).
+  - idle: GPU 2.3%
+  - `getDisplayMedia` audio track held, video track stopped: 5.4%
+  - plus AudioContext and worklet: 2.8%
+  - stopped: 1.9%
+  - **only the `.listen-pulse` dot, infinitely animated: 20.2%** (11.9% with the backdrop hidden, so 0.4.54 paid it too)
+  - after removing the dot: 3.8%
+- **Why:** an endless CSS animation keeps the compositor producing frames for the whole window; the capture pipeline is not the cost. The dot is now static. Measured during a real listening session: GPU 3.2–3.3%, and the song was still decided (Unrequited Love −51 ms → offset 0).
+- **Verifier:** `staticListeningIndicator` added. The 0.4.55 player-bar check matched `.player-bar{`, but the renderer CSS is not minified (`.player-bar {`), so it passed without checking anything. Both regexes now allow whitespace and were confirmed against a failing sample.
+- The renderer CSS ships unminified, so any CSS text check must tolerate whitespace.
+
 ## 2026-11-12 / 0.4.55 deployed: main-window redesign
 
 - `release/current` = **0.4.55** (asar SHA256 `c6faa80a78545dbab6647899b716baead878f8f6179318fe3634d7ffe8e82a46`, verifier 76/76, 1069 tests). Rollback: `release/current-0.4.54-backup-20261112`; the 0.4.53 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0455`.
 - The user asked for a redesign ("界面不太好看，重新设计一下"). The old `styles.css` was four stacked themes (lavender/orange, then a Spotify layer, then font and 0.4.54 patches). A postcss pass (`scratchpad/split-css.cjs`, by class name) kept only overlay/shared selectors there; every main-window rule was rewritten in `src/app.css`.
 - **Look:** a blurred album-art backdrop for the whole window (`Backdrop` in `App.tsx`; the previous cover stays under the new one while it fades in, and a missing thumbnail keeps the last). Lyrics sit directly on it (no card). Japanese lines use `word-break: auto-phrase`. The header has a 76 px cover and pill badges, and an `@container main` rule shrinks it below 540 px. The settings panel has four tabs (`syllable-ui-panel-tab` in localStorage) with the overlay toggle in a fixed footer, and `Range` paints the filled track through `--fill`.
 - **Performance:** `backdrop-filter` on the player bar re-blurred the window behind it on every progress tick (GPU 20% vs 2%). It is gone, and the verifier fails if it returns. The static art layer's `filter: blur(90px)` is cheap. Same profile with listening off: 0.4.54 GPU 1.2–1.9% / renderer ~2.1%; 0.4.55 GPU 2.0–2.7% / renderer 1.7–2.7%.
-- **Open:** while listening calibration captures audio, the test instance's GPU process sits around 20% until the song is decided. The suspect is the `getDisplayMedia` desktop capture outliving its stopped video track. Not yet investigated.
+- **GPU while listening:** about 20% until the song is decided. Resolved in 0.4.56: the cause was the indicator animation, not the capture.
 
 ## 2026-11-12 / 0.4.54 deployed: interaction and layout polish
 

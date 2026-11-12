@@ -155,8 +155,10 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .card-watermark.tone-calibrated { color: var(--sy-accent-text); }
 .card-watermark.tone-listening { color: var(--sy-text-2); }
 .card-watermark.tone-experimental { color: var(--sy-warn); }
-.listen-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--sy-accent); animation: listen-pulse 1.4s ease-in-out infinite; }
-@keyframes listen-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.1); } }
+/* Static on purpose: an endless animation, even on a 7 px dot, makes the
+   compositor redraw the whole window every frame (measured: GPU process 20%
+   vs 3% while listening runs, up to ~2.5 min per new song). */
+.listen-pulse { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--sy-accent); box-shadow: 0 0 0 3px rgba(30, 215, 96, .2); }
 
 .lyrics-stage-shell { position: absolute; inset: 0; }
 .lyrics-viewport {
@@ -522,6 +524,5 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 
 @media (prefers-reduced-motion: reduce) {
   .app-backdrop-art { animation: none; }
-  .listen-pulse { animation: none; opacity: 1; }
   .lyric-group, .lyric-seek-hint, .progress-track, .switch i { transition: none; }
 }

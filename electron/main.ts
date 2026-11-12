@@ -25,6 +25,7 @@ import { VocalSync } from './audio-sync/vocal-sync'
 import { LocalCtc } from './audio-sync/local-ctc'
 import { PhonemeSession } from './audio-sync/phoneme-session'
 import { LyricOffsetSession } from './audio-sync/lyric-offset-session'
+import { readPronunciations } from './audio-sync/pronunciation-client'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import { watchWindowVisibility, windowVisible } from './window-visibility'
 import { paintRecovery, waitForFirstPaint, waitForLoad } from './first-paint'
@@ -50,7 +51,7 @@ const localCtc = new LocalCtc({ roots: audioSyncRoots, runnerPath: app.isPackage
   ? path.join(process.resourcesPath, 'audio-sync/romaji-ctc-runner.py')
   : path.join(app.getAppPath(), 'scripts/audio-sync/romaji-ctc-runner.py') })
 const phonemeSession = new PhonemeSession(localCtc, matchPhonemeInWorker)
-const lyricOffsetSession = new LyricOffsetSession(localCtc, analyzeJapaneseLines)
+const lyricOffsetSession = new LyricOffsetSession(localCtc, analyzeJapaneseLines, undefined, readPronunciations)
 let activeAudioMode: 'reference' | 'vocal' | 'phoneme' | 'listen' | null = null
 let audioCaptureGrantUntil = 0
 let localSpotify: LocalSpotifyService | null = null
@@ -1640,7 +1641,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('audio-sync:listen', async (event, value: VocalCapture) => {
     if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'listen') throw new Error('听音校准未启用')
     const result = await lyricOffsetSession.process(value)
-    qaLog(`listen offset: reason=${result.reason}; state=${result.state}; windowLines=${result.windowLines}; lines=${result.lines}; windows=${result.windows}; measured=${result.measuredDeltaMs ?? 'none'}; spread=${result.spreadMs ?? 'none'}; offset=${result.offsetMs ?? 'none'}; elapsedMs=${result.elapsedMs}; track=${lastPlayback?.track?.artist ?? ''} - ${lastPlayback?.track?.name ?? ''}`)
+    qaLog(`listen offset: reason=${result.reason}; language=${value?.language}; state=${result.state}; windowLines=${result.windowLines}; lines=${result.lines}; windows=${result.windows}; measured=${result.measuredDeltaMs ?? 'none'}; spread=${result.spreadMs ?? 'none'}; offset=${result.offsetMs ?? 'none'}; elapsedMs=${result.elapsedMs}; track=${lastPlayback?.track?.artist ?? ''} - ${lastPlayback?.track?.name ?? ''}`)
     return result
   })
   ipcMain.handle('audio-sync:observation', (event, observation: AcousticObservation) => {

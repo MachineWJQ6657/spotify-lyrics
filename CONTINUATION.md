@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.52 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.51-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.53 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.52-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (71 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (72 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -15,12 +15,29 @@
   - Audit tooling (scratchpad, not committed): bundle `electron/lyrics-provider.ts` with esbuild and run `fetchLyrics` per track **sequentially and paced**. LRCLIB allows a burst of ~20 requests refilled at ~3/s (429 `retry-after: 1`); Kugou `song_search_v2` silently returns an empty list (byte-identical to a real miss) for a large share of unsigned requests. Back-to-back audits measure those limits, not lyric quality (see 0.4.50).
 - **Next-song prefetch (0.4.51, needs the optional Web API connection):** about 60 s before a song ends, `/me/player/queue` gives the next item; its lyrics go through the full pipeline and its generated romaji is cached, so the song change shows them at once. The user's normal profile is **not** connected yet (no `session.json`); without it nothing changes.
 - **Romaji:** generated romaji matches NetEase human romaji on 89.8% of 3,022 lines (`ROMANIZATION_REVISION` 3).
-- **Listening calibration (0.4.52, default on):** for Japanese songs the app listens to a few 12 s loopback blocks, force-aligns the known lyric lines with the local RomajiASR CTC model and stores a per-song display offset keyed by the lyric timing (`listenedOffset`). This fixes community files that are a constant 0.6–12 s early/late on Spotify's audio (the real cause of "lyrics too early"; see the 0.4.52 entry).
+- **Listening calibration (0.4.52, default on; Chinese and English since 0.4.53):** the app listens to a few 12 s loopback blocks, force-aligns the known lyric lines with the local RomajiASR CTC model (Chinese via pinyin, English via CMUdict, mapped to its morae) and stores a per-song display offset keyed by the lyric timing (`listenedOffset`). This fixes community files that are a constant 0.6–12 s early/late on Spotify's audio (the real cause of "lyrics too early"; see the 0.4.52 entry).
 - **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions; re-measured 2026-11-12 with an independent loopback recorder: SMTC runs ~50–60 ms ahead of the audio.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.53 deployed: listening calibration for Chinese and English lyrics
+
+- `release/current` = **0.4.53** (asar SHA256 `fab99fc5b97cb0795c35a5399d59f6c49e8799d9330aa6af5326d91557fa6436`, verifier 72/72, 1052 tests). Rollback: `release/current-0.4.52-backup-20261112`; the 0.4.51 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0453`.
+- **How non-Japanese lines are placed.** The RomajiASR model only knows Japanese morae, so Chinese and English lyrics are mapped onto them:
+  - Chinese: pinyin from `pinyin-pro` (3.29.4, context readings, both scripts) → `electron/audio-sync/mandarin-phones.ts`. Each syllable becomes a CV mora set (`xiang` → `sha|shi`, `?a`, `?N`).
+  - English: CMUdict (`cmu-pronouncing-dictionary` 3.0.0) → `english-phones.ts`, the way katakana hears a word (`love` → `ra|ro|ru`, `?v|vu|bu`; post-vocalic R dropped).
+  - Phone strings: `a|b` lists acceptable labels; a leading `?` marks an optional phone (codas, nasal endings, diphthong tails). `alignLines` can pass over optional phones at 1.5 nats each and leave a line early when its tail is optional. Lines are judged by required phones only.
+  - Readings come from `pronunciation-worker.js` (a disposable worker, ~0.1 s, ~30 MB freed afterwards; both libraries are bundled into it, so they are devDependencies). Mixed zh/en lines use one tokenizer; digits, kana and unknown words end a line's usable prefix.
+  - Lines scoring ≥ −1.5 are kept for zh/en (−1.2 for Japanese). Over 12 songs, lines at ≥ −1.5 were within 350 ms of their song's offset 90% of the time; below −1.8, none were.
+  - English lyrics where < 75% of the words have a reading (Spanish, romaji) are skipped as `no-lines`.
+- **Measurements (loopback + offline emulation of the in-app windows, 12 songs × 2 clips; Demucs check).**
+  - CTC onset vs Demucs vocal onset: English median +20 ms (IQR 10–220). Chinese +100 ms (IQR 30–210), because sung Chinese lines often open with a soft glide or hum (緣 yu-, 也 ye-, 命 m-) that the energy threshold catches ~300 ms early. CTC lands on the strong vocal rise, so no correction is applied.
+  - Relinking matters: Spotify plays a **254.6 s** Shape of You (catalog 233.7 s, 7 s longer intro); every provider's file is ~7.2 s early. Anti-Hero plays a 309 s version and its lines disagree, so it stays undecided. Someone Like You is +0.7 s; Viva La Vida +0.7–1.0 s; 光年之外 +0.3–0.5 s; Blinding Lights −0.2 s; the rest are within ±0.15 s.
+  - In-app (isolated dev profile): Shape of You decided after 2 blocks (+7265 ms measured, offset +7120); afterwards lines appeared 0.27 s before to 0.23 s after the vocal. 光年之外 measured +321 ms → offset 0 (below the 250 ms minimum after the 150 ms lead). The packaged candidate measured Viva La Vida at +1000 ms → offset +850.
+- **Language detection.** `detectLyricsLanguage` now ignores credit lines and the middle dot ・, and calls a text English when Latin words outnumber twice the Han characters. NetEase's "作词 : …" lines had made Viva La Vida "zh-Hans". Already-cached documents keep their stored language; the listener treats zh and en the same way.
+- **Still open:** English words inside Japanese lines still end the line (Shout Baby, Pre-Romance). Korean is not listened to. Per-segment drift (Mix) is unchanged.
 
 ## 2026-11-12 / 0.4.52 deployed: listening calibration of lyric timing, consensus-outlier fix
 

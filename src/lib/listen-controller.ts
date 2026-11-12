@@ -6,14 +6,20 @@ import { listenLines, listenTimingKey } from './listened-offset'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
 
 /**
- * Automatic listening calibration: while a Japanese song with timed lyrics
+ * Automatic listening calibration: while a Japanese, Chinese or English song with timed lyrics
  * plays and its lyric file has not been measured yet, capture a few 12 s
  * blocks of system output, let the main process locate known lines in them,
  * and store the per-song display offset. Audio stays in memory; capture stops
  * as soon as the song is measured, paused, changed or skipped.
  */
 
-export interface ListenTarget { trackId: string; timingKey: string; lines: { text: string; startMs: number }[] }
+export interface ListenTarget { trackId: string; timingKey: string; language: 'ja' | 'zh' | 'en'; lines: { text: string; startMs: number }[] }
+
+/** Lyric language as the listener names it (main process maps each to a pronunciation source). */
+export function listenLanguageOf(language: string | undefined): ListenTarget['language'] | null {
+  if (language === 'ja' || language === 'en') return language
+  return language?.startsWith('zh') ? 'zh' : null
+}
 
 const MAX_SESSION_ATTEMPTS = 2
 const MAX_BLOCKS = 12
@@ -30,14 +36,15 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   if (lyrics?.trackId !== playback.track.id) return { reason: 'no-lyrics' }
   if (lyrics.offsetMs) return { reason: 'manual-offset' }
   const original = lyrics.untimedOriginal ? undefined : lyrics.tracks.find(track => track.kind === 'original')
-  if (!original || original.language !== 'ja') return { reason: 'unsupported-language' }
+  const language = listenLanguageOf(original?.language)
+  if (!original || !language) return { reason: 'unsupported-language' }
   const lines = listenLines(original.lines)
   if (lines.length < 8 || lines.length > 400) return { reason: 'too-few-lines' }
   const timingKey = listenTimingKey(original)
   if (!timingKey) return { reason: 'invalid-lines' }
   if (lyrics.listenedOffset?.timingKey === timingKey) return { reason: 'already-measured' }
   if ((attempts.get(`${playback.track.id}\0${timingKey}`) ?? 0) >= MAX_SESSION_ATTEMPTS) return { reason: 'attempts-exhausted' }
-  return { target: { trackId: playback.track.id, timingKey, lines } }
+  return { target: { trackId: playback.track.id, timingKey, language, lines } }
 }
 
 let active: { target: ListenTarget; stop: () => Promise<void> } | null = null
@@ -117,7 +124,7 @@ async function begin(target: ListenTarget) {
       if (++blocks > MAX_BLOCKS) { failed(); processing = false; await stop(); return }
       try {
         const result = await window.syllable.audioSync.listen({ trackId: target.trackId, capturedAtMs, captureDurationMs: block.pcm.length / 16,
-          sampleRate: 16000, pcm: block.pcm, language: 'ja', lines: target.lines })
+          sampleRate: 16000, pcm: block.pcm, language: target.language, lines: target.lines })
         if (stopped) return
         if (result.state === 'inconsistent') failed()
         if (result.state === 'decided' || result.state === 'inconsistent') {
@@ -127,8 +134,9 @@ async function begin(target: ListenTarget) {
           await stop()
           return
         }
-        if (result.reason === 'invalid-input' || result.reason === 'no-lines') failed()
-        if (result.reason === 'inactive' || result.reason === 'lyrics-changed' || result.reason === 'invalid-input' || result.reason === 'no-lines') await stop()
+        const unusable = result.reason === 'invalid-input' || result.reason === 'no-lines' || result.reason === 'unsupported-language'
+        if (unusable) failed()
+        if (unusable || result.reason === 'inactive' || result.reason === 'lyrics-changed') await stop()
       } catch { failed(); await stop() }
       finally { processing = false }
     }

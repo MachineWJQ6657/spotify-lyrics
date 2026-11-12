@@ -102,7 +102,7 @@ export const SettingsPanel = memo(function SettingsPanel() {
       <div className="range-labels"><span>提前</span><button onClick={() => changeOffset(0)}><RotateCcw size={12} />本曲归零</button><span>延后</span></div>
       <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 250)}>−250 ms</button><button onClick={() => changeOffset(0)}>0</button><button onClick={() => changeOffset(offsetMs + 250)}>+250 ms</button></div>
       <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 1000)}>−1 秒</button><button onClick={() => changeOffset(offsetMs + 1000)}>+1 秒</button></div>
-      <label className="switch-row top-gap"><div><strong>听音自动校准</strong><span>日语歌曲播放时在本机听几段声音，整体校正歌词提前或延后；音频不保存、不上传</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
+      <label className="switch-row top-gap"><div><strong>听音自动校准</strong><span>日语、中文、英文歌曲播放时在本机听几段声音，整体校正歌词提前或延后；音频不保存、不上传</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
     </section>
 
     <section>

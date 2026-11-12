@@ -8,6 +8,12 @@ import { referenceLabel } from '../lib/source-label'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { currentSessionCalibration } from '../lib/session-calibration'
 
+
+/** Measured delta > 0: the file runs ahead of the singing (shown too early). */
+export function listenedClockLabel(measuredDeltaMs: number) {
+  return measuredDeltaMs >= 0 ? `听音自动校准（原歌词比演唱早 ${measuredDeltaMs} ms）` : `听音自动校准（原歌词比演唱晚 ${-measuredDeltaMs} ms）`
+}
+
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
   const [exporting, setExporting] = useState(false)
   const [exportStatus, setExportStatus] = useState('')
@@ -30,7 +36,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs
   const listenedApplies = !manual && !activeLyrics?.offsetMs && settings.listenOffset !== false && listenedLyricsOffset(activeLyrics) !== 0
   const clockMode = manual ? '本次听感校准（不保存到歌曲）' : audioActive ? '声音校准（实验）'
-    : listenedApplies ? `听音自动校准（原歌词比演唱早 ${activeLyrics?.listenedOffset?.measuredDeltaMs ?? 0} ms）` : '媒体时间回退（未验证听感）'
+    : listenedApplies ? listenedClockLabel(activeLyrics?.listenedOffset?.measuredDeltaMs ?? 0) : '媒体时间回退（未验证听感）'
   const trackContext = [playback?.track?.name ?? '', playback?.track?.artist ?? '', playback?.track?.album ?? ''].find(hasKana) ?? ''
   const originalLanguage = activeLyrics?.tracks.find(track => track.kind === 'original')?.language
   const trackNamePresentation = scriptPresentation(playback?.track?.name ?? '', trackContext, originalLanguage)

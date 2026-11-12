@@ -47,6 +47,11 @@ describe('listenTarget', () => {
   })
 
   it('explains every reason not to listen', () => {
+    // Chinese (either script) and English lyrics are listened to through their pronunciations.
+    for (const [language, expected] of [['zh-Hans', 'zh'], ['zh-Hant', 'zh'], ['en', 'en'], ['ja', 'ja']] as const) {
+      const result = listenTarget(input({ lyrics: doc({ tracks: [{ ...original, language }] }) }))
+      expect('target' in result && result.target.language).toBe(expected)
+    }
     const reason = (extra: object) => { const result = listenTarget(input(extra)); return 'reason' in result ? result.reason : 'target' }
     expect(reason({ enabled: false })).toBe('disabled')
     expect(reason({ demoMode: true })).toBe('demo')
@@ -54,7 +59,8 @@ describe('listenTarget', () => {
     expect(reason({ playback: playing('song', false) })).toBe('not-playing')
     expect(reason({ playback: playing('other') })).toBe('no-lyrics')
     expect(reason({ lyrics: doc({ offsetMs: 500 }) })).toBe('manual-offset')
-    expect(reason({ lyrics: doc({ tracks: [{ ...original, language: 'en' }] }) })).toBe('unsupported-language')
+    expect(reason({ lyrics: doc({ tracks: [{ ...original, language: 'ko' }] }) })).toBe('unsupported-language')
+    expect(reason({ lyrics: doc({ tracks: [{ ...original, language: 'original' }] }) })).toBe('unsupported-language')
     expect(reason({ lyrics: doc({ tracks: [{ ...original, lines: lines.slice(0, 5) }] }) })).toBe('too-few-lines')
     expect(reason({ lyrics: doc({ listenedOffset: listened({ state: 'inconsistent' }) }) })).toBe('already-measured')
     expect(reason({ lyrics: doc({ listenedOffset: listened({ timingKey: 'old' }) }) })).toBe('target')

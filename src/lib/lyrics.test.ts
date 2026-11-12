@@ -81,6 +81,12 @@ describe('LRC parsing', () => {
     expect(detectLyricsLanguage('[00:01.00]喜んで会いに行く')).toBe('ja')
     expect(detectLyricsLanguage('[00:01.00]她想去南方')).toBe('zh-Hans')
     expect(detectLyricsLanguage('[00:01.00]Tonight we dance')).toBe('en')
+    // Provider credit lines do not decide the language of the song.
+    expect(detectLyricsLanguage('[00:00.00]作词 : Guy Berryman/Jonny Buckland\n[00:01.00]作曲 : Chris Martin\n[00:10.00]I used to rule the world\n[00:14.00]Seas would rise when I gave the word')).toBe('en')
+    expect(detectLyricsLanguage('[00:00.00]作詞・作曲：n-buna\n[00:10.00]Tonight we dance under the moon\n[00:14.00]And I will never let you go tonight')).toBe('en')
+    expect(detectLyricsLanguage('[00:00.00]作词 : 林夕\n[00:10.00]我爱你 baby\n[00:14.00]说好不哭')).toBe('zh-Hans')
+    expect(detectLyricsLanguage('[00:10.00]Baby 我想你 每一天 每一夜')).toBe('zh-Hans')
+    expect(detectLyricsLanguage('[00:00.00]作词 : 林夕')).toBe('zh-Hans')
   })
 
   it('always keeps the source track as the timing anchor', () => {

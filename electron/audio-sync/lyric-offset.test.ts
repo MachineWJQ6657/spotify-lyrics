@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CtcOutput } from './ctc-tokens'
 import { alignLines, LISTEN_LEAD_MS, LyricOffsetEstimator, logSoftmax, measureWindow, median, type LineDelta, type PhoneLine } from './lyric-offset'
 
-const VOCABULARY = ['<blank>', 'ka', 'na', 'shi', 'i', 'to', 'mo', 'ru', 'yo', 'sa', 'si', 'o', 'wo']
+const VOCABULARY = ['<blank>', 'ka', 'na', 'shi', 'i', 'to', 'mo', 'ru', 'yo', 'sa', 'si', 'o', 'wo', 'N']
 const id = (label: string) => VOCABULARY.indexOf(label)
 
 /** Synthetic CTC output: blank everywhere except the given phone spans. */
@@ -48,6 +48,26 @@ describe('alignLines', () => {
     const output = ctc(300, sing(100, ['ka', 'si', 'o', 'na']))
     const [line] = alignLines(logSoftmax(output)!, [{ index: 0, startMs: 0, phones: ['ka', 'shi', 'wo', 'na'] }])
     expect(line?.onsetFrame).toBe(100)
+  })
+
+  it('passes over optional phones the singer does not articulate', () => {
+    const output = ctc(400, sing(100, ['ka', 'na', 'shi', 'i']))
+    const [line] = alignLines(logSoftmax(output)!, [{ index: 0, startMs: 0, phones: ['?sa', 'ka', '?N', 'na', 'shi', 'i', '?N', '?o'] }])
+    expect(line?.onsetFrame).toBe(100)
+    expect(line?.phones).toBe(4)
+    expect(line!.score).toBeGreaterThan(-0.1)
+  })
+
+  it('uses an optional phone when it is sung, and accepts listed alternatives', () => {
+    const output = ctc(400, sing(100, ['sa', 'N', 'na', 'shi']))
+    const [line] = alignLines(logSoftmax(output)!, [{ index: 0, startMs: 0, phones: ['ka|sa', '?N', 'na', 'shi'] }])
+    expect(line?.onsetFrame).toBe(100)
+    expect(line!.score).toBeGreaterThan(-0.1)
+  })
+
+  it('does not align a line made only of optional phones', () => {
+    const logp = logSoftmax(ctc(200, sing(50, ['N', 'o'])))!
+    expect(alignLines(logp, [{ index: 0, startMs: 0, phones: ['?N', '?o'] }])).toEqual([null])
   })
 
   it('rejects unknown labels and empty input instead of guessing', () => {

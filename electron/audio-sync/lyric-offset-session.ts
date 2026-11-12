@@ -4,7 +4,8 @@ import { lyricTimingKey } from '../../src/lib/lyric-timing-key'
 import { captureQuality } from './capture-quality'
 import type { CtcOutput } from './ctc-tokens'
 import { mapJapanesePhones } from './japanese-phonemes'
-import { LyricOffsetEstimator, measureWindow, type OffsetDecision, type PhoneLine } from './lyric-offset'
+import { LyricOffsetEstimator, measureWindow, PRONOUNCED_MIN_LINE_SCORE, requiredPhones, type OffsetDecision, type PhoneLine } from './lyric-offset'
+import { MIN_PRONUNCIATION_COVERAGE, pronunciationCoverage, pronunciationPhones, type PronunciationToken } from './lyric-pronunciation'
 import type { JapaneseWord } from '../romanizer'
 
 interface Engine {
@@ -12,6 +13,13 @@ interface Engine {
   cancel(): void
 }
 type Analyzer = (lines: string[], options?: { signal?: AbortSignal }) => Promise<JapaneseWord[][]>
+type Pronouncer = (lines: string[], options?: { signal?: AbortSignal }) => Promise<PronunciationToken[][]>
+
+/** Languages the listener can place: Japanese morae directly, Chinese and English through pinyin / CMUdict. */
+export type ListenLanguage = 'ja' | 'zh' | 'en'
+export function listenLanguage(value: unknown): ListenLanguage | null {
+  return value === 'ja' || value === 'zh' || value === 'en' ? value : null
+}
 
 /** Loopback capture reaches the renderer this long after the sound was played.
  * Measured 2026-11-12 against an independent WASAPI loopback recorder on the
@@ -48,6 +56,16 @@ export function phoneLines(lines: VocalCapture['lines'], words: JapaneseWord[][]
   return out
 }
 
+/** Chinese / English lines: the leading pronounceable tokens of each line, in model labels. */
+export function pronunciationLines(lines: VocalCapture['lines'], tokens: PronunciationToken[][], vocabulary: ReadonlySet<string>): PhoneLine[] {
+  const out: PhoneLine[] = []
+  lines.forEach((line, index) => {
+    const phones = pronunciationPhones(tokens[index] ?? [], vocabulary)
+    if (requiredPhones(phones) >= 3) out.push({ index, startMs: line.startMs, phones })
+  })
+  return out
+}
+
 /**
  * Listens to a few windows of the current song and estimates how far its lyric
  * file is from what is sung. Media position comes from the transport clock
@@ -57,6 +75,7 @@ export class LyricOffsetSession {
   private owner = ''
   private key = ''
   private phones: PhoneLine[] | null = null
+  private tokens: PronunciationToken[][] | null = null
   private estimator = new LyricOffsetEstimator()
   private playback: PlaybackSnapshot | null = null
   private tail: { pcm: Float32Array; endAtMs: number } | null = null
@@ -65,12 +84,12 @@ export class LyricOffsetSession {
   private revision = 0
   private abort: AbortController | null = null
 
-  constructor(private engine: Engine, private analyze: Analyzer, private now = () => Date.now()) {}
+  constructor(private engine: Engine, private analyze: Analyzer, private now = () => Date.now(), private pronounce: Pronouncer | null = null) {}
 
   start(trackId: string) { this.clear(); this.owner = trackId }
   clear() {
     this.revision += 1
-    this.owner = ''; this.key = ''; this.phones = null; this.tail = null
+    this.owner = ''; this.key = ''; this.phones = null; this.tokens = null; this.tail = null
     this.estimator = new LyricOffsetEstimator()
     this.abort?.abort(); this.abort = null
     this.engine.cancel()
@@ -102,7 +121,8 @@ export class LyricOffsetSession {
       ({ ...decision, reason, trackId: value?.trackId ?? '', timingKey: this.key, windowLines, elapsedMs: this.now() - started })
     if (this.pending) return result('busy')
     if (!this.owner || value?.trackId !== this.owner || this.playback?.track?.id !== this.owner || !this.playback?.isPlaying) return result('inactive')
-    if (value.language !== 'ja') return result('unsupported-language')
+    const language = listenLanguage(value.language)
+    if (!language || (language !== 'ja' && !this.pronounce)) return result('unsupported-language')
     if (value.sampleRate !== 16000 || !(value.pcm instanceof Float32Array) || value.pcm.length < 96000 || value.pcm.length > 240000
       || !Number.isFinite(value.capturedAtMs) || value.capturedAtMs > started + 200 || started - value.capturedAtMs > 3000
       || !Number.isFinite(value.captureDurationMs) || Math.abs(value.captureDurationMs - value.pcm.length / 16) > 1
@@ -137,18 +157,28 @@ export class LyricOffsetSession {
     const timeout = setTimeout(() => abort.abort(), 15000)
     const current = () => !abort.signal.aborted && revision === this.revision && this.owner === value.trackId
     try {
-      if (!this.phones) {
+      if (!this.phones && language === 'ja') {
         const words = await this.analyze(value.lines.map(line => line.text), { signal: abort.signal })
         if (!current()) return result('cancelled')
         if (words.length !== value.lines.length) return result('invalid-input')
         this.phones = phoneLines(value.lines, words)
+      } else if (!this.phones && !this.tokens) {
+        const tokens = await this.pronounce!(value.lines.map(line => line.text), { signal: abort.signal })
+        if (!current()) return result('cancelled')
+        if (tokens.length !== value.lines.length) return result('invalid-input')
+        this.tokens = tokens
+        // Mostly unknown words: another language written in Latin letters.
+        if (pronunciationCoverage(tokens) < MIN_PRONUNCIATION_COVERAGE) this.phones = []
       }
-      if (this.phones.length < 4) return result('no-lines')
+      if (this.phones && this.phones.length < 4) return result('no-lines')
       const output = await this.engine.recognize(pcm, { signal: abort.signal })
       if (!current()) return result('cancelled')
+      // Chinese / English phones are chosen from the model's own label set.
+      if (!this.phones) this.phones = pronunciationLines(value.lines, this.tokens!, new Set(output.vocabulary))
+      if (this.phones.length < 4) return result('no-lines')
       const deltas = measureWindow(output, this.phones, { startMediaMs, sampleRate: 16000,
         strideSamples: output.geometry.strideSamples, receptiveFieldSamples: output.geometry.receptiveFieldSamples },
-      { expectedOffsetMs: this.estimator.center })
+      { expectedOffsetMs: this.estimator.center, minScore: language === 'ja' ? undefined : PRONOUNCED_MIN_LINE_SCORE })
       const decision = this.estimator.add(deltas)
       return result('measured', decision, deltas.length)
     } catch (error) {

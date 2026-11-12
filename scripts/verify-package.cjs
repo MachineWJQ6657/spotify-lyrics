@@ -16,6 +16,9 @@ const main = read(mainEntry)
 const native = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]local-spotify-.*\.js$/.test(entry)).map(read).join('\n')
 const renderer = entries.filter(entry => /[\\/]renderer[\\/].*\.js$/.test(entry)).map(read).join('\n')
 const rendererCss = entries.filter(entry => /[\\/]renderer[\\/].*\.css$/.test(entry)).map(read).join('\n')
+const pronunciationWorkerEntry = entries.find(entry => entry.replace(/\\/g, '/') === '/out/main/pronunciation-worker.js')
+const pronunciationWorker = pronunciationWorkerEntry ? read(pronunciationWorkerEntry) : ''
+const pronunciationChunk = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]lyric-pronunciation-.*\.js$/.test(entry)).map(read).join('\n')
 const preload = entries.filter(entry => /[\\/]preload[\\/].*\.cjs$/.test(entry)).map(read).join('\n')
 const checks = {
   executable: fs.existsSync(path.join(directory, 'Syllable.exe')),
@@ -46,6 +49,9 @@ const checks = {
   consensusOutlierDropped: main.includes('const consistent = topIsTimelineOutlier'),
   listenedOffset: main.includes('audio-sync:listen') && main.includes('listen offset: reason=') && main.includes('function alignLines(') && main.includes('function timingPrior(')
     && renderer.includes('听音自动校准') && renderer.includes('listenedOffset'),
+  // Chinese / English listening: the disposable worker carries pinyin-pro and CMUdict.
+  listenPronunciation: main.includes('pronunciation-worker.js') && pronunciationChunk.includes('function pronunciationCoverage(') && pronunciationChunk.includes('function pinyinPhones(')
+    && pronunciationWorker.includes('B AW1 T') && pronunciationWorker.includes('toneType') && renderer.includes('日语、中文、英文歌曲'),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),
   instrumentalIsDefinitive: main.includes('function isInstrumentalPlaceholder(') && main.includes('instrumentalRecord') && renderer.includes('歌词源确认这首歌没有歌词'),

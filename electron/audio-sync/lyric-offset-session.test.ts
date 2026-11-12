@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PlaybackSnapshot } from '../../src/types'
 import type { VocalCapture } from '../../src/lib/vocal-sync-types'
 import type { CtcOutput } from './ctc-tokens'
-import { CAPTURE_LATENCY_MS, LyricOffsetSession, phoneLines } from './lyric-offset-session'
+import { CAPTURE_LATENCY_MS, LyricOffsetSession, phoneLines, pronunciationLines } from './lyric-offset-session'
+import type { PronunciationToken } from './lyric-pronunciation'
 import type { JapaneseWord } from '../romanizer'
 
 const VOCABULARY = ['<blank>', 'ka', 'na', 'shi', 'i', 'to', 'mo', 'ru', 'yo']
@@ -26,7 +27,7 @@ const words = (text: string): JapaneseWord[] => [{ surface_form: text, reading: 
 const PHRASES: Record<string, string[]> = { かなしい: ['ka', 'na', 'shi', 'i'], ともるよ: ['to', 'mo', 'ru', 'yo'] }
 const lines = Array.from({ length: 12 }, (_, index) => ({ text: index % 2 ? 'ともるよ' : 'かなしい', startMs: 20_000 + index * 3000 }))
 
-function setup(offsetMs: number) {
+function setup(offsetMs: number, language = 'ja') {
   let now = 1_000_000
   // The file is `offsetMs` early: each line is sung at startMs + offsetMs.
   const engine = {
@@ -38,16 +39,19 @@ function setup(offsetMs: number) {
   }
   let mediaStart = 0
   const analyze = vi.fn(async (texts: string[]) => texts.map(words))
-  const session = new LyricOffsetSession(engine, analyze, () => now)
+  // English readings that map onto the same test labels (K AA -> ka, SH IY -> shi ...).
+  const ARPABET: Record<string, string[]> = { かなしい: ['K AA1', 'N AA1', 'SH IY1', 'IY1'], ともるよ: ['T OW1', 'M OW1', 'R UW1', 'Y OW1'] }
+  const pronounce = vi.fn(async (texts: string[]) => texts.map(text => (ARPABET[text] ?? []).map((reading): PronunciationToken => ({ kind: 'word', text, reading }))))
+  const session = new LyricOffsetSession(engine, analyze, () => now, pronounce)
   const playback = (positionMs: number, observedAtMs: number, isPlaying = true): PlaybackSnapshot => ({ track: { id: 'song', name: 'x', artist: 'y', album: 'z', coverUrl: '', durationMs: 200_000 }, positionMs, observedAtMs, isPlaying, sampleId: 1, playbackSource: 'local' })
   /** A 12 s block ending at wall time `endWall`, while media position = wall - 1_000_000 + 10_000. */
   const block = (endWall: number): VocalCapture => {
     now = endWall + 100
     // Sample 0 of the analysed PCM (incl. any prepended tail) is set by the session; the fake engine needs it.
-    return { trackId: 'song', capturedAtMs: endWall, captureDurationMs: 12_000, sampleRate: SR, pcm: new Float32Array(12 * SR).fill(0.01), language: 'ja', lines }
+    return { trackId: 'song', capturedAtMs: endWall, captureDurationMs: 12_000, sampleRate: SR, pcm: new Float32Array(12 * SR).fill(0.01), language, lines }
   }
   const media = (wall: number) => wall - 1_000_000 + 10_000
-  return { session, engine, analyze, playback, block, media, setMediaStart: (value: number) => { mediaStart = value }, setNow: (value: number) => { now = value } }
+  return { session, engine, analyze, pronounce, playback, block, media, setMediaStart: (value: number) => { mediaStart = value }, setNow: (value: number) => { now = value } }
 }
 
 describe('LyricOffsetSession', () => {
@@ -71,12 +75,28 @@ describe('LyricOffsetSession', () => {
     expect(h.engine.recognize.mock.calls.at(-1)![0].length).toBe(15 * SR)
   })
 
+  it('measures English (and Chinese) lyrics through their pronunciations', async () => {
+    const h = setup(-700, 'en')
+    h.session.start('song')
+    h.session.observePlayback(h.playback(10_000, 1_000_000))
+    let result
+    for (let end = 1_012_000; end <= 1_060_000; end += 12_000) {
+      h.setMediaStart(h.media(end === 1_012_000 ? end - 12_000 : end - 15_000))
+      result = await h.session.process(h.block(end))
+      if (result.state === 'decided') break
+    }
+    expect(result).toMatchObject({ reason: 'measured', state: 'decided' })
+    expect(Math.abs(result!.measuredDeltaMs! - (-700 - CAPTURE_LATENCY_MS))).toBeLessThanOrEqual(30)
+    expect(h.pronounce).toHaveBeenCalledTimes(1)
+    expect(h.analyze).not.toHaveBeenCalled()
+  })
+
   it('rejects captures for another track, while paused, or with bad input', async () => {
     const h = setup(0)
     h.session.start('song')
     h.session.observePlayback(h.playback(10_000, 1_000_000))
     expect((await h.session.process({ ...h.block(1_012_000), trackId: 'other' })).reason).toBe('inactive')
-    expect((await h.session.process({ ...h.block(1_012_000), language: 'en' })).reason).toBe('unsupported-language')
+    expect((await h.session.process({ ...h.block(1_012_000), language: 'ko' })).reason).toBe('unsupported-language')
     expect((await h.session.process({ ...h.block(1_012_000), sampleRate: 8000 })).reason).toBe('invalid-input')
     expect((await h.session.process({ ...h.block(1_012_000), capturedAtMs: 900_000 })).reason).toBe('invalid-input')
     expect((await h.session.process({ ...h.block(1_012_000), pcm: new Float32Array(12 * SR) })).reason).toBe('silence')
@@ -122,5 +142,17 @@ describe('phoneLines', () => {
       { index: 0, startMs: 1000, phones: ['ka', 'na', 'shi', 'i'] },
       { index: 2, startMs: 3000, phones: ['ka', 'na', 'shi', 'i'] },
     ])
+  })
+})
+
+describe('pronunciationLines', () => {
+  it('keeps lines whose pronounceable prefix has at least three sounded phones', () => {
+    const tokens: PronunciationToken[][] = [
+      [{ kind: 'han', reading: 'ka' }, { kind: 'han', reading: 'na' }, { kind: 'han', reading: 'shi' }],
+      [{ kind: 'han', reading: 'ka' }, { kind: 'unsupported', text: '2' }, { kind: 'han', reading: 'na' }, { kind: 'han', reading: 'shi' }],
+      [{ kind: 'word', text: 'x', reading: null }],
+    ]
+    const result = pronunciationLines([{ text: 'a', startMs: 1000 }, { text: 'b', startMs: 2000 }, { text: 'c', startMs: 3000 }], tokens, new Set(VOCABULARY))
+    expect(result).toEqual([{ index: 0, startMs: 1000, phones: ['ka', 'na', 'shi'] }])
   })
 })

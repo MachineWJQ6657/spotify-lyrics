@@ -118,13 +118,20 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
 }
 
 export function detectLyricsLanguage(text: string) {
-  const hangul = (text.match(/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/g) ?? []).length
-  const kana = (text.match(/[\u3040-\u30ff]/g) ?? []).length
+  // Lyricist / composer credit lines say nothing about the sung language.
+  const sung = text.split(/\r?\n/).map(line => line.replace(TIME, '').replace(WORD_TIME, '').trim()).filter(line => line && !isLyricCredit(line)).join('\n')
+  const body = /\p{L}/u.test(sung) ? sung : text
+  const hangul = (body.match(/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/g) ?? []).length
+  // Not the middle dot (U+30FB): Chinese credits use it too.
+  const kana = (body.match(/[\u3040-\u30fa\u30fc-\u30ff]/g) ?? []).length
   if (hangul >= 3 && hangul > kana) return 'ko'
-  if (/[\u3040-\u30ff]/.test(text)) return 'ja'
-  if (/[\u3400-\u9fff]/.test(text)) return 'zh-Hans'
-  if (/[A-Za-z]/.test(text)) return 'en'
-  return 'original'
+  if (kana) return 'ja'
+  const han = (body.match(/[\u3400-\u9fff]/g) ?? []).length
+  const latinWords = (body.match(/[A-Za-z]+(?:['\u2019][A-Za-z]+)*/g) ?? []).length
+  // An English song with a few Chinese characters left (a title, a note) is still English.
+  if (han && han * 2 >= latinWords) return 'zh-Hans'
+  if (latinWords) return 'en'
+  return han ? 'zh-Hans' : 'original'
 }
 
 export function languageFromFilename(name: string): { code: string; label: string; kind: LyricTrack['kind'] } {

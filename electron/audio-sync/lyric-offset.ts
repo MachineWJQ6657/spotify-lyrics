@@ -18,7 +18,7 @@ export interface PhoneLine {
   /** Index in the original lyric track. */
   index: number
   startMs: number
-  /** RomajiASR vocabulary labels for the line's leading supported words. */
+  /** RomajiASR vocabulary labels for the line's leading supported words ("a|b" alternatives, "?x" optional). */
   phones: string[]
 }
 
@@ -38,6 +38,8 @@ export interface AlignOptions {
   skipCostPerPhone?: number
   /** Extra cost of starting line k's first phone at frame f (weak timing prior). */
   onsetCost?: (line: number, frame: number) => number
+  /** Cost of passing over one optional ("?") phone. */
+  optionalSkipCost?: number
 }
 
 const ALTERNATES: Record<string, string[]> = {
@@ -71,27 +73,41 @@ export function logSoftmax(output: CtcOutput): LogProbabilities | null {
   return { frames, width, values, frameMax, blankId: output.blankId, vocabulary: output.vocabulary }
 }
 
+/** Labels a phone accepts: "a|b" lists alternatives; Japanese morae add known variants. */
 function phoneIds(phone: string, index: Map<string, number>) {
   const ids = new Set<number>()
-  for (const label of [phone, ...(ALTERNATES[phone] ?? []), ...(CONSONANT[phone] ? [CONSONANT[phone]] : [])]) {
-    const id = index.get(label)
-    if (id !== undefined) ids.add(id)
+  for (const base of phone.split('|')) {
+    for (const label of [base, ...(ALTERNATES[base] ?? []), ...(CONSONANT[base] ? [CONSONANT[base]] : [])]) {
+      const id = index.get(label)
+      if (id !== undefined) ids.add(id)
+    }
   }
   return [...ids]
 }
 
+/** "?x" marks a phone the singer may not articulate as its own mora. */
+export function isOptionalPhone(phone: string) { return phone.startsWith('?') }
+/** Phones that must be heard; lines are judged by these. */
+export function requiredPhones(phones: string[]) { return phones.filter(phone => !isOptionalPhone(phone)).length }
+
 /**
  * Monotonic forced alignment of several lines inside one window. Between and
  * around lines a filler state absorbs instrumentals and noise at a fixed cost;
- * any line may be skipped. Returns one entry per input line (null = skipped).
+ * any line may be skipped. Optional phones may be passed over at a small cost.
+ * Returns one entry per input line (null = skipped).
  */
 export function alignLines(logp: LogProbabilities, lines: PhoneLine[], options: AlignOptions = {}): Array<LineAlignment | null> {
   const fillerCost = options.fillerCost ?? 1.2
   const skipPerPhone = options.skipCostPerPhone ?? 1.4
+  const optionalCost = options.optionalSkipCost ?? 1.5
   const onsetCost = options.onsetCost
   const vocabulary = new Map(logp.vocabulary.map((label, id) => [label, id]))
-  const layout = lines.map(line => ({ ids: line.phones.map(phone => phoneIds(phone, vocabulary)), phones: line.phones }))
-  if (!layout.length || layout.some(line => !line.ids.length || line.ids.some(ids => !ids.length))) return lines.map(() => null)
+  const layout = lines.map(line => {
+    const optional = line.phones.map(isOptionalPhone)
+    const labels = line.phones.map(phone => isOptionalPhone(phone) ? phone.slice(1) : phone)
+    return { ids: labels.map(label => phoneIds(label, vocabulary)), labels, optional, required: optional.filter(item => !item).length }
+  })
+  if (!layout.length || layout.some(line => !line.ids.length || !line.required || line.ids.some(ids => !ids.length))) return lines.map(() => null)
   // State indices: filler(k) then 2n+1 CTC states per line, then a final filler.
   const fillerOf: number[] = [], firstOf: number[] = [], statesOf: number[] = []
   let size = 0
@@ -100,8 +116,15 @@ export function alignLines(logp: LogProbabilities, lines: PhoneLine[], options: 
   size += 1
   const T = logp.frames
   if (T < 2 || size * T > 30_000_000) return lines.map(() => null)
-  const skipCost = (k: number) => skipPerPhone * Math.max(1, layout[k].ids.length)
+  const skipCost = (k: number) => skipPerPhone * Math.max(1, layout[k].required)
   const fillerAfter = (k: number) => k + 1 < layout.length ? fillerOf[k + 1] : finalFiller
+  // Ways to leave line k: its last label or trailing blank, or earlier when the tail is optional.
+  const exits = layout.map((line, k) => {
+    const first = firstOf[k], n = line.ids.length
+    const list: Array<[number, number]> = [[first + 2 * n, 0], [first + 2 * n - 1, 0]]
+    for (let p = n - 1, cost = optionalCost; p > 0 && line.optional[p]; p -= 1, cost += optionalCost) list.push([first + 2 * p, cost], [first + 2 * p - 1, cost])
+    return list
+  })
   const NEG = -1e300
   let previous = new Float64Array(size).fill(NEG)
   let current = new Float64Array(size)
@@ -120,32 +143,42 @@ export function alignLines(logp: LogProbabilities, lines: PhoneLine[], options: 
     for (let k = 0; k < layout.length; k += 1) {
       const filler = fillerOf[k]
       let best = previous[filler], arg = filler
-      if (k > 0) {
-        const last = firstOf[k - 1] + statesOf[k - 1] - 1
-        if (previous[last] > best) { best = previous[last]; arg = last }
-        if (previous[last - 1] > best) { best = previous[last - 1]; arg = last - 1 }
-      }
+      if (k > 0) for (const [state, cost] of exits[k - 1]) if (previous[state] - cost > best) { best = previous[state] - cost; arg = state }
       current[filler] = best - fillerCost; back[base + filler] = arg
-      const first = firstOf[k], ids = layout[k].ids, phones = layout[k].phones
+      const first = firstOf[k], { ids, labels, optional } = layout[k]
+      const entry = onsetCost ? onsetCost(k, f) : 0
       for (let s = 0; s < statesOf[k]; s += 1) {
         const index = first + s
         let b = previous[index], a = index
-        if (s > 1 && previous[index - 1] > b) { b = previous[index - 1]; a = index - 1 }
-        if (s <= 1) {
-          // Entering the first phone (from the leading blank or the filler) is the line onset.
-          const entry = s === 1 && onsetCost ? onsetCost(k, f) : 0
-          if (s === 1 && previous[index - 1] - entry > b) { b = previous[index - 1] - entry; a = index - 1 }
-          if (previous[filler] - entry > b) { b = previous[filler] - entry; a = filler }
+        if (s === 0) {
+          if (previous[filler] > b) { b = previous[filler]; a = filler }
+        } else if (s % 2 === 0) {
+          if (previous[index - 1] > b) { b = previous[index - 1]; a = index - 1 }
+        } else {
+          const q = (s - 1) / 2
+          // Enter phone q after phone q-1, or over a run of optional phones before it.
+          for (let j = q, cost = 0; j >= 0; j -= 1, cost += optionalCost) {
+            // From the blank before phone j; the leading blank (j = 0) means the line starts here.
+            const blankState = first + 2 * j
+            const fromBlank = previous[blankState] - cost - (j === 0 ? entry : 0)
+            if (fromBlank > b) { b = fromBlank; a = blankState }
+            if (j === 0) {
+              const fromFiller = previous[filler] - cost - entry
+              if (fromFiller > b) { b = fromFiller; a = filler }
+            } else if (labels[j - 1] !== labels[q]) {
+              const labelState = first + 2 * (j - 1) + 1
+              if (previous[labelState] - cost > b) { b = previous[labelState] - cost; a = labelState }
+            }
+            if (j === 0 || !optional[j - 1]) break
+          }
         }
-        if (s % 2 === 1 && s >= 3 && phones[(s - 1) / 2] !== phones[(s - 3) / 2] && previous[index - 2] > b) { b = previous[index - 2]; a = index - 2 }
         current[index] = b + (s % 2 === 0 ? blank : emit(f, ids[(s - 1) / 2])); back[base + index] = a
       }
     }
     {
-      const k = layout.length - 1, last = firstOf[k] + statesOf[k] - 1
+      const k = layout.length - 1
       let best = previous[finalFiller], arg = finalFiller
-      if (previous[last] > best) { best = previous[last]; arg = last }
-      if (previous[last - 1] > best) { best = previous[last - 1]; arg = last - 1 }
+      for (const [state, cost] of exits[k]) if (previous[state] - cost > best) { best = previous[state] - cost; arg = state }
       current[finalFiller] = best - fillerCost; back[base + finalFiller] = arg
     }
     // Same-frame skips: filler k -> filler k+1 without aligning line k.
@@ -177,10 +210,15 @@ export function alignLines(logp: LogProbabilities, lines: PhoneLine[], options: 
     }
     state = pointer
   }
-  return found.map((item, k) => item ? {
-    index: lines[k].index, onsetFrame: item.onset, endFrame: item.end, phones: layout[k].ids.length,
-    score: [...item.best.values()].reduce((sum, value) => sum + value, 0) / layout[k].ids.length,
-  } : null)
+  return found.map((item, k) => {
+    if (!item) return null
+    // Required phones always count; optional ones only when they were heard.
+    const counted = layout[k].ids.length - layout[k].optional.filter((flag, p) => flag && !item.best.has(p)).length
+    return {
+      index: lines[k].index, onsetFrame: item.onset, endFrame: item.end, phones: layout[k].required,
+      score: [...item.best.values()].reduce((sum, value) => sum + value, 0) / Math.max(1, counted),
+    }
+  })
 }
 
 export interface WindowGeometry {
@@ -210,15 +248,19 @@ export function timingPrior(distanceMs: number) {
   return 0.05 * seconds
 }
 export const MIN_LINE_SCORE = -1.2
+/** Chinese / English lines matched through approximate morae score lower when
+ * correctly placed: measured 2026-11-12 on 12 songs, lines scoring >= -1.5
+ * fell within 350 ms of their song's offset 90% of the time (below -1.8: none). */
+export const PRONOUNCED_MIN_LINE_SCORE = -1.5
 export const MIN_LINE_PHONES = 4
 
 /** Lines worth aligning in a window: expected time within the window +/- slack. */
 export function linesForWindow(lines: PhoneLine[], startMediaMs: number, endMediaMs: number, slackMs = WINDOW_SLACK_MS, expectedOffsetMs = 0) {
-  return lines.filter(line => line.phones.length >= 3 && line.startMs + expectedOffsetMs >= startMediaMs - slackMs && line.startMs + expectedOffsetMs <= endMediaMs + slackMs)
+  return lines.filter(line => requiredPhones(line.phones) >= 3 && line.startMs + expectedOffsetMs >= startMediaMs - slackMs && line.startMs + expectedOffsetMs <= endMediaMs + slackMs)
 }
 
 /** Located lines in one window, as sung-vs-file deltas (positive = file is early). */
-export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: WindowGeometry, options: AlignOptions & { expectedOffsetMs?: number } = {}): LineDelta[] {
+export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: WindowGeometry, options: AlignOptions & { expectedOffsetMs?: number; minScore?: number } = {}): LineDelta[] {
   const logp = logSoftmax(output)
   const expectedFrames = Math.floor((output.geometry.sampleCount - geometry.receptiveFieldSamples) / geometry.strideSamples) + 1
   if (!logp || logp.frames !== expectedFrames || output.geometry.sampleRate !== geometry.sampleRate) return []
@@ -239,7 +281,7 @@ export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: W
     const endMs = geometry.startMediaMs + frameMs(item.endFrame)
     // A line cut by the window edge has an unreliable onset.
     if (sungMs < geometry.startMediaMs + 400 || endMs > endMediaMs - 300) return
-    if (item.score < MIN_LINE_SCORE || item.phones < MIN_LINE_PHONES) return
+    if (item.score < (options.minScore ?? MIN_LINE_SCORE) || item.phones < MIN_LINE_PHONES) return
     deltas.push({ index: line.index, lineMs: line.startMs, sungMs: Math.round(sungMs), deltaMs: Math.round(sungMs - line.startMs), score: item.score, phones: item.phones })
   })
   return deltas

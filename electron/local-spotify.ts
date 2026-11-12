@@ -142,8 +142,37 @@ export function advanceStartupClockGate(previous: StartupClockGate | null, state
   }
 }
 
+/** Longest wait for the worker's ordered native shutdown before terminating it anyway. */
+export const WORKER_SHUTDOWN_TIMEOUT_MS = 2000
+
+/**
+ * Stop a local Spotify worker without crashing the app: the worker first stops
+ * libspotifyctl's event thread and frees the client ("shutdown-done"), then it
+ * is terminated. An already exited or wedged worker is terminated after at
+ * most WORKER_SHUTDOWN_TIMEOUT_MS.
+ */
+export async function stopWorker(worker: Pick<Worker, 'postMessage' | 'on' | 'off' | 'terminate'>, timeoutMs = WORKER_SHUTDOWN_TIMEOUT_MS) {
+  await new Promise<void>(resolve => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      worker.off('message', onMessage)
+      worker.off('exit', finish)
+      resolve()
+    }
+    const onMessage = (message: { type?: string } | null) => { if (message?.type === 'shutdown-done') finish() }
+    const timer = setTimeout(finish, timeoutMs)
+    worker.on('message', onMessage)
+    worker.on('exit', finish)
+    try { worker.postMessage({ type: 'shutdown' }) } catch { finish() }
+  })
+  await worker.terminate().catch(() => undefined)
+}
+
 interface WorkerMessage {
-  type: 'state' | 'closed' | 'response' | 'fatal' | 'status'
+  type: 'state' | 'closed' | 'response' | 'fatal' | 'status' | 'shutdown-done'
   state?: LocalState | null
   requestId?: number
   ok?: boolean
@@ -298,7 +327,7 @@ export class LocalSpotifyService {
     const worker = this.worker
     this.worker = null
     this.rejectPending('本地 Spotify 服务已关闭')
-    if (worker) await worker.terminate().catch(() => undefined)
+    if (worker) await stopWorker(worker)
     this.state = null
     this.coverTrackId = ''
     this.coverUrl = ''
@@ -332,7 +361,20 @@ export class LocalSpotifyService {
         const { performance } = require('node:perf_hooks')
         const { SpotifyClient } = require(workerData.modulePath)
         const koffi = require(workerData.koffiPath)
+        const nodePath = require('node:path')
         const user32 = koffi.load('user32.dll')
+        // libspotifyctl raises its events from its own native thread; koffi parks
+        // that thread until this JS thread runs the callback. Its close()
+        // unregisters the callbacks before stopping the thread, and terminating
+        // the worker leaves the thread calling into a dead environment: both make
+        // koffi abort the whole app (seen as a fast-fail crash on quit, 0.4.58)
+        // or fault inside libspotifyctl.dll (0.4.51). Stop the thread first, off
+        // this JS thread (a synchronous stop deadlocks against a callback in
+        // flight), and only then unregister and free.
+        const spotifyctl = koffi.load(nodePath.join(nodePath.dirname(workerData.modulePath), 'prebuilt', 'libspotifyctl.dll'))
+        const stopNativeThread = spotifyctl.func('void spotifyctl_stop(void *c)')
+        let pollTimer = null
+        let shuttingDown = false
         const sendNotifyMessage = user32.func('bool __stdcall SendNotifyMessageW(intptr_t hWnd, uint32_t Msg, uintptr_t wParam, intptr_t lParam)')
         let client = null
         let lastState = null
@@ -491,7 +533,7 @@ export class LocalSpotifyService {
           })
           client.start()
           sendState(client.latestState(), true)
-          setInterval(() => {
+          pollTimer = setInterval(() => {
             try {
               const fresh = client.latestState()
               sendState(fresh)
@@ -500,7 +542,28 @@ export class LocalSpotifyService {
         } catch (error) {
           parentPort.postMessage({ type: 'fatal', error: error && error.message ? error.message : String(error) })
         }
+        const shutdown = () => {
+          if (shuttingDown) return
+          shuttingDown = true
+          if (pollTimer) clearInterval(pollTimer)
+          if (pendingStateTimer) clearTimeout(pendingStateTimer)
+          if (nativeBoundaryTimer) clearTimeout(nativeBoundaryTimer)
+          pollTimer = null; pendingStateTimer = null; nativeBoundaryTimer = null
+          const done = () => parentPort.postMessage({ type: 'shutdown-done' })
+          const current = client
+          client = null
+          if (!current || !current._handle) return done()
+          current.removeAllListeners()
+          try {
+            stopNativeThread.async(current._handle, () => {
+              // The event thread has been joined: nothing can call back now.
+              setTimeout(() => { try { current.close() } catch (_) {} done() }, 20)
+            })
+          } catch (_) { done() }
+        }
         parentPort.on('message', message => {
+          if (message && message.type === 'shutdown') return shutdown()
+          if (shuttingDown) return
           const reply = (ok, error) => parentPort.postMessage({ type: 'response', requestId: message.requestId, ok, error })
           let attemptedSkipTrack = ''
           try {
@@ -750,7 +813,7 @@ export class LocalSpotifyService {
     this.worker = null
     if (worker) {
       worker.removeAllListeners()
-      void worker.terminate().catch(() => undefined)
+      void stopWorker(worker)
     }
     this.state = null
     this.listener?.(null)

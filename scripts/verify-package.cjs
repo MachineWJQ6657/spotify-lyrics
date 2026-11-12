@@ -67,6 +67,11 @@ const checks = {
   // contextual bar with an overlay-settings shortcut, and no paused dimming capping the text opacity.
   overlayLockInteraction: main.includes('function toggleOverlayLock(') && main.includes('OVERLAY_CONTROLS_DWELL_MS') && main.includes('window:show-section')
     && renderer.includes('悬浮窗设置') && renderer.includes('syllable:panel-tab') && !/\.overlay-shell\.paused/.test(rendererCss),
+  // 0.4.59 crash fixes: stop libspotifyctl's event thread off the JS thread before terminating its worker,
+  // never touch destroyed windows from timers, log main-process errors instead of a modal dialog, quit on request.
+  orderedNativeShutdown: native.includes('stopNativeThread.async(') && native.includes("type: 'shutdown-done'") && native.includes('function stopWorker(') && main.includes('QUIT_FLUSH_BUDGET_MS'),
+  crashHardening: main.includes('function isShown(') && /process\.on\(["']uncaughtException["']/.test(main) && /["']error\.log["']/.test(main)
+    && /["']--syllable-quit["']/.test(main) && /["']session-end["']/.test(main),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

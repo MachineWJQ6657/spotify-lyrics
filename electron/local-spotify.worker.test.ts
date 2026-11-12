@@ -4,11 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalSpotifyService } from './local-spotify'
 
 const captured = vi.hoisted(() => ({ sources: [] as string[] }))
-vi.mock('node:worker_threads', () => ({ Worker: class {
-  constructor(source: string) { captured.sources.push(source) }
-  on() { return this }
-  terminate() { return Promise.resolve(0) }
-} }))
+vi.mock('node:worker_threads', async () => {
+  const { EventEmitter: Emitter } = await import('node:events')
+  return { Worker: class extends Emitter {
+    constructor(source: string) { super(); captured.sources.push(source) }
+    // close() asks the worker to stop its native thread; this host stub exits instead.
+    postMessage(message: { type?: string }) { if (message?.type === 'shutdown') queueMicrotask(() => this.emit('exit', 0)) }
+    terminate() { return Promise.resolve(0) }
+  } }
+})
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); captured.sources.length = 0 })
 
 // Execute the ACTUAL generated Worker body with only native bindings replaced.
@@ -26,17 +30,25 @@ function workerFixture() {
   port.postMessage = message => { messages.push(message as typeof messages[number]) }
   let raw = { title: '晴る', artist: 'ヨルシカ', album: '晴る', positionMs: 14350, durationMs: 276701, statusName: 'PLAYING' }
   let client!: EventEmitter
+  const nativeCalls: string[] = []
   class Client extends EventEmitter {
+    _handle = { native: true }
     constructor() { super(); client = this }
     start() {}
     latestState() { return raw }
+    close() { nativeCalls.push('close') }
   }
+  const nativeStop = Object.assign(() => true, { async: (handle: unknown, done: (error: unknown) => void) => {
+    nativeCalls.push(handle ? 'stop-async' : 'stop-async-without-handle')
+    setTimeout(() => { nativeCalls.push('stopped'); done(null) }, 30)
+  } })
   runInNewContext(captured.sources.at(-1)!, {
     require: (name: string) => {
       if (name === 'node:worker_threads') return { parentPort: port, workerData: { modulePath: 'native-client', koffiPath: 'native-koffi' } }
       if (name === 'node:perf_hooks') return { performance: { now: () => Date.now() } }
       if (name === 'native-client') return { SpotifyClient: Client }
-      if (name === 'native-koffi') return { load: () => ({ func: () => () => true }) }
+      if (name === 'native-koffi') return { load: () => ({ func: (signature: string) => signature.includes('spotifyctl_stop') ? nativeStop : () => true }) }
+      if (name === 'node:path') return { join: (...parts: string[]) => parts.join('/'), dirname: (value: string) => value.split('/').slice(0, -1).join('/') || '.' }
       throw new Error(`Unexpected native Worker dependency: ${name}`)
     }, Date, Buffer, setTimeout, clearTimeout, setInterval, clearInterval,
   })
@@ -44,8 +56,35 @@ function workerFixture() {
   const emit = (patch: Partial<typeof raw>) => { raw = { ...raw, ...patch }; client.emit('stateChanged', raw) }
   emit({ positionMs: 19350 })
   messages.length = 0
-  return { emit, messages, service }
+  return { emit, messages, service, port, nativeCalls, client: () => client }
 }
+
+describe('native Worker shutdown', () => {
+  it('stops the native event thread asynchronously before unregistering callbacks and freeing the client', async () => {
+    const { port, messages, nativeCalls, client, service } = workerFixture()
+    port.emit('message', { type: 'shutdown' })
+    // Off the JS thread: nothing closed yet, and the poll timer no longer publishes.
+    expect(nativeCalls).toEqual(['stop-async'])
+    expect(client().listenerCount('stateChanged')).toBe(0)
+    vi.advanceTimersByTime(29)
+    expect(nativeCalls).toEqual(['stop-async'])
+    vi.advanceTimersByTime(1)
+    expect(nativeCalls).toEqual(['stop-async', 'stopped'])
+    expect(messages.some(message => message.type === 'shutdown-done')).toBe(false)
+    vi.advanceTimersByTime(20)
+    expect(nativeCalls).toEqual(['stop-async', 'stopped', 'close'])
+    expect(messages.filter(message => message.type === 'shutdown-done')).toHaveLength(1)
+    messages.length = 0
+    vi.advanceTimersByTime(5000)
+    expect(messages.filter(message => message.type === 'state')).toHaveLength(0)
+    // A second request and later commands are ignored, not run against a freed client.
+    port.emit('message', { type: 'shutdown' })
+    port.emit('message', { type: 'command', command: 'next', requestId: 7 })
+    expect(nativeCalls.filter(call => call === 'stop-async')).toHaveLength(1)
+    expect(messages.filter(message => message.type === 'response')).toHaveLength(0)
+    await service.close()
+  })
+})
 
 describe('native boundary Worker timer', () => {
   it('releases a persistent zero within250 ms even without another native event, with no added lag', async () => {

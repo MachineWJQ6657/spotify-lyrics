@@ -2,12 +2,13 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.58 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.57-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.59 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.58-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (80 checks).
-  - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (82 checks).
+  - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
+  - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
   - Romanized titles are verified against native kana.
@@ -24,6 +25,30 @@
 - **Test on the secondary display only:** launch every isolated instance and every `--syllable-qa-view` run with `--syllable-secondary-test`. The user asked that tests never disturb the primary screen.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.59 deployed: crash on quit (koffi abort), destroyed-window timers, error log
+
+- `release/current` = **0.4.59** (asar SHA256 `697c2e21c58fafe888dfa3ca3d340ca0224ffae8e06c4b3c216c1d93f530c0aa`, verifier 82/82, 1091 tests). Rollback: `release/current-0.4.58-backup-20261112`; the 0.4.57 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0459`.
+- **Evidence:**
+  - Application event 1000 / WER dump: Syllable 0.4.58 (a QA instance) died in `koffi.node` with `0xc0000409` (`FAST_FAIL_FATAL_APP_EXIT`, i.e. abort) 63 s after start. It had hung for ~50 s after its QA result.
+  - An earlier 0.4.51 crash (2026-11-11 20:42, the user's instance) was `0xc0000005` in `libspotifyctl.dll`.
+- **Cause:**
+  - libspotifyctl raises events on its own native thread. koffi queues each callback to the JS thread and blocks the native thread until it has run (koffi callbacks.md, "Asynchronous callbacks").
+  - `LocalSpotifyService.close()` and `handleWorkerFailure()` terminated the worker without stopping that thread, so a queued callback hit a dead environment and koffi aborted.
+  - libspotifyctl's own `close()` unregisters the callbacks before stopping the thread. A synchronous `spotifyctl_stop` on the JS thread deadlocks against a callback in flight, which is the old "close() can hang".
+- **Fix:**
+  - The worker handles `{type:'shutdown'}`: it clears its timers and listeners, calls `spotifyctl_stop.async(handle)` (its own `koffi.load` of the same DLL), then after the callback (+20 ms) `client.close()`, and posts `shutdown-done`.
+  - `stopWorker()` waits for `shutdown-done`, `exit` or 2 s, then terminates the worker. `before-quit` races the whole flush against `QUIT_FLUSH_BUDGET_MS` = 4000.
+  - Verified with the real library in plain Node: the async stop finishes in 3–4 ms with no error.
+- **"Object has been destroyed" dialog (seen by the user):** the QA exit path (`app.exit`, which skips before-quit) destroyed the windows while the 24 ms hover poll was still scheduled, and `overlayWindow?.isVisible()` threw. Production-path checks now use `isShown()` / `hideIfAlive()`; the QA exit stops tracking and closes the media worker first.
+- **Hardening:**
+  - `uncaughtException`, `unhandledRejection`, `child-process-gone` and `render-process-gone` are logged to `error.log` (`electron/error-log.ts`) instead of Electron's modal dialog.
+  - `--syllable-quit` via the second-instance handoff triggers a graceful quit (a second instance started with the switch never starts the app).
+  - `session-end` (Windows logoff/shutdown) flushes storage and quits.
+- **Tests:** `local-spotify-shutdown.test.ts` (stopWorker) and `error-log.test.ts`. The generated-worker test drives `shutdown` and asserts stop-async → stopped → close → shutdown-done, with no later polls or commands.
+- **Notes:**
+  - The bundler normalizes quotes (`'x'` → `"x"`), so verifier string checks must be quote-agnostic.
+  - The worker source lives in the `chunks/local-spotify-*.js` chunk (`native` in the verifier), not `main.js`.
 
 ## 2026-11-12 / 0.4.58 deployed: overlay text opacity fix, lock-only interaction
 

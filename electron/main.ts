@@ -10,6 +10,7 @@ import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { inspectWindowRegion } from './windows-window-region'
 import { TransportGate, type TransportBackend } from './transport-gate'
+import { createErrorLog } from './error-log'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
 import { PlaybackDiagnostics } from './playback-diagnostics'
@@ -132,6 +133,24 @@ const headlessAudioQa = process.argv.includes('--syllable-qa-headless') && Boole
   && (qaView === 'audio-sync' || liveAudioQa || qaView === 'performance')
   && process.argv.some(value => value.startsWith('--user-data-dir='))
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
+// Main-process errors go to <userData>/error.log instead of Electron's modal
+// "A JavaScript error occurred" dialog: a timer that throws (for example on a
+// window destroyed during quit) must not interrupt the desktop, and a crash
+// the user notices must leave a trace to diagnose.
+const writeErrorLog = createErrorLog(() => { try { return path.join(app.getPath('userData'), 'error.log') } catch { return null } })
+const logMainError = (kind: string, error: unknown) => {
+  console.error(`[${kind}]`, error)
+  qaLog(`main error: ${kind}: ${error instanceof Error ? error.message : String(error)}`)
+  void writeErrorLog(kind, error)
+}
+process.on('uncaughtException', error => logMainError('uncaughtException', error))
+process.on('unhandledRejection', reason => logMainError('unhandledRejection', reason))
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason !== 'clean-exit') logMainError('child-process-gone', `${details.type} ${details.reason} exitCode=${details.exitCode}${details.name ? ` name=${details.name}` : ''}`)
+})
+app.on('render-process-gone', (_event, contents, details) => {
+  if (details.reason !== 'clean-exit') logMainError('render-process-gone', `${contents.getURL().split('#')[1] || 'main'} ${details.reason} exitCode=${details.exitCode}`)
+})
 let qaVocalCaptures = 0
 let qaVocalAnalyses = 0
 const loggedToolWindowStyles = new Set<string>()
@@ -199,6 +218,15 @@ function publishOverlayVisibility(visible: boolean) {
 }
 
 const overlayControlsSize = { width: 290, height: 40 }
+
+/** Shown and not destroyed. Never throws for a window torn down under a pending timer. */
+function isShown(window: BrowserWindow | null | undefined): window is BrowserWindow {
+  return Boolean(window && !window.isDestroyed() && window.isVisible())
+}
+
+function hideIfAlive(window: BrowserWindow | null | undefined) {
+  if (window && !window.isDestroyed()) window.hide()
+}
 
 function secondaryDisplay() {
   const primary = screen.getPrimaryDisplay()
@@ -277,7 +305,7 @@ function stopOverlayControlsVisibilityTracking() {
   overlayControlsDwellTimer = null
   overlayHovered = false
   overlayControlsHovered = false
-  overlayControlsWindow?.hide()
+  hideIfAlive(overlayControlsWindow)
 }
 
 function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boolean) {
@@ -292,12 +320,12 @@ function updateOverlayControlsHover(sender: Electron.WebContents, hovered: boole
 function refreshTransparentHoverTracking() {
   if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
   transparentHoverTimer = null
-  if (!overlayWindow?.isVisible() || quitting) return
+  if (quitting || !isShown(overlayWindow)) return
   // Forwarded DOM movement gives immediate entry/leave. This independent
   // native fallback also works when Chromium misses movement after a wake.
   const tick = () => {
     transparentHoverTimer = null
-    if (!overlayWindow?.isVisible() || quitting) return
+    if (quitting || !isShown(overlayWindow)) return
     const cursor = screen.getCursorScreenPoint()
     sampleTransparentHover(cursor)
     const pollMs = overlayInputState({ bounds: overlayWindow.getBounds(), cursor, regions: overlayHitRegions,
@@ -308,11 +336,11 @@ function refreshTransparentHoverTracking() {
 }
 
 function sampleTransparentHover(cursor: Electron.Point) {
-    if (!overlayWindow?.isVisible() || !overlayControlsWindow || quitting) return
+    if (quitting || !isShown(overlayWindow) || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
     applyOverlayMouseIgnore(overlayInputTransparent(cursor))
     const lyricsHover = isOverOverlayRegion(cursor, overlayWindow.getBounds(), overlayHitRegions)
     const controlsBounds = overlayControlsWindow.getBounds()
-    const controlsHover = overlayControlsWindow.isVisible() && isOverOverlayRegion(cursor, controlsBounds,
+    const controlsHover = isShown(overlayControlsWindow) && isOverOverlayRegion(cursor, controlsBounds,
       [{ x: 0, y: 0, width: controlsBounds.width, height: controlsBounds.height }])
     if (lyricsHover === overlayHovered && controlsHover === overlayControlsHovered) return
     overlayHovered = lyricsHover
@@ -324,12 +352,12 @@ function updateControlsVisibility() {
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
   if (headlessAudioQa) return
-  if (!overlayWindow?.isVisible() || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
+  if (!isShown(overlayWindow) || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
   if (overlayHovered || overlayControlsHovered) {
     if (overlayPointerDrag || Date.now() < overlayControlsSuppressedUntil) return
     if (!overlayControlsWindow.isVisible()) {
       const reveal = () => {
-        if (!overlayControlsWindow || overlayControlsWindow.isDestroyed() || overlayControlsWindow.isVisible() || !overlayWindow?.isVisible()) return
+        if (!overlayControlsWindow || overlayControlsWindow.isDestroyed() || overlayControlsWindow.isVisible() || !isShown(overlayWindow)) return
         syncOverlayControlsBounds()
         overlayControlsWindow.showInactive()
         raiseOverlayControls()
@@ -353,7 +381,7 @@ function updateControlsVisibility() {
   // hide it without flickering while the pointer crosses the gap.
   overlayControlsHideTimer = setTimeout(() => {
     overlayControlsHideTimer = null
-    if (!overlayHovered && !overlayControlsHovered && !overlayPointerDrag) overlayControlsWindow?.hide()
+    if (!overlayHovered && !overlayControlsHovered && !overlayPointerDrag) hideIfAlive(overlayControlsWindow)
   }, Math.max(600, controlsRecoveryUntil - Date.now()))
 }
 
@@ -377,7 +405,7 @@ async function recoverOverlayControls() {
 
 function suppressOverlayControls(durationMs = 180) {
   overlayControlsSuppressedUntil = Math.max(overlayControlsSuppressedUntil, Date.now() + durationMs)
-  if (!overlayPointerDrag) overlayControlsWindow?.hide()
+  if (!overlayPointerDrag) hideIfAlive(overlayControlsWindow)
 }
 
 function syncOverlayControlsBounds() {
@@ -517,7 +545,7 @@ function requestOverlayLayout(reason: string) {
   const generation = overlayLayout.requestLayout()
   overlayShapeKey = ''
   overlayHitRegions = []
-  overlayControlsWindow?.hide()
+  hideIfAlive(overlayControlsWindow)
   if (!overlayWindow || overlayWindow.isDestroyed()) return
   applyOverlayShape()
   applyOverlayMouseIgnore(overlayInputTransparent())
@@ -556,7 +584,7 @@ function recoverOverlayDisplay(reason: string) {
       // The native layered surface must rejoin the new display compositor.
       // A showInactive on an already visible HWND is a no-op; actually unmap
       // for one compositor frame. Preserve hide/close intent during that gap.
-      const reshow = (overlayWindow?.isVisible() || overlayRemapPending) && overlayShowRequested
+      const reshow = (isShown(overlayWindow) || overlayRemapPending) && overlayShowRequested
       if (reshow) {
         overlayRemapPending = true
         overlayWindow?.hide()
@@ -602,7 +630,7 @@ function publishOverlayBounds(updateShape = true) {
   if (updateShape && !overlayDragSettleTimer) applyOverlayShape()
   if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) syncOverlayControlsBounds()
   overlayWindow.webContents.send('overlay:bounds-changed', bounds)
-  mainWindow?.webContents.send('overlay:bounds-changed', bounds)
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('overlay:bounds-changed', bounds)
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
   boundsSaveTimer = setTimeout(() => {
     boundsSaveTimer = null
@@ -705,6 +733,13 @@ function createWindows() {
         const source = sources.find(item => item.display_id === String(secondaryDisplay().id)) ?? sources[0]
         callback(source ? { video: source, audio: 'loopback' } : {})
       }).catch(() => callback({}))
+  })
+  // Windows logoff/shutdown kills the process soon after: persist now and
+  // let the close below go through instead of hiding to the tray.
+  mainWindow.on('session-end', () => {
+    quitting = true
+    mainWindow?.webContents.session.flushStorageData()
+    app.quit()
   })
   mainWindow.on('close', event => {
     if (quitting) return
@@ -1288,7 +1323,13 @@ function createWindows() {
       }
       quitting = true
       if (qaView?.startsWith('overlay-restore') || qaView === 'overlay-display-recovery' || qaView === 'overlay-startup') app.quit()
-      else app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
+      else {
+        // app.exit() skips before-quit: stop window timers and the native
+        // media worker here so nothing runs against destroyed windows.
+        stopOverlayControlsVisibilityTracking()
+        await Promise.race([localSpotify?.close() ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 3000))])
+        app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
+      }
     }, 7000)
   }
 
@@ -1621,10 +1662,17 @@ async function poll() {
   } finally { pollTimer = setTimeout(() => void poll(), nextPollMs) }
 }
 
-if (!hasSingleInstanceLock) app.quit()
-else app.on('second-instance', () => { revealMainWindow('cursor') })
+// `Syllable.exe --syllable-quit` asks a running instance to quit through the
+// normal before-quit flush (settings, overlay bounds, native media shutdown)
+// instead of being killed, e.g. before an update replaces its files.
+const quitRequest = process.argv.includes('--syllable-quit')
+if (!hasSingleInstanceLock || quitRequest) app.quit()
+else app.on('second-instance', (_event, argv) => {
+  if (argv.includes('--syllable-quit')) { qaLog('quit requested by another instance'); quitting = true; app.quit(); return }
+  revealMainWindow('cursor')
+})
 
-if (hasSingleInstanceLock) app.whenReady().then(async () => {
+if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   qaLog(`startup secondary-test=${secondaryMonitorQa}; displays=${JSON.stringify(screen.getAllDisplays().map(display => ({ id: display.id, primary: display.id === screen.getPrimaryDisplay().id, workArea: display.workArea, scaleFactor: display.scaleFactor })))}`)
   ipcMain.handle('auth:status', () => ({ connected: spotify.isConnected(), localConnected: localSpotify?.hasTrack() ?? false }))
   ipcMain.handle('auth:login', async (_event, clientId: string) => { await spotify.login(clientId); return { connected: true } })
@@ -1832,7 +1880,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) qaLog(`overlay controls anchor: ${JSON.stringify(overlayControlsAnchor)}`)
       // Freeze a visible pill so it never follows line wrapping while the user
       // is aiming at a button. The newest anchor applies the next time it opens.
-      if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil && !overlayControlsWindow?.isVisible()) syncOverlayControlsBounds()
+      if (!overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil && !isShown(overlayControlsWindow)) syncOverlayControlsBounds()
     }
     return true
   })
@@ -1864,7 +1912,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     if (!overlayMovable || (event.sender !== overlayWindow?.webContents && event.sender !== overlayControlsWindow?.webContents) || !overlayWindow) return
     cancelOverlayDisplayRecovery()
     const fromControls = event.sender === overlayControlsWindow?.webContents
-    const controlsWereVisible = overlayControlsWindow?.isVisible() ?? false
+    const controlsWereVisible = isShown(overlayControlsWindow)
     overlayPointerDrag = { cursor: screen.getCursorScreenPoint(), bounds: overlayWindow.getBounds(), fromControls, controlsWereVisible }
     applyOverlayMouseIgnore(false)
     if (controlsWereVisible && overlayControlsWindow) {
@@ -2013,6 +2061,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
 app.on('activate', () => { revealMainWindow() })
 app.on('window-all-closed', () => app.quit())
+/** Longest the quit sequence waits for saves and native shutdown (worker stop: 2 s). */
+const QUIT_FLUSH_BUDGET_MS = 4000
+
 app.on('before-quit', event => {
   quitting = true
   vocalSync.clear()
@@ -2034,11 +2085,17 @@ app.on('before-quit', event => {
     ? overlayWindow.getBounds() : stableOverlayBounds)
   const save = overlayBoundsRestored && overlayNativeRestored && finalOverlayBounds
     ? windowBoundsStore.set(finalOverlayBounds) : Promise.resolve()
-  void Promise.all([
+  // Never let a wedged native shutdown keep the app alive: quit proceeds after
+  // QUIT_FLUSH_BUDGET_MS even if a worker is stuck inside a native call.
+  const budget = new Promise<void>(resolve => setTimeout(() => {
+    console.warn(`Quit flush exceeded ${QUIT_FLUSH_BUDGET_MS} ms; exiting anyway`)
+    resolve()
+  }, QUIT_FLUSH_BUDGET_MS).unref())
+  void Promise.race([Promise.all([
     save.catch(error => console.error('Final overlay bounds save failed:', error)),
     closeNative.catch(error => console.error('Native media shutdown failed:', error)),
     closeCtc.catch(error => console.error('Local phoneme shutdown failed:', error))
-  ]).finally(() => {
+  ]), budget]).finally(() => {
     quitFlushed = true
     if (qaCapturePath) app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)
     else app.quit()

@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.57 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.56-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.58 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.57-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (79 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (80 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -21,8 +21,27 @@
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Styles:** `src/styles.css` holds only what every window shares (reset, script font stacks) plus the overlay and hover controls; `scripts/verify-overlay-*.cjs` read it. The main window's design is `src/app.css` (tokens `--sy-*`), imported by `App.tsx`, so it ships as the App chunk's CSS and the overlay windows never load it.
+- **Test on the secondary display only:** launch every isolated instance and every `--syllable-qa-view` run with `--syllable-secondary-test`. The user asked that tests never disturb the primary screen.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.58 deployed: overlay text opacity fix, lock-only interaction
+
+- `release/current` = **0.4.58** (asar SHA256 `8e8749d7079acbad1b7908c7112fb1abe7b3e7b900eb4011485772a0918e5c4b`, verifier 80/80, 1083 tests). Rollback: `release/current-0.4.57-backup-20261112`; the 0.4.56 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0458`.
+- **Bug:** 0.4.57's `.overlay-shell.paused` halved `.overlay-lyrics` opacity. The user saw dim text (Spotify had been paused), and the 文字透明度 slider could not exceed 50%. The rule is removed, and the verifier rejects `.overlay-shell.paused`.
+- **One lock:**
+  - Locked = not movable + click-through (as before); unlocked = interactive.
+  - `overlay:restore` calls `setOverlayClickThrough(false)`, so click-through follows the lock. An old "unlocked but click-through" preference had no remaining control and is dropped.
+  - `toggleOverlayLock()` backs Ctrl+Alt+M and the tray item: locked → `recoverOverlayControls()`, unlocked → lock.
+  - The click-through IPC remains for compatibility; nothing in the UI calls it.
+- **Hover dwell:** `updateControlsVisibility` delays the bar by `OVERLAY_CONTROLS_DWELL_MS` (350) only when the lyrics are input-transparent and no recovery window is active. `overlay-unlock` QA gained `hover-dwell` (bar not yet visible right after the sample), and `overlay-controls` QA waits for the dwell.
+- **Bar:** a flex row, window 290×40 (`overlayControlsSize`; the renderer's anchor width matches). Order: drag (unlocked only) | prev | play | next | divider | lock | 悬浮窗设置 | open | close. 悬浮窗设置 calls `window.show('overlay-settings')`. Main sends `window:show-section`; `App` sets the tab key and expands the panel, then dispatches `syllable:panel-tab`.
+- **Unlocked gestures:** Ctrl+wheel on the lyrics (±2 px, 34–88), double-click opens the client (existing drag-end guard), and the hover outline is `.overlay-shell:not(.position-locked):hover`.
+- **QA notes:**
+  - Internal QA views need `--syllable-qa-capture=<png>`, or the QA block never runs.
+  - `shortcut` fails while the user's instance holds Ctrl+Alt+U.
+  - `overlay-controls`'s DOM-dispatched `hover` also fails on 0.4.57 (the native sampler ignores DOM hover).
+  - Tested in packaged form on the secondary display: Ctrl+wheel 52→56→52, double-click opens, the settings button lands on the 悬浮窗 tab, no console errors.
 
 ## 2026-11-12 / 0.4.57 deployed: overlay fit, title card, boundary-timed lyrics
 

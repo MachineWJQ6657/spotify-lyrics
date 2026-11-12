@@ -85,7 +85,12 @@ contextBridge.exposeInMainWorld('syllable', {
       ipcRenderer.on('window:visibility-changed', handler)
       return () => ipcRenderer.removeListener('window:visibility-changed', handler)
     },
-    show: () => ipcRenderer.invoke('window:show'),
+    show: (section?: 'overlay-settings') => ipcRenderer.invoke('window:show', section),
+    onShowSection: (callback: (section: string) => void) => {
+      const handler = (_: unknown, section: string) => callback(section)
+      ipcRenderer.on('window:show-section', handler)
+      return () => ipcRenderer.removeListener('window:show-section', handler)
+    },
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close')

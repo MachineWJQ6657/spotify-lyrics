@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react'
 import { finishPointerDrag } from './lib/pointer-drag'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { usePosition } from './hooks/usePosition'
@@ -36,7 +36,6 @@ export function Overlay() {
   const content = overlayContent(playback, activeLyrics, line)
   const titlePresentation = content.kind === 'title' ? scriptPresentation(content.title, `${playback?.track?.artist ?? ''} ${playback?.track?.album ?? ''}`, base?.language) : null
   const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), content.kind, content.kind === 'title' ? [content.title, content.subtitle] : line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
-  const paused = Boolean(playback?.track) && !playback?.isPlaying
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
   const layoutGeneration = useRef(0)
   const [layoutRevision, setLayoutRevision] = useState(0)
@@ -120,6 +119,12 @@ export function Overlay() {
     }
     window.syllable.overlay.moveTo(event.screenX, event.screenY)
   }
+  // Unlocked: Ctrl + wheel over the lyrics resizes the text in 2 px steps.
+  const adjustFontSize = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (settings.positionLocked || !event.ctrlKey || !event.deltaY) return
+    const fontSize = Math.max(34, Math.min(88, settings.fontSize + (event.deltaY < 0 ? 2 : -2)))
+    if (fontSize !== settings.fontSize) patchSettings({ fontSize })
+  }
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!finishPointerDrag(dragRef, () => window.syllable.overlay.endMove(), event.pointerId)) return
     window.syllable.overlay.pointerCaptured(false)
@@ -141,7 +146,7 @@ export function Overlay() {
       const controlsAnchor = textRegions.length ? (() => {
         const left = Math.min(...textRegions.map(rect => rect.x))
         const right = Math.max(...textRegions.map(rect => rect.x + rect.width))
-        const width = 262
+        const width = 290
         const padding = 8
         const preferredX = settings.alignment === 'center' ? (left + right - width) / 2 : left
         return {
@@ -204,9 +209,11 @@ export function Overlay() {
     '--overlay-text-color': settings.textColor === 'green' ? '#1ed760' : settings.textColor === 'warm' ? '#fff4e6' : '#ffffff'
   } as React.CSSProperties
 
-  return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''} ${paused ? 'paused' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
+  return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
     <div className="overlay-surface">
-      <div ref={lyricsRef} className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
+      <div ref={lyricsRef} className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
+        onWheel={adjustFontSize} onDoubleClick={() => { if (!settings.positionLocked) void window.syllable.window.show() }}
+        title={settings.positionLocked ? undefined : '拖动移动 · 拖边缘缩放 · Ctrl+滚轮调字号 · 双击打开客户端'}>
         <div ref={contentRef} className="overlay-line-content" key={`${layoutRevision}-${playback?.track?.id ?? 'none'}-${line?.startMs ?? -1}-${content.kind}`}>
           {content.kind === 'title' ? <>
             <div lang={titlePresentation!.lang} className={`overlay-primary title-card ${titlePresentation!.className}`}>{content.title}</div>

@@ -23,8 +23,9 @@ function Range({ value, min, max, step = 1, onChange, label, disabled = false }:
     style={{ '--fill': rangeFill(value, min, max) } as React.CSSProperties} onChange={event => onChange(Number(event.target.value))} />
 }
 
-type PanelTab = 'lyrics' | 'timing' | 'overlay' | 'connect'
-const TAB_KEY = 'syllable-ui-panel-tab'
+export type PanelTab = 'lyrics' | 'timing' | 'overlay' | 'connect'
+export const TAB_KEY = 'syllable-ui-panel-tab'
+export const PANEL_TAB_EVENT = 'syllable:panel-tab'
 const readTab = (): PanelTab => {
   try { const value = localStorage.getItem(TAB_KEY); return value === 'timing' || value === 'overlay' || value === 'connect' ? value : 'lyrics' } catch { return 'lyrics' }
 }
@@ -32,6 +33,12 @@ const readTab = (): PanelTab => {
 export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCollapse?: () => void }) {
   const [tab, setTab] = useState<PanelTab>(readTab)
   const selectTab = (value: PanelTab) => { setTab(value); try { localStorage.setItem(TAB_KEY, value) } catch { /* view-only preference */ } }
+  // The overlay's control bar can ask for its settings ("悬浮窗设置").
+  useEffect(() => {
+    const show = (event: Event) => { const value = (event as CustomEvent<PanelTab>).detail; if (value) setTab(value) }
+    window.addEventListener(PANEL_TAB_EVENT, show)
+    return () => window.removeEventListener(PANEL_TAB_EVENT, show)
+  }, [])
   const connected = useAppStore(state => state.connected)
   const localConnected = useAppStore(state => state.localConnected)
   const demoMode = useAppStore(state => state.demoMode)
@@ -174,13 +181,12 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
           <Range min={100} max={160} step={2} value={settings.lineHeight} onChange={lineHeight => patchSettings({ lineHeight })} label="歌词行距" />
         </section>
         <section>
-          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>锁定位置</strong><span>锁定后穿透桌面；移到歌词上显示控制栏，Ctrl+Alt+U 解锁</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
-          <label className="switch-row"><div><strong>鼠标穿透</strong><span>{settings.positionLocked ? '已锁定：整个窗口都会穿透' : '开启后不可拖动、缩放'}</span></div><Switch label="鼠标穿透" disabled={settings.positionLocked} value={settings.clickThrough} onChange={clickThrough => { patchSettings({ clickThrough }); void window.syllable.overlay.setClickThrough(clickThrough) }} /></label>
+          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>锁定悬浮窗</strong><span>{settings.positionLocked ? '已锁定：歌词不挡鼠标，点击会穿透到下面的窗口；鼠标在歌词上停一下会出现控制条' : '未锁定：拖动歌词移动、拖边缘缩放、Ctrl+滚轮调字号、双击打开客户端'}</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
         </section>
         <section>
           <label className="setting-label">快捷键</label>
           <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>L</kbd><span>显示 / 隐藏</span></div>
-          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>M</kbd><span>切换鼠标穿透</span></div>
+          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>M</kbd><span>锁定 / 解锁</span></div>
           <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>U</kbd><span>解锁并显示控制栏</span></div>
         </section>
       </>}

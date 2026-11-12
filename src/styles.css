@@ -374,14 +374,28 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
 
 /* 0.4.57 overlay: long lines shrink to fit the window (--overlay-fit, set by
    Overlay.tsx after measuring), Japanese wraps at phrase boundaries, the intro
-   shows the song title, and a paused song dims. No endless animations here:
-   the overlay is on screen all the time. */
+   shows the song title. No endless animations here: the overlay is on screen
+   all the time. (0.4.57's paused dimming was removed in 0.4.58: it capped the
+   text opacity setting at 50% whenever Spotify was paused.) */
 .overlay-primary { font-size: calc(var(--overlay-size) * var(--overlay-fit, 1)); }
 .overlay-shell .overlay-secondary { font-size: calc(18px * var(--overlay-fit, 1)); }
 .overlay-shell .overlay-secondary.romanization { font-size: calc(16px * var(--overlay-fit, 1)); }
 .overlay-primary:lang(ja), .overlay-secondary:lang(ja) { word-break: auto-phrase; }
 .overlay-primary.title-card { font-size: calc(var(--overlay-size) * .62 * var(--overlay-fit, 1)); }
 .overlay-shell .overlay-secondary.artist { color: rgba(255, 255, 255, .82); font-size: calc(16px * var(--overlay-fit, 1)); }
-.overlay-lyrics { transition: opacity 400ms ease; }
-.overlay-shell.paused .overlay-lyrics { opacity: calc(var(--overlay-text-opacity) * .5); }
-@media (prefers-reduced-motion: reduce) { .overlay-lyrics { transition: none; } }
+
+/* 0.4.58 overlay interaction. The control pill holds only what works in the
+   current state (no drag handle while locked), so it lays out as a flex row. */
+.overlay-controls-shell { display: flex; align-items: center; justify-content: center; gap: 1px; padding: 4px 8px; }
+.overlay-controls-shell .controls-drag { width: 22px; flex: none; }
+.overlay-controls-shell button { flex: none; }
+.controls-divider { width: 1px; height: 18px; margin: 0 4px; flex: none; background: rgba(255, 255, 255, .14); }
+/* Unlocked: hovering the lyrics shows the window's extent, so it is clear what
+   a drag moves and where the edges to resize are. Locked lyrics never do. */
+.overlay-shell:not(.position-locked) .overlay-surface { transition: box-shadow 120ms linear, background-color 120ms linear; }
+.overlay-shell.no-background:not(.position-locked):hover .overlay-surface {
+  background: rgba(0, 0, 0, .22) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28) !important;
+}
+.overlay-shell.has-background:not(.position-locked):hover .overlay-surface { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28), 0 14px 44px rgba(0, 0, 0, .35); }
+

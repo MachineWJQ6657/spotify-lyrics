@@ -5,7 +5,7 @@ import { Cloud, Languages, PanelRightOpen, PencilLine, Radio, Sparkles } from 'l
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
-import { SettingsPanel } from './components/SettingsPanel'
+import { PANEL_TAB_EVENT, SettingsPanel, TAB_KEY } from './components/SettingsPanel'
 import { LibraryView } from './components/LibraryView'
 import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
@@ -58,6 +58,13 @@ export function App() {
   const togglePanel = useCallback(() => setPanelCollapsed(value => {
     try { localStorage.setItem(PANEL_KEY, value ? '0' : '1') } catch { /* view-only preference */ }
     return !value
+  }), [])
+  // "悬浮窗设置" on the overlay's control bar: expand the panel at its overlay tab.
+  useEffect(() => window.syllable.window.onShowSection?.(section => {
+    if (section !== 'overlay-settings') return
+    try { localStorage.setItem(TAB_KEY, 'overlay'); localStorage.setItem(PANEL_KEY, '0') } catch { /* view-only preference */ }
+    setPanelCollapsed(false)
+    window.dispatchEvent(new CustomEvent(PANEL_TAB_EVENT, { detail: 'overlay' }))
   }), [])
   const listening = useSyncExternalStore(subscribeListening, listeningTrackId) === (playback?.track?.id ?? null) && Boolean(playback?.track)
   const durationMs = playback?.track?.durationMs

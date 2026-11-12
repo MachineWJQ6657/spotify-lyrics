@@ -54,7 +54,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <article><Captions /><div><strong>歌词字号</strong><span>{settings.fontSize}px</span></div><button onClick={() => patchSettings({ fontSize: 56 })}>设为 56px</button></article>
       <article><Settings2 /><div><strong>逐行编辑</strong><span>搜索、改词与取当前时间</span></div><button onClick={openEditor}>打开</button></article>
     </div>
-    <div className="info-note">更细的语言、字号、偏移、模糊和鼠标穿透选项都可直接在右侧调整。</div>
+    <div className="info-note">更细的语言、字号、偏移、悬浮窗外观和锁定选项都可直接在右侧调整。</div>
     <AudioSyncPanel />
   </div>
 
@@ -79,7 +79,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + L</strong><span>显示或隐藏桌面悬浮歌词</span></article>
-      <article><Keyboard /><strong>Ctrl + Alt + M</strong><span>切换悬浮窗鼠标穿透</span></article>
+      <article><Keyboard /><strong>Ctrl + Alt + M</strong><span>锁定 / 解锁桌面歌词。锁定后歌词不挡鼠标，点击穿透到下面的窗口；未锁定时可拖动、缩放，Ctrl+滚轮调字号</span></article>
       <article><CircleHelp /><strong>歌词不匹配</strong><span>点击歌曲标题右侧的铅笔，搜索候选并逐行校时。</span></article>
     </div>
     <AudioSyncPanel />

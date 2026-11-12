@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { GripVertical, Lock, MousePointer2, Pause, Play, SkipBack, SkipForward, Unlock, X } from 'lucide-react'
+import { GripVertical, Lock, Pause, Play, SkipBack, SkipForward, SlidersHorizontal, Unlock, X } from 'lucide-react'
 import { useAppStore } from './store/useAppStore'
 import { useWindowSync } from './hooks/useWindowSync'
 import { usePlaybackConnection } from './hooks/usePlayback'
@@ -59,11 +59,6 @@ export function OverlayControls() {
       setTransportPending(false)
     }
   }
-  const toggleClickThrough = () => {
-    const next = !settings.clickThrough
-    patchSettings({ clickThrough: next })
-    void window.syllable.overlay.setClickThrough(next)
-  }
   const togglePositionLock = () => {
     const next = !settings.positionLocked
     patchSettings({ positionLocked: next, clickThrough: next })
@@ -95,14 +90,19 @@ export function OverlayControls() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
+  const playLabel = playback?.isPlaying ? '暂停' : '播放'
+  const transportBlocked = transportPending || Boolean(pendingSkipTrackId)
+  // Only what works in the current state: a locked overlay cannot be dragged
+  // and has nothing to toggle but the lock itself.
   return <div className={`overlay-controls-shell ${settings.positionLocked ? 'position-locked' : ''}`} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
-    <span className="controls-drag" title={settings.positionLocked ? '位置已锁定' : '拖动悬浮窗'} onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}><GripVertical size={15} /></span>
-    <button type="button" title="上一首（播放超过 3 秒时先回到开头）" aria-label="上一首" disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport('previous')}><SkipBack size={15} fill="currentColor" /></button>
-    <button type="button" className="controls-play" title={playback?.isPlaying ? '暂停' : '播放'} aria-label={playback?.isPlaying ? '暂停' : '播放'} disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport(playback?.isPlaying ? 'pause' : 'play')}>{playback?.isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button>
-    <button type="button" title={pendingSkipTrackId ? '正在等待 Spotify 换曲…' : '下一首'} aria-label="下一首" disabled={transportPending || Boolean(pendingSkipTrackId)} onClick={() => void sendTransport('next')}><SkipForward size={15} fill="currentColor" /></button>
-    <button type="button" disabled={settings.positionLocked} title={settings.positionLocked ? '已锁定：全窗口穿透，解锁后可调整' : settings.clickThrough ? '关闭歌词区域穿透' : '开启歌词区域穿透'} aria-label="切换歌词区域穿透" aria-pressed={settings.clickThrough} onClick={toggleClickThrough}><MousePointer2 size={15} /></button>
-    <button type="button" title={settings.positionLocked ? '解锁位置（Ctrl+Alt+U）' : '锁定位置（移到歌词上显示控制栏，Ctrl+Alt+U 解锁）'} aria-label={settings.positionLocked ? '解锁悬浮窗位置' : '锁定悬浮窗位置'} aria-pressed={settings.positionLocked} onClick={togglePositionLock}>{settings.positionLocked ? <Lock size={15} /> : <Unlock size={15} />}</button>
-    <button type="button" className="controls-open" title="打开 Syllable 客户端（Ctrl+Alt+S）" aria-label="打开 Syllable 客户端" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void window.syllable.window.show() }}><BrandMark size={17} /></button>
-    <button type="button" title="关闭桌面歌词" aria-label="关闭桌面歌词" onClick={close}><X size={16} /></button>
+    {!settings.positionLocked && <span className="controls-drag" title="拖动悬浮窗" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}><GripVertical size={15} /></span>}
+    <button type="button" title="上一首（播放超过 3 秒时先回到开头）" aria-label="上一首" disabled={transportBlocked} onClick={() => void sendTransport('previous')}><SkipBack size={15} fill="currentColor" /></button>
+    <button type="button" className="controls-play" title={playLabel} aria-label={playLabel} disabled={transportBlocked} onClick={() => void sendTransport(playback?.isPlaying ? 'pause' : 'play')}>{playback?.isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button>
+    <button type="button" title={pendingSkipTrackId ? '正在等待 Spotify 换曲…' : '下一首'} aria-label="下一首" disabled={transportBlocked} onClick={() => void sendTransport('next')}><SkipForward size={15} fill="currentColor" /></button>
+    <i className="controls-divider" aria-hidden="true" />
+    <button type="button" title={settings.positionLocked ? '解锁：可拖动、缩放（Ctrl+Alt+M）' : '锁定：歌词不挡鼠标，点击穿透到下面的窗口（Ctrl+Alt+M）'} aria-label={settings.positionLocked ? '解锁悬浮窗位置' : '锁定悬浮窗位置'} aria-pressed={settings.positionLocked} onClick={togglePositionLock}>{settings.positionLocked ? <Lock size={15} /> : <Unlock size={15} />}</button>
+    <button type="button" title="悬浮窗设置（字号、颜色、背景…）" aria-label="悬浮窗设置" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void window.syllable.window.show('overlay-settings') }}><SlidersHorizontal size={15} /></button>
+    <button type="button" className="controls-open" title="打开 Syllable 客户端（Ctrl+Alt+S）" aria-label="打开 Syllable 客户端" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void window.syllable.window.show() }}><BrandMark size={18} /></button>
+    <button type="button" title="关闭桌面歌词（Ctrl+Alt+L 重新打开）" aria-label="关闭桌面歌词" onClick={close}><X size={16} /></button>
   </div>
 }

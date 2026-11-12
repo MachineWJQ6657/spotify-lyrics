@@ -59,6 +59,10 @@ let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
 let overlayControlsWindow: BrowserWindow | null = null
 let overlayControlsHideTimer: NodeJS.Timeout | null = null
+// Locked lyrics pass clicks through; a pointer merely crossing them on its way
+// elsewhere should not pop up the control bar. Show it after a short dwell.
+const OVERLAY_CONTROLS_DWELL_MS = 350
+let overlayControlsDwellTimer: NodeJS.Timeout | null = null
 let overlayHovered = false
 let overlayControlsHovered = false
 let transparentHoverTimer: NodeJS.Timeout | null = null
@@ -194,7 +198,7 @@ function publishOverlayVisibility(visible: boolean) {
   for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:visibility-changed', visible)
 }
 
-const overlayControlsSize = { width: 262, height: 40 }
+const overlayControlsSize = { width: 290, height: 40 }
 
 function secondaryDisplay() {
   const primary = screen.getPrimaryDisplay()
@@ -269,6 +273,8 @@ function stopOverlayControlsVisibilityTracking() {
   transparentHoverTimer = null
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
+  if (overlayControlsDwellTimer) clearTimeout(overlayControlsDwellTimer)
+  overlayControlsDwellTimer = null
   overlayHovered = false
   overlayControlsHovered = false
   overlayControlsWindow?.hide()
@@ -322,13 +328,26 @@ function updateControlsVisibility() {
   if (overlayHovered || overlayControlsHovered) {
     if (overlayPointerDrag || Date.now() < overlayControlsSuppressedUntil) return
     if (!overlayControlsWindow.isVisible()) {
-      syncOverlayControlsBounds()
-      overlayControlsWindow.showInactive()
-      raiseOverlayControls()
-      qaLog(`overlay controls shown: ${overlayHovered ? 'lyrics' : 'controls'}`)
+      const reveal = () => {
+        if (!overlayControlsWindow || overlayControlsWindow.isDestroyed() || overlayControlsWindow.isVisible() || !overlayWindow?.isVisible()) return
+        syncOverlayControlsBounds()
+        overlayControlsWindow.showInactive()
+        raiseOverlayControls()
+        qaLog(`overlay controls shown: ${overlayHovered ? 'lyrics' : 'controls'}`)
+      }
+      // Only input-transparent (locked) lyrics wait; an unlocked overlay or an
+      // explicit unlock/recovery shows the bar at once.
+      const dwell = overlayHovered && !overlayControlsHovered && overlayInputTransparent() && Date.now() >= controlsRecoveryUntil
+      if (!dwell) { reveal(); return }
+      overlayControlsDwellTimer ??= setTimeout(() => {
+        overlayControlsDwellTimer = null
+        if ((overlayHovered || overlayControlsHovered) && !overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) reveal()
+      }, OVERLAY_CONTROLS_DWELL_MS)
     }
     return
   }
+  if (overlayControlsDwellTimer) clearTimeout(overlayControlsDwellTimer)
+  overlayControlsDwellTimer = null
   // The pill lives in a separate HWND with a small visual gap above the lyric
   // text. Keep it alive long enough for the pointer to cross that gap, then
   // hide it without flickering while the pointer crosses the gap.
@@ -440,6 +459,12 @@ function setOverlayClickThrough(value: boolean) {
   refreshTransparentHoverTracking()
   for (const window of [mainWindow, overlayWindow, overlayControlsWindow]) if (window && !window.isDestroyed()) window.webContents.send('overlay:click-through-changed', overlayClickThrough)
   return overlayClickThrough
+}
+
+/** Lock (click-through, not movable) <-> unlock (draggable, controls shown). */
+function toggleOverlayLock() {
+  if (!overlayMovable) void recoverOverlayControls()
+  else setOverlayMovable(false)
 }
 
 function setOverlayMovable(value: boolean) {
@@ -746,7 +771,7 @@ function createWindows() {
         : qaView === 'performance' ? ['isolated', 'hidden-clock', 'fresh-samples', 'visible-clock', 'rehidden-clock', 'restore-projection', 'hidden-surfaces']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
         : qaView?.startsWith('overlay-restore-check') ? ['bounds', 'visibility', 'appearance', 'preferences', 'native-lock', 'first-presentation', 'reopen-restored', 'unlock']
-        : qaView === 'overlay-unlock' ? ['locked-poll', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
+        : qaView === 'overlay-unlock' ? ['locked-poll', 'hover-dwell', 'hover', 'pass-through', 'bridge', 'hidden-stop', 'recover', 'state', 'shortcut', 'bounds']
         : qaView === 'overlay-startup' ? ['restored', 'visible', 'unclipped', 'measured', 'native-input', 'uncloaked']
         : qaView === 'overlay-display-recovery' ? ['initial-layout', 'invalidated', 'fresh-layout', 'stale-rejected', 'locked-paint', 'native-coverage', 'bounds-preserved', 'visible', 'bounded-resets'] : [])
       if (qaView === 'overlay-startup' && overlayWindow) {
@@ -838,6 +863,8 @@ function createWindows() {
         overlayHovered = false; overlayControlsHovered = false
         overlayControlsWindow.hide()
         sampleTransparentHover({ x: initialBounds.x + 100, y: initialBounds.y + 70 })
+        checks.record('hover-dwell', !overlayControlsWindow.isVisible())
+        await new Promise(resolve => setTimeout(resolve, OVERLAY_CONTROLS_DWELL_MS + 80))
         checks.record('hover', overlayControlsWindow.isVisible())
         const native = enforceWindowsToolWindow(overlayWindow)
         checks.record('pass-through', overlayMouseIgnored && !overlayMovable && Boolean((native.after ?? 0) & 0x20))
@@ -1118,7 +1145,7 @@ function createWindows() {
         showOverlay()
         syncOverlayControlsBounds()
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
-        await new Promise(resolve => setTimeout(resolve, 180))
+        await new Promise(resolve => setTimeout(resolve, 180 + OVERLAY_CONTROLS_DWELL_MS))
         qaLog(`overlay hover control: visible=${overlayControlsWindow.isVisible()}`)
         checks.record('hover', overlayControlsWindow.isVisible())
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }))`)
@@ -1126,7 +1153,7 @@ function createWindows() {
         qaLog(`overlay leave control: hidden=${!overlayControlsWindow.isVisible()}`)
         checks.record('leave', !overlayControlsWindow.isVisible())
         await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
-        await new Promise(resolve => setTimeout(resolve, 180))
+        await new Promise(resolve => setTimeout(resolve, 180 + OVERLAY_CONTROLS_DWELL_MS))
         const opened = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]'); button?.click(); return Boolean(button) })()`)
         await new Promise(resolve => setTimeout(resolve, 220))
         qaLog(`overlay open-client control: found=${opened}, visible=${mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, bounds=${JSON.stringify(mainWindow.getBounds())}`)
@@ -1408,9 +1435,8 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
     { label: '显示 / 隐藏桌面歌词', accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
-    { label: '锁定 / 解锁桌面歌词（锁定后穿透）', click: () => setOverlayMovable(!overlayMovable) },
+    { label: '锁定 / 解锁桌面歌词（锁定后点击穿透）', accelerator: 'Ctrl+Alt+M', click: toggleOverlayLock },
     { label: '解锁并显示歌词控制栏', accelerator: 'Ctrl+Alt+U', click: () => { void recoverOverlayControls() } },
-    { label: '切换鼠标穿透', accelerator: 'Ctrl+Alt+M', click: () => setOverlayClickThrough(!overlayClickThrough) },
     { label: '播放 / 暂停', click: () => { void executePlaybackCommand(lastPlayback?.isPlaying ? 'pause' : 'play').catch(() => undefined) } },
     { type: 'separator' },
     { label: '退出', click: () => { quitting = true; app.quit() } }
@@ -1745,8 +1771,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     overlayMovable = !settings.positionLocked
     overlayWindow?.setMovable(overlayMovable)
     overlayControlsWindow?.setMovable(overlayMovable)
-    // Restoration is not an explicit user unlock; do not clear saved hit-through.
-    setOverlayClickThrough(settings.clickThrough === true)
+    // Click-through is part of the lock (0.4.58): locked passes every click,
+    // unlocked takes input on the lyrics. An old "unlocked but click-through"
+    // preference had no remaining control to turn it off, so it is not restored.
+    setOverlayClickThrough(false)
     overlayNativeRestored = true
     acknowledgeOverlaySettings()
     publishOverlayBounds()
@@ -1928,14 +1956,16 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   })
   ipcMain.handle('window:maximize', () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize())
   ipcMain.handle('window:close', () => mainWindow?.close())
-  ipcMain.handle('window:show', event => {
+  ipcMain.handle('window:show', (event, section?: unknown) => {
     const fromOverlay = event.sender === overlayWindow?.webContents || event.sender === overlayControlsWindow?.webContents
     if (fromOverlay && Date.now() - lastOverlayDragEndedAt < 650) {
       qaLog('open-client suppressed: pointer sequence just moved the overlay')
       return false
     }
     qaLog(`open-client accepted: sender=${event.sender === overlayControlsWindow?.webContents ? 'controls' : event.sender === overlayWindow?.webContents ? 'overlay' : 'main'}`)
-    return revealMainWindow(fromOverlay ? 'overlay' : 'cursor')
+    const shown = revealMainWindow(fromOverlay ? 'overlay' : 'cursor')
+    if (shown && section === 'overlay-settings') mainWindow?.webContents.send('window:show-section', section)
+    return shown
   })
 
   // The bridge must be ready before either renderer loads; otherwise their
@@ -1972,7 +2002,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }).catch(error => console.warn('Local Spotify module failed to load:', error))
   if (!headlessAudioQa) {
     globalShortcut.register('CommandOrControl+Alt+L', toggleOverlay)
-    globalShortcut.register('CommandOrControl+Alt+M', () => { if (!overlayMovable) void recoverOverlayControls(); else setOverlayClickThrough(!overlayClickThrough) })
+    globalShortcut.register('CommandOrControl+Alt+M', toggleOverlayLock)
     const unlockRegistered = globalShortcut.register('CommandOrControl+Alt+U', () => { void recoverOverlayControls() })
     if (!unlockRegistered) console.warn('Ctrl+Alt+U unavailable; use tray menu to unlock lyrics')
     qaLog(`unlock shortcut registered=${unlockRegistered}`)

@@ -63,6 +63,10 @@ const checks = {
   // 0.4.57 overlay: long lines shrink to fit, title card before the first line, lyric surfaces wake at boundaries.
   overlayFitAndTitle: renderer.includes('function fitSearchStep(') && renderer.includes('title-card') && /--overlay-fit/.test(rendererCss) && /auto-phrase/.test(rendererCss),
   boundaryLyricClock: renderer.includes('function msUntilNextLyricChange(') && renderer.includes('nextDue.current'),
+  // 0.4.58 overlay interaction: one lock (no separate click-through), dwell before the bar over locked lyrics,
+  // contextual bar with an overlay-settings shortcut, and no paused dimming capping the text opacity.
+  overlayLockInteraction: main.includes('function toggleOverlayLock(') && main.includes('OVERLAY_CONTROLS_DWELL_MS') && main.includes('window:show-section')
+    && renderer.includes('悬浮窗设置') && renderer.includes('syllable:panel-tab') && !/\.overlay-shell\.paused/.test(rendererCss),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

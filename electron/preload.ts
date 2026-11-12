@@ -8,7 +8,8 @@ contextBridge.exposeInMainWorld('syllable', {
     configureEngine: () => ipcRenderer.invoke('audio-sync:configure-engine'),
     vocal: (value: unknown) => ipcRenderer.invoke('audio-sync:vocal', value),
     phoneme: (value: unknown) => ipcRenderer.invoke('audio-sync:phoneme', value),
-    clear: () => ipcRenderer.invoke('audio-sync:clear'),
+    listen: (value: unknown) => ipcRenderer.invoke('audio-sync:listen', value),
+    clear: (mode?: string) => ipcRenderer.invoke('audio-sync:clear', mode),
     observation: (value: unknown) => ipcRenderer.invoke('audio-sync:observation', value)
   },
   auth: {

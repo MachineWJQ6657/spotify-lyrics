@@ -980,8 +980,15 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide : topTier
   const undominated = plausible.filter(item => !isProvenIncomplete(item, plausible))
   const complete = undominated.length ? undominated : plausible
-  const viable = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0
+  const undominatedTimeline = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0
     || searchTimelineVersionDominated(item, other, durationMs)))
+  // Two independent timelines agreeing with each other and both disagreeing
+  // with a third by seconds prove the third is shifted or another edit (heard
+  // 2026-11-12: an LRCLIB search file 1.5-4 s late while NetEase and Kugou
+  // matched the audio). Reopening the pool is not enough: drop the outlier
+  // whenever a consistent alternative remains.
+  const consistent = topIsTimelineOutlier ? undominatedTimeline.filter(item => !isTimelineConsensusOutlier(item, wide)) : undominatedTimeline
+  const viable = consistent.length ? consistent : undominatedTimeline
   // A provider-side translation can masquerade as the original and win the
   // numeric score simply by splitting each sung line into two shorter rows.
   // LRCLIB /get has matched the requested title + artist directly, so retain a

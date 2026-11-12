@@ -2,6 +2,7 @@ import type { LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../ty
 import { TransportClock } from './clock'
 import { currentSessionCalibration, displayedLyricPosition } from './session-calibration'
 import { activeLineIndex } from './lyrics'
+import { displayLyricsOffset } from './listened-offset'
 
 export interface LyricDiagnosticContext {
   capturedAtMs: number
@@ -21,7 +22,7 @@ export function lyricDiagnosticContext(playback: PlaybackSnapshot | null, lyrics
   const clock = new TransportClock()
   clock.update(playback)
   const manual = currentSessionCalibration(session, playback, document)
-  const offsetMs = manual?.offsetMs ?? document?.offsetMs ?? fallbackOffsetMs
+  const offsetMs = manual?.offsetMs ?? displayLyricsOffset(document, fallbackOffsetMs)
   const position = displayedLyricPosition(clock.position(now), playback, document, offsetMs, manual, now)
   return { capturedAtMs: now, matchesPlayback, offsetMs, sourceDurationMs: document?.sourceDurationMs ?? null,
     providerRevision: document?.providerRevision ?? null, estimatedLyricPositionMs: position, sessionCalibrated: Boolean(manual),

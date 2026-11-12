@@ -23,7 +23,9 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // Revision 41 stages LRCLIB lookups and asks Kugou's lyric keyword search.
 // Revision 42 prefers an equivalent, complete, same-clock NetEase timeline
 // over a denser search-hit file, keeping its own translation rows.
-const LYRICS_PROVIDER_REVISION = 42
+// Revision 43 drops a timeline that two agreeing providers prove is shifted,
+// instead of only reopening the quality race (where it could still win).
+const LYRICS_PROVIDER_REVISION = 43
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
 // Revision 2: reading-based long vowels (taiyou), number+counter compounds
@@ -76,9 +78,14 @@ export function mergeUserEditedTracks(providerTracks: LyricTrack[], baseline?: L
 
 /** Partial provider responses must use the same calibration as final results. */
 export function preserveLyricsCalibration(document: LyricsDocument, baseline?: LyricsDocument | null): LyricsDocument {
-  return baseline?.trackId === document.trackId && baseline.offsetMs != null
-    ? { ...document, offsetMs: baseline.offsetMs }
-    : document
+  if (baseline?.trackId !== document.trackId) return document
+  // A listened offset carries its own timing key, so keeping it is safe even
+  // when the provider returns a different file: it simply stops applying.
+  return {
+    ...document,
+    ...(baseline.offsetMs != null ? { offsetMs: baseline.offsetMs } : {}),
+    ...(baseline.listenedOffset ? { listenedOffset: baseline.listenedOffset } : {})
+  }
 }
 
 /** Carries edit ownership only for tracks that survived the provider merge. */
@@ -452,6 +459,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         const enriched = {
           ...providerDocument,
           ...(committedGeneration.offsetMs != null ? { offsetMs: committedGeneration.offsetMs } : {}),
+          ...(committedGeneration.listenedOffset ? { listenedOffset: committedGeneration.listenedOffset } : {}),
           tracks,
           updatedAt: Date.now()
         }

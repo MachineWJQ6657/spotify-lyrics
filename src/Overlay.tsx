@@ -5,6 +5,7 @@ import { usePosition } from './hooks/usePosition'
 import { useAppStore } from './store/useAppStore'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from './lib/lyrics'
 import { useWindowSync } from './hooks/useWindowSync'
+import { displayLyricsOffset } from './lib/listened-offset'
 import { displayedLyricPosition } from './lib/session-calibration'
 
 export function Overlay() {
@@ -15,7 +16,7 @@ export function Overlay() {
     if (settingsReady) void window.syllable.overlay.ready()
   }, [settingsReady])
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
-  const offsetMs = activeLyrics?.offsetMs ?? (playback?.playbackSource === 'demo' ? settings.offsetMs : 0)
+  const offsetMs = displayLyricsOffset(activeLyrics, playback?.playbackSource === 'demo' ? settings.offsetMs : 0, settings.listenOffset !== false)
   const position = displayedLyricPosition(usePosition(playback, 80), playback, activeLyrics, offsetMs, sessionCalibration)
   const tracks = useMemo(() => visibleTracks(activeLyrics, settings.enabledLanguages, settings.romanization), [activeLyrics, settings.enabledLanguages, settings.romanization])
   const base = tracks.find(track => track.kind === 'original') ?? tracks[0]

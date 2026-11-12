@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
-import type { AppSettings, LyricLine, LyricTrack, LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
+import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
 import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
 import { retimeLines } from '../lib/lyrics'
@@ -30,6 +30,8 @@ interface AppState {
   updateLyricLine(trackId: string, lineIndex: number, patch: Partial<LyricLine>): void
   shiftLyricTrack(trackId: string, deltaMs: number): void
   setLyricsOffset(offsetMs: number): void
+  /** Stores an automatic listening calibration for a song (current view and library). */
+  setListenedOffset(trackId: string, value: ListenedOffset | null): void
   deleteLibraryDocument(trackId: string): void
   retryCurrentLyrics(): void
   /** Re-runs provider lookup without deleting the last usable document. */
@@ -237,8 +239,23 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   }),
   setLyricsOffset: offsetMs => set(state => {
     if (!state.lyrics) return state
-    const document = { ...state.lyrics, offsetMs: Math.max(-30_000, Math.min(30_000, Math.round(offsetMs))), updatedAt: Date.now() }
+    const document: LyricsDocument = { ...state.lyrics, offsetMs: Math.max(-30_000, Math.min(30_000, Math.round(offsetMs))), updatedAt: Date.now() }
+    // Resetting to zero must also stop an automatic listened offset from applying.
+    if (document.offsetMs === 0 && document.listenedOffset?.state === 'decided') document.listenedOffset = { ...document.listenedOffset, state: 'dismissed' }
     return { sessionCalibration: null, lyrics: document, library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+  }),
+  setListenedOffset: (trackId, value) => set(state => {
+    const apply = (document: LyricsDocument) => {
+      const next = { ...document, updatedAt: Date.now() }
+      if (value) next.listenedOffset = value
+      else delete next.listenedOffset
+      return next
+    }
+    const stored = state.library[trackId]
+    const lyrics = state.lyrics?.trackId === trackId ? apply(state.lyrics) : state.lyrics
+    const base = lyrics?.trackId === trackId ? lyrics : stored ? apply(stored) : null
+    if (!base) return state
+    return { lyrics, library: trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, base) }
   }),
   deleteLibraryDocument: trackId => set(state => {
     const library = { ...state.library }

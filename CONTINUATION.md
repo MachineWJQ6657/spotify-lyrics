@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.51 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.50-backup-20261111`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.52 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.51-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (69 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (71 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -15,11 +15,47 @@
   - Audit tooling (scratchpad, not committed): bundle `electron/lyrics-provider.ts` with esbuild and run `fetchLyrics` per track **sequentially and paced**. LRCLIB allows a burst of ~20 requests refilled at ~3/s (429 `retry-after: 1`); Kugou `song_search_v2` silently returns an empty list (byte-identical to a real miss) for a large share of unsigned requests. Back-to-back audits measure those limits, not lyric quality (see 0.4.50).
 - **Next-song prefetch (0.4.51, needs the optional Web API connection):** about 60 s before a song ends, `/me/player/queue` gives the next item; its lyrics go through the full pipeline and its generated romaji is cached, so the song change shows them at once. The user's normal profile is **not** connected yet (no `session.json`); without it nothing changes.
 - **Romaji:** generated romaji matches NetEase human romaji on 89.8% of 3,022 lines (`ROMANIZATION_REVISION` 3).
-- **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions.
+- **Listening calibration (0.4.52, default on):** for Japanese songs the app listens to a few 12 s loopback blocks, force-aligns the known lyric lines with the local RomajiASR CTC model and stores a per-song display offset keyed by the lyric timing (`listenedOffset`). This fixes community files that are a constant 0.6–12 s early/late on Spotify's audio (the real cause of "lyrics too early"; see the 0.4.52 entry).
+- **Sync:** SMTC and Web API positions match the audible content (±11 ms) on non-Mix transitions; re-measured 2026-11-12 with an independent loopback recorder: SMTC runs ~50–60 ms ahead of the audio.
   - Spotify no longer stores Mix recipes on disk (`list_player_*` replaced `context_player_state_restore`), so `spotify-transition.ts` finds nothing.
   - The open question is whether user-started Mix transitions time-stretch the incoming track (historical recipes 0.954→1.0 over ~26 s ⇒ ~1 s early lyrics). A reference-free rate estimator exists (see the 0.4.47 entry). A real Mix capture is still pending.
 - **Overlay first paint (fixed in 0.4.49):** with the overlay hidden at startup (the user's saved setting), `ready-to-show` intermittently never fires, on Electron 44.2.0 as well as 44.11.1. The old retry waited for that once-per-window event again, so `showOverlay()` failed for the whole session. The earlier "44.11.1 hang" was this same delay (2 × 10 s) cut off by the test timeout, not an Electron regression. Electron is still 44.2.0; the 44.11.1 security update should be re-tested now that the fix is in.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.52 deployed: listening calibration of lyric timing, consensus-outlier fix
+
+- `release/current` = **0.4.52** (asar SHA256 `fe963c0ad09395f7446857001dd141b20aae6070dc1d8e4b7e9688365dffc53a`, verifier 71/71). Rollback: `release/current-0.4.51-backup-20261112`; the 0.4.50 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0452`. Packaged isolated test: 修羅 decided after 3 blocks (+418 ms on the NetEase file chosen from SMTC metadata, spread 10 ms, offset +270) and persisted.
+
+- **Root cause of "lyrics too early" (measured, not assumed).**
+  - Method: a WASAPI loopback recorder (scratchpad tooling, not committed). Pause, seek to P, resume; the audio onset is position P. This agrees with raw SMTC to ±65 ms (SMTC runs ~50–60 ms ahead of the audio).
+  - Lines are located with the repo's RomajiASR CTC model by forced alignment of the known lyric text: an HMM with filler between lines, skippable lines and a mild timing prior.
+  - Demucs-separated vocal onsets agree with the CTC onsets: median +10 ms, IQR 0–90 ms, n=67.
+  - Whisper word times were too coarse (±1 s) to be useful here.
+  - Syllable adds no display lead.
+  - Over 20+ songs, community files are often a constant 0.6–1.8 s early on Spotify's audio, frequently in all three providers. Examples: 春泥棒 +1.78, 斜陽 +1.3, Shout Baby (LRCLIB exact) +1.0, 残酷になりますように +2.8.
+  - Others are within ±0.2 s.
+  - Two durations-related cases:
+    - Spotify plays a 305 s recording of ケセラセラ while its catalog says 272 s; every file runs 12.2 s early.
+    - 春泥棒 SMTC reports 297.8 s versus 290.3 s in the catalog.
+- **Listening calibration.** The listener is on by default when the local CTC runtime exists (`.tools/audio-sync`).
+  - Files: `electron/audio-sync/lyric-offset.ts` (aligner + estimator), `lyric-offset-session.ts`, `src/lib/listen-controller.ts`, `src/lib/listened-offset.ts`.
+  - **When it runs:** a playing song with a Japanese timed original that has not been measured for its current timing key, with no manual offset and no manual audio-sync mode active.
+  - **Capture:** the renderer captures 12 s loopback blocks (`prepare('listen')`). Main analyses each block with a 3 s tail of the previous one (15 s, the runner's limit) and maps it to media time via the SMTC transport (`CAPTURE_LATENCY_MS` = 45, measured).
+  - **Search:** ±30 s until an estimate exists, then ±6 s around it. The timing prior is 0.05 nats/phone/s.
+  - **Decision:** at least 6 lines from at least 2 windows, MAD ≤ 160 ms, and 70% of lines within 350 ms. The offset is `median − 150 ms`; corrections under 250 ms become 0.
+  - **Stops when:** a decision is made, playback pauses, the song changes, or 12 blocks pass. Two inconclusive or failed measurements per song per session also stop it.
+  - **Storage:** `LyricsDocument.listenedOffset {timingKey, state, offsetMs, measuredDeltaMs, …}`. It is carried across provider refreshes, and applies only while the original timing key matches.
+  - **Override:** a manual `offsetMs` wins. "本曲归零" marks it `dismissed`. A switch in the right panel turns it off.
+  - **Verified in-app (isolated dev profile + parallel independent recording):**
+    - 春泥棒: decided after 4 blocks. In-app +1886 vs offline +1793 at that point (93 ms = SMTC lead + capture latency).
+    - ケセラセラ: +12.27 s in-app vs +12.16 s offline.
+    - シンデレラ: offset 0.
+    - After the 春泥棒 correction, CDP-observed line activations sit −31…+169 ms relative to the sung onsets (they were ~1.85 s early).
+- **Consensus outlier removal** (provider revision **43**): `isTimelineConsensusOutlier` only reopened the pool. A shifted file that won on line density stayed selected (10月無口な君を忘れる: LRCLIB search file 1.5→4 s late; NetEase/Kugou within 0.4 s of the audio). Such outliers are now dropped when a consistent alternative remains.
+  - A/B (157 songs, paced): 152 same.
+  - 4 diffs were Kugou flakiness; replaying the same HTTP responses gave identical picks.
+  - 1 intended change.
+- Tests: 1033 pass. Package verifier: 71 checks (`listenedOffset`, `consensusOutlierDropped`, `providerRevision43`).
 
 ## 2026-11-11 / 0.4.51 deployed: NetEase-first timeline, next-song prefetch, romaji cache
 

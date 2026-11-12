@@ -16,6 +16,10 @@ export interface LyricsDocument {
   tracks: LyricTrack[]
   /** Per-song visual calibration. Positive values delay the lyrics. */
   offsetMs?: number
+  /** Automatic calibration measured by listening to Spotify's audio. Applies
+   * only while the original lyric timing still has this key; a manual
+   * offsetMs always wins. */
+  listenedOffset?: ListenedOffset
   updatedAt?: number
   providerRevision?: number
   /** Provider release duration retained for matching and diagnostics only. */
@@ -26,6 +30,19 @@ export interface LyricsDocument {
   userEditedTrackIds?: string[]
   /** Providers confirm the recording is instrumental; nothing to retry. */
   instrumental?: boolean
+}
+
+export interface ListenedOffset {
+  timingKey: string
+  /** dismissed: the user reset this song's calibration; keep the measurement, never re-apply. */
+  state: 'decided' | 'inconsistent' | 'dismissed'
+  /** Positive values delay the lyrics. 0 when inconsistent or already in sync. */
+  offsetMs: number
+  /** Median of (sung - file timestamp) over the located lines. */
+  measuredDeltaMs?: number
+  spreadMs?: number
+  lines: number
+  measuredAt: number
 }
 
 export interface TrackInfo {
@@ -89,6 +106,8 @@ export interface AppSettings {
   automaticAudioSync?: boolean
   /** Diagnostic CTC backend never publishes a playback/lyric clock anchor. */
   audioSyncBackend?: 'whisper' | 'phoneme-diagnostic'
+  /** Automatic per-song lyric offset by listening (default on when the local model exists). */
+  listenOffset?: boolean
   enabledLanguages: string[]
   romanization: boolean
   offsetMs: number

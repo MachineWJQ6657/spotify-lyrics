@@ -14,6 +14,8 @@ import { languageFromFilename, makeTrack } from './lib/lyrics'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
 import { recordSurfaceRender } from './lib/render-probe'
+import { connectListener } from './lib/listen-controller'
+import { displayLyricsOffset } from './lib/listened-offset'
 import { acousticController } from './lib/acoustic-controller'
 import { currentSessionCalibration } from './lib/session-calibration'
 
@@ -22,9 +24,10 @@ export function App() {
   usePlaybackConnection()
   useWindowSync()
   useEffect(() => acousticController.connect(), [])
+  useEffect(() => connectListener(), [])
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, sessionCalibration } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
-  const lyricOffset = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
+  const lyricOffset = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
   const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
   const [view, setView] = useState<AppView>('now')
   const [dropMessage, setDropMessage] = useState('')

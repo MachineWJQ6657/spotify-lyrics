@@ -24,6 +24,7 @@ import { LocalAsr } from './audio-sync/local-asr'
 import { VocalSync } from './audio-sync/vocal-sync'
 import { LocalCtc } from './audio-sync/local-ctc'
 import { PhonemeSession } from './audio-sync/phoneme-session'
+import { LyricOffsetSession } from './audio-sync/lyric-offset-session'
 import { matchPhonemeInWorker } from './audio-sync/ctc-worker-client'
 import { watchWindowVisibility, windowVisible } from './window-visibility'
 import { paintRecovery, waitForFirstPaint, waitForLoad } from './first-paint'
@@ -49,7 +50,8 @@ const localCtc = new LocalCtc({ roots: audioSyncRoots, runnerPath: app.isPackage
   ? path.join(process.resourcesPath, 'audio-sync/romaji-ctc-runner.py')
   : path.join(app.getAppPath(), 'scripts/audio-sync/romaji-ctc-runner.py') })
 const phonemeSession = new PhonemeSession(localCtc, matchPhonemeInWorker)
-let activeAudioMode: 'reference' | 'vocal' | 'phoneme' | null = null
+const lyricOffsetSession = new LyricOffsetSession(localCtc, analyzeJapaneseLines)
+let activeAudioMode: 'reference' | 'vocal' | 'phoneme' | 'listen' | null = null
 let audioCaptureGrantUntil = 0
 let localSpotify: LocalSpotifyService | null = null
 let mainWindow: BrowserWindow | null = null
@@ -663,7 +665,7 @@ function createWindows() {
   void mainWindow.loadURL(rendererUrl())
   mainWindow.webContents.on('render-process-gone', () => {
     audioCaptureGrantUntil = 0; activeAudioMode = null
-    acousticClock.clear(); vocalSync.clear(); phonemeSession.clear()
+    acousticClock.clear(); vocalSync.clear(); phonemeSession.clear(); lyricOffsetSession.clear()
   })
   mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
     // A short, one-use grant from the visible main renderer. Auxiliary windows
@@ -1427,6 +1429,7 @@ function broadcast(value: unknown) {
     acousticClock.observePlayback(value as typeof lastPlayback)
     vocalSync.observePlayback(value as typeof lastPlayback)
     phonemeSession.observePlayback(value as typeof lastPlayback)
+    lyricOffsetSession.observePlayback(value as typeof lastPlayback)
     value = vocalSync.clock.decorate(acousticClock.decorate(value as typeof lastPlayback))
   }
   let mainPayload = value
@@ -1509,6 +1512,7 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
       acousticClock.clear()
       vocalSync.clear()
       phonemeSession.clear()
+      lyricOffsetSession.clear()
       if (decision.action === 'seek-to-zero') await service.seek(0)
       else await service.control(decision.action)
     } catch (error) {
@@ -1607,26 +1611,37 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
   ipcMain.handle('audio-sync:prepare', (event, mode?: string) => {
     if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error('请先播放歌曲')
-    if (mode !== 'reference' && mode !== 'vocal' && mode !== 'phoneme') throw new Error('无效的声音后端')
+    if (mode !== 'reference' && mode !== 'vocal' && mode !== 'phoneme' && mode !== 'listen') throw new Error('无效的声音后端')
     activeAudioMode = mode
     vocalSync.clear()
     phonemeSession.clear()
+    lyricOffsetSession.clear()
     acousticClock.clear()
     if (mode === 'vocal' && lastPlayback.track) vocalSync.start(lastPlayback.track.id)
     if (mode === 'phoneme' && lastPlayback.track) phonemeSession.start(lastPlayback.track.id)
+    if (mode === 'listen' && lastPlayback.track) lyricOffsetSession.start(lastPlayback.track.id)
     audioCaptureGrantUntil = Date.now() + 10000
     broadcast(lastPlayback)
     return true
   })
-  ipcMain.handle('audio-sync:clear', event => {
+  ipcMain.handle('audio-sync:clear', (event, mode?: string) => {
     if (event.sender !== mainWindow?.webContents) return false
+    // The automatic listener must not tear down a manual mode that replaced it.
+    if (mode !== undefined && mode !== activeAudioMode) return false
     audioCaptureGrantUntil = 0
     activeAudioMode = null
     acousticClock.clear()
     vocalSync.clear()
     phonemeSession.clear()
+    lyricOffsetSession.clear()
     broadcast(lastPlayback)
     return true
+  })
+  ipcMain.handle('audio-sync:listen', async (event, value: VocalCapture) => {
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'listen') throw new Error('听音校准未启用')
+    const result = await lyricOffsetSession.process(value)
+    qaLog(`listen offset: reason=${result.reason}; state=${result.state}; windowLines=${result.windowLines}; lines=${result.lines}; windows=${result.windows}; measured=${result.measuredDeltaMs ?? 'none'}; spread=${result.spreadMs ?? 'none'}; offset=${result.offsetMs ?? 'none'}; elapsedMs=${result.elapsedMs}; track=${lastPlayback?.track?.artist ?? ''} - ${lastPlayback?.track?.name ?? ''}`)
+    return result
   })
   ipcMain.handle('audio-sync:observation', (event, observation: AcousticObservation) => {
     if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'reference') return 'rejected'

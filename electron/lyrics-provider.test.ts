@@ -1426,6 +1426,26 @@ describe('lyrics provider merging', () => {
     expect(result?.source).not.toBe('shifted-outlier')
   })
 
+  it('drops a shifted search timeline even when it scores higher than two agreeing sources', () => {
+    // Heard 2026-11-12 (Atarayo 10月無口な君を忘れる): an LRCLIB search file
+    // 1.5-4 s late won on line density although NetEase and Kugou matched the audio.
+    const stamp = (totalMs: number) => `[${String(Math.floor(totalMs / 60_000)).padStart(2, '0')}:${String(Math.floor(totalMs % 60_000 / 1000)).padStart(2, '0')}.00]`
+    const makeTimeline = (source: string, shiftMs: number, confidence: number, splitRows: boolean): LyricsResult => ({
+      syncedLyrics: Array.from({ length: 15 }, (_, index) => {
+        const totalMs = 4_000 + index * 5_000 + shiftMs
+        const row = `${stamp(totalMs)}shared lyric ${index}`
+        return splitRows ? [row, `${stamp(totalMs + 2_500)}echo ${index}`] : [row]
+      }).flat().join(String.fromCharCode(10)),
+      plainLyrics: null, source, confidence, matchedDurationMs: 80_000
+    })
+    const result = mergeProviderSet([
+      makeTimeline('LRCLIB · 搜索候选', 4_000, 90, true),
+      makeTimeline('网易云音乐 · 搜索匹配 90%', 0, 90, false),
+      makeTimeline('酷狗音乐 · 搜索匹配 90%', 300, 90, false)
+    ], 80_000)
+    expect(result?.source).not.toBe('LRCLIB · 搜索候选')
+  })
+
   it('does not force a globally shifted LRCLIB exact timeline over two agreeing sources', () => {
     const makeTimeline = (source: string, shiftMs: number, confidence: number): LyricsResult => ({
       syncedLyrics: Array.from({ length: 14 }, (_, index) => {

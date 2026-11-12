@@ -2,13 +2,15 @@ import type { AppSettings, LyricsCandidate, PlaybackSnapshot, TrackInfo } from '
 
 interface SyllableApi {
   audioSync: {
-    prepare(mode?: 'reference' | 'vocal' | 'phoneme'): Promise<boolean>
+    prepare(mode?: 'reference' | 'vocal' | 'phoneme' | 'listen'): Promise<boolean>
     engineStatus(): Promise<import('../electron/audio-sync/local-asr').AsrStatus>
     phonemeStatus(): Promise<import('../electron/audio-sync/local-ctc').LocalCtcStatus>
     configureEngine(): Promise<import('../electron/audio-sync/local-asr').AsrStatus | null>
     vocal(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('./lib/vocal-sync-types').VocalResult>
     phoneme(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('./lib/phoneme-diagnostic-types').PhonemeDiagnosticResult>
-    clear(): Promise<boolean>
+    listen(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('../electron/audio-sync/lyric-offset-session').ListenResult>
+    /** With a mode, clears only while that mode is the active one. */
+    clear(mode?: 'listen'): Promise<boolean>
     observation(value: import('../electron/audio-sync/acoustic-clock').AcousticObservation): Promise<'locked' | 'confirming' | 'rejected'>
   }
   auth: { status(): Promise<{ connected: boolean; localConnected?: boolean }>; login(clientId: string): Promise<{ connected: boolean }>; logout(): Promise<{ connected: boolean }> }

@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Check, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, MousePointer2, Move, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { languageFromFilename, makeTrack } from '../lib/lyrics'
 
 const languageOptions = [
@@ -30,7 +31,8 @@ export const SettingsPanel = memo(function SettingsPanel() {
   const [message, setMessage] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const activeLyrics = !playbackTrackId || lyrics?.trackId === playbackTrackId ? lyrics : null
-  const offsetMs = activeLyrics?.offsetMs ?? (demoMode ? settings.offsetMs : 0)
+  const offsetMs = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
+  const listened = !activeLyrics?.offsetMs && settings.listenOffset !== false && listenedLyricsOffset(activeLyrics) !== 0
   const changeOffset = (value: number) => activeLyrics ? setLyricsOffset(value) : demoMode ? patchSettings({ offsetMs: value }) : undefined
 
   useEffect(() => {
@@ -95,11 +97,12 @@ export const SettingsPanel = memo(function SettingsPanel() {
     <section>
       <label className="setting-label">歌词字号 <small>{settings.fontSize}px</small></label>
       <input type="range" min="34" max="88" value={settings.fontSize} onChange={event => patchSettings({ fontSize: Number(event.target.value) })} />
-      <label className="setting-label top-gap">逐曲同步校准 <small>{offsetMs > 0 ? '+' : ''}{offsetMs} ms</small></label>
+      <label className="setting-label top-gap">逐曲同步校准 <small>{offsetMs > 0 ? '+' : ''}{offsetMs} ms{listened ? ' · 听音自动' : ''}</small></label>
       <input type="range" min="-30000" max="30000" step="50" value={offsetMs} onChange={event => changeOffset(Number(event.target.value))} />
       <div className="range-labels"><span>提前</span><button onClick={() => changeOffset(0)}><RotateCcw size={12} />本曲归零</button><span>延后</span></div>
       <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 250)}>−250 ms</button><button onClick={() => changeOffset(0)}>0</button><button onClick={() => changeOffset(offsetMs + 250)}>+250 ms</button></div>
       <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 1000)}>−1 秒</button><button onClick={() => changeOffset(offsetMs + 1000)}>+1 秒</button></div>
+      <label className="switch-row top-gap"><div><strong>听音自动校准</strong><span>日语歌曲播放时在本机听几段声音，整体校正歌词提前或延后；音频不保存、不上传</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
     </section>
 
     <section>

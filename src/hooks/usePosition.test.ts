@@ -162,6 +162,33 @@ describe('visibility-aware visual position clock', () => {
     expect(hooks.positions).toHaveLength(5)
   })
 
+  it('in boundary mode wakes just after each boundary and otherwise at most every refreshMs', () => {
+    vi.stubGlobal('window', { setInterval, clearInterval, setTimeout, clearTimeout })
+    const boundaries = [10_300, 11_000, 12_400]
+    const due = (position: number) => { const next = boundaries.find(at => at > position); return next === undefined ? undefined : next - position }
+    hooks.index = 0
+    usePosition(sample(), 500, due)
+    hooks.pending.splice(0).forEach(effect => effect())
+    hooks.positions.length = 0
+    vi.advanceTimersByTime(3_000)
+    for (const at of boundaries) expect(hooks.positions.some(position => position >= at && position <= at + 6)).toBe(true)
+    expect(hooks.positions.every((position, index) => index === 0 || position - hooks.positions[index - 1] <= 502)).toBe(true)
+    expect(hooks.positions.length).toBeLessThan(10) // an 80 ms interval would be 37
+    expect(vi.getTimerCount()).toBe(1)
+    setVisibility('hidden')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('in boundary mode does not busy-loop on a boundary that is due now', () => {
+    vi.stubGlobal('window', { setInterval, clearInterval, setTimeout, clearTimeout })
+    hooks.index = 0
+    usePosition(sample(), 500, () => 0)
+    hooks.pending.splice(0).forEach(effect => effect())
+    hooks.positions.length = 0
+    vi.advanceTimersByTime(100)
+    expect(hooks.positions.length).toBeLessThanOrEqual(25)
+  })
+
   it('removes visibility listeners and timers on cleanup', () => {
     render(sample())
     hooks.cells.forEach(cell => { cell.cleanup?.(); cell.cleanup = undefined })

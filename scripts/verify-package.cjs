@@ -60,6 +60,9 @@ const checks = {
   redesignedShell: rendererCss.includes('.app-backdrop-art') && rendererCss.includes('.panel-tabs') && renderer.includes('syllable-ui-panel-tab')
     && /\.player-bar\s*\{/.test(rendererCss) && !/\.player-bar\s*\{[^}]*backdrop-filter/.test(rendererCss),
   // An endless animation on the listening indicator kept the GPU process at ~20% while listening.
+  // 0.4.57 overlay: long lines shrink to fit, title card before the first line, lyric surfaces wake at boundaries.
+  overlayFitAndTitle: renderer.includes('function fitSearchStep(') && renderer.includes('title-card') && /--overlay-fit/.test(rendererCss) && /auto-phrase/.test(rendererCss),
+  boundaryLyricClock: renderer.includes('function msUntilNextLyricChange(') && renderer.includes('nextDue.current'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

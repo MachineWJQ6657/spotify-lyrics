@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.56 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.55-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.57 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.56-backup-20261112`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (77 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (79 checks).
   - Smoke-test in an isolated `--user-data-dir`, back up `%APPDATA%/syllable`, swap `current`, relaunch. Old versions go to the Recycle Bin.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
   - NetEase translation alignment handles furigana, kana/kanji variants, split/merged rows and interludes. Missing translations are borrowed from sibling NetEase entries, or found by lyric-text search for romanized Spotify titles.
@@ -23,6 +23,22 @@
 - **Styles:** `src/styles.css` holds only what every window shares (reset, script font stacks) plus the overlay and hover controls; `scripts/verify-overlay-*.cjs` read it. The main window's design is `src/app.css` (tokens `--sy-*`), imported by `App.tsx`, so it ships as the App chunk's CSS and the overlay windows never load it.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-12 / 0.4.57 deployed: overlay fit, title card, boundary-timed lyrics
+
+- `release/current` = **0.4.57** (asar SHA256 `7adba1e01de24d5d94fc9ff63bfcae0de9559bc397d9524073f036e4eed5560e`, verifier 79/79, 1083 tests). Rollback: `release/current-0.4.56-backup-20261112`; the 0.4.55 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0457`.
+- **User's overlay settings** (read from a profile copy with `scratchpad/dump-settings.cjs`): 721×211, centered, no background, white with soft shadow, weight 760, 52 px, ja + romaji + zh, locked and click-through.
+- **Shrink to fit:** `Overlay.tsx` measures `.overlay-line-content` against `.overlay-lyrics` in a layout effect and bisects `--overlay-fit` (`fitSearchStep` in `src/lib/overlay-content.ts`; range 0.6–1, 2% bracket, about 5 renders per line change before paint, none when the line fits). A proportional guess overshot (0.64 where 0.65 fit), because a smaller font drops whole rows. Hit regions republish on `fit`.
+- **Content states** (`overlayContent`):
+  - lyric line;
+  - title card (`.overlay-primary.title-card` at 0.62×, artist row; "纯音乐" for instrumentals) before the first line, while loading, or without lyrics;
+  - idle.
+  `.overlay-shell.paused` halves the text opacity. `word-break: auto-phrase` applies to `:lang(ja)` rows.
+- **Boundary clock:** `usePosition(playback, maxMs, nextDueMs)` chains `setTimeout`s planned from `msUntilNextLyricChange` (next line start, or the next word of a word-timed line; `src/lib/lyric-clock.ts`), +2 ms, at least 4 ms, at most `maxMs` (500), re-planned after every render. Without `nextDueMs` the old interval is unchanged (player bar 160 ms, editor). Used by the overlay and `ClockedLyricsStage`.
+- **Measured** during muted playback in an isolated profile (Spotify volume set to 0 over the Web API, restored to 88 and paused afterwards). The tools are `overlay-switch-probe.js` and `switch-lateness.mjs`: a MutationObserver on the overlay, compared with the main-process clock and the saved LRC.
+  - Lateness of each line switch: 0.4.56 20–77 ms (median 56); packaged 0.4.57 5–20 ms (median 8).
+  - Overlay renders: 571 → ~64 per 45 s.
+- `verify-overlay-contrast.cjs` passed; `verify-overlay-paint.cjs` passed 20/20.
 
 ## 2026-11-12 / 0.4.56 deployed: GPU at ~20% while listening
 

@@ -371,3 +371,17 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
 .overlay-shell.no-background.effect-none .overlay-secondary {
   text-shadow: 0 1px 2px rgba(0, 0, 0, .82);
 }
+
+/* 0.4.57 overlay: long lines shrink to fit the window (--overlay-fit, set by
+   Overlay.tsx after measuring), Japanese wraps at phrase boundaries, the intro
+   shows the song title, and a paused song dims. No endless animations here:
+   the overlay is on screen all the time. */
+.overlay-primary { font-size: calc(var(--overlay-size) * var(--overlay-fit, 1)); }
+.overlay-shell .overlay-secondary { font-size: calc(18px * var(--overlay-fit, 1)); }
+.overlay-shell .overlay-secondary.romanization { font-size: calc(16px * var(--overlay-fit, 1)); }
+.overlay-primary:lang(ja), .overlay-secondary:lang(ja) { word-break: auto-phrase; }
+.overlay-primary.title-card { font-size: calc(var(--overlay-size) * .62 * var(--overlay-fit, 1)); }
+.overlay-shell .overlay-secondary.artist { color: rgba(255, 255, 255, .82); font-size: calc(16px * var(--overlay-fit, 1)); }
+.overlay-lyrics { transition: opacity 400ms ease; }
+.overlay-shell.paused .overlay-lyrics { opacity: calc(var(--overlay-text-opacity) * .5); }
+@media (prefers-reduced-motion: reduce) { .overlay-lyrics { transition: none; } }

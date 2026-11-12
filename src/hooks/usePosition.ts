@@ -9,8 +9,20 @@ declare global {
   }
 }
 
-export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100) {
+/**
+ * Visual transport position, re-rendered while playing and visible.
+ *
+ * Without `nextDueMs` it ticks every `refreshMs` (progress bars, the editor).
+ * With it, `refreshMs` is only the longest wait: the hook asks how many ms
+ * remain until the display next changes (a line or word boundary) and wakes
+ * just after it, so a line switches on time instead of up to one tick late,
+ * and a line without word timing costs a couple of renders per second.
+ */
+export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100, nextDueMs?: (positionMs: number) => number | undefined) {
   const clock = useRef(new TransportClock())
+  const nextDue = useRef(nextDueMs)
+  nextDue.current = nextDueMs
+  const plan = useRef<() => void>(() => {})
   const nativeVisible = useRef<boolean | null>(typeof window.syllable?.window?.visibility === 'function' ? null : true)
   const [position, setPosition] = useState(0)
   // Keep every transport observation, including hidden-window seeks/track
@@ -23,11 +35,14 @@ export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100) 
   }, [playback])
   useEffect(() => {
     let timer: number | undefined
+    let timeout: number | undefined
     let disposed = false
     let visibilityRevision = 0
     const stop = () => {
       if (timer !== undefined) window.clearInterval(timer)
-      timer = undefined
+      if (timeout !== undefined) window.clearTimeout(timeout)
+      timer = undefined; timeout = undefined
+      plan.current = () => {}
     }
     const refreshVisibility = () => {
       stop()
@@ -35,7 +50,25 @@ export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100) 
       // Project the latest observation immediately. Reopening after a minute
       // must not replay missed ticks or wait for a fresh Spotify sample.
       setPosition(clock.current.position())
-      if (playback?.isPlaying) timer = window.setInterval(() => {
+      if (!playback?.isPlaying) return
+      if (nextDue.current) {
+        const tick = () => {
+          timeout = undefined
+          const probe = window.__syllablePositionProbe
+          if (probe) probe.ticks += 1
+          setPosition(clock.current.position())
+          // A tick that changes nothing visible may not re-render; plan anyway.
+          plan.current()
+        }
+        plan.current = () => {
+          if (timeout !== undefined) window.clearTimeout(timeout)
+          const due = nextDue.current?.(clock.current.position())
+          // +2 ms lands just after the boundary; 4 ms floor avoids a busy loop.
+          const delay = due === undefined || !Number.isFinite(due) ? refreshMs : Math.max(4, Math.min(refreshMs, Math.ceil(due) + 2))
+          timeout = window.setTimeout(tick, delay)
+        }
+        plan.current()
+      } else timer = window.setInterval(() => {
         const probe = window.__syllablePositionProbe
         if (probe) probe.ticks += 1
         setPosition(clock.current.position())
@@ -73,5 +106,8 @@ export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100) 
       stop()
     }
   }, [playback?.isPlaying, refreshMs])
+  // Boundary mode re-plans after every render: new lyrics, an offset change or
+  // a fresh transport sample can move the next boundary.
+  useEffect(() => { plan.current() })
   return position
 }

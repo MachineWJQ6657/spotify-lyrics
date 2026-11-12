@@ -56,6 +56,9 @@ const checks = {
   seekableLyrics: renderer.includes('lyric-seek-hint') && renderer.includes('播放这一句') && renderer.includes('input, textarea, select, button'),
   timingStatusLabel: renderer.includes('正在听音校准') && renderer.includes('听音校准 · 歌词'),
   librarySearchUndo: renderer.includes('按歌名、艺人或专辑筛选') && renderer.includes('restoreLibraryDocument'),
+  // 0.4.55 redesign: main-window CSS is its own chunk (app.css); the overlay keeps styles.css.
+  redesignedShell: rendererCss.includes('.app-backdrop-art') && rendererCss.includes('.panel-tabs') && renderer.includes('syllable-ui-panel-tab')
+    && !/\.player-bar\{[^}]*backdrop-filter/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),
   instrumentalIsDefinitive: main.includes('function isInstrumentalPlaceholder(') && main.includes('instrumentalRecord') && renderer.includes('歌词源确认这首歌没有歌词'),

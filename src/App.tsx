@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
+import { memo, useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
+import './app.css'
 import { sourceLabel } from './lib/source-label'
-import { Cloud, Languages, PencilLine, Radio, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { Cloud, Languages, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
@@ -26,6 +27,21 @@ import type { LyricLine } from './types'
 const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
 const PANEL_KEY = 'syllable-ui-panel-collapsed'
 const readPanelCollapsed = () => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } }
+
+/**
+ * Blurred album art behind the whole window. The previous cover stays under
+ * the new one while it fades in, so a song change never flashes to black.
+ * A missing cover (thumbnail not delivered yet) keeps the last one.
+ */
+const Backdrop = memo(function Backdrop({ cover }: { cover?: string }) {
+  const [layers, setLayers] = useState<string[]>(() => cover ? [cover] : [])
+  useEffect(() => {
+    if (cover) setLayers(current => current[current.length - 1] === cover ? current : [...current.slice(-1), cover])
+  }, [cover])
+  return <div className="app-backdrop" aria-hidden="true">
+    {layers.map(url => <div key={url} className="app-backdrop-art" style={{ backgroundImage: `url(${JSON.stringify(url)})` }} />)}
+  </div>
+})
 
 export function App() {
   recordSurfaceRender('shell')
@@ -105,6 +121,7 @@ export function App() {
   }, [demoMode])
 
   return <div className="app-shell" onDragOver={event => event.preventDefault()} onDrop={event => void importDroppedLyrics(event)} style={{ '--lyric-size': `${settings.fontSize}px` } as React.CSSProperties}>
+    <Backdrop cover={playback?.track?.coverUrl || undefined} />
     <Titlebar title={VIEW_TITLES[view]} />
     <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''}`}>
       <Sidebar active={view} onChange={setView} />
@@ -112,7 +129,7 @@ export function App() {
         {view === 'library' || view === 'sources' ? <LibraryView mode={view} openEditor={openEditor} /> : view === 'settings' || view === 'help' ? <InfoView mode={view} openEditor={openEditor} /> : <>
         <div className="now-header">
           <div className="now-track-heading">
-            <div className="header-cover">{playback?.track?.coverUrl ? <img src={playback.track.coverUrl} /> : <BrandMark size={46} title="Syllable" />}</div>
+            <div className="header-cover">{playback?.track?.coverUrl ? <img src={playback.track.coverUrl} /> : <BrandMark size={40} title="Syllable" />}</div>
             <div>
             <span className={`eyebrow ${demoMode ? 'demo' : ''}`} title={demoMode ? '演示模式，尚未同步 Spotify' : localConnected ? '已连接本机 Spotify 媒体会话' : '已连接 Spotify Web API'}><Radio size={12} /><span>{demoMode ? '演示模式 · 未连接' : localConnected ? 'Spotify 桌面端' : 'Spotify Web API'}</span></span>
             <h1 {...titlePresentation}>{playback?.track?.name ?? '等待 Spotify 播放'}</h1>
@@ -123,14 +140,13 @@ export function App() {
 来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验`}><Cloud size={13} /><em>{sourceText}</em></span>{trackCount > 0 && <span title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
         <div className="lyric-card">
-          <div className="ambient ambient-one" /><div className="ambient ambient-two" />
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>
         <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics}
           onSeekLine={seekLine} seekLabel={seekLabel} onSearch={openEditor} />
         </div>
         </>}
       </main>
-      {panelCollapsed ? <aside className="settings-rail"><button title="展开设置面板" aria-label="展开设置面板" onClick={togglePanel}><SlidersHorizontal size={18} /></button></aside> : <SettingsPanel onCollapse={togglePanel} />}
+      {panelCollapsed ? <aside className="settings-rail"><button title="展开设置面板" aria-label="展开设置面板" onClick={togglePanel}><PanelRightOpen size={18} /></button></aside> : <SettingsPanel onCollapse={togglePanel} />}
     </div>
     <ClockedPlayerBar playback={playback} demoMode={demoMode} />
     {editorOpen && <ClockedLyricsEditor playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} />}

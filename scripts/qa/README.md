@@ -113,6 +113,29 @@ Run it after any change to `local-spotify.ts`, `native-clock.ts` or the gate
 functions; it is the only check of that code that needs no live playback, and
 it does not replace one.
 
+## Live playback check
+
+```bash
+node scripts/qa/spotify-api.cjs login --client-id=<the Syllable dev app>   # once; the user approves the consent page
+bash scripts/qa/launch-test-instance.sh
+node scripts/qa/live-check.mjs
+node scripts/qa/live-analyse.mjs
+bash scripts/qa/quit-test-instance.sh
+```
+
+`live-check.mjs` plays the current track on this PC's Spotify (the device named
+`%COMPUTERNAME%`, never another one) and reads what the test instance shows
+every 8 ms: the position of the progress bar, the active lyric row and the
+list's scroll. It pauses and resumes from Spotify and from Syllable's button
+(also a quick pause and play), clicks a lyric row and then the same row twice
+more, skips to the next track and lets a song end. If the player was paused,
+the volume is 0 throughout and the track, position, paused state and volume
+are restored at the end. `live-analyse.mjs` compares the shown position with
+the Web API's and lists every backward or forward move of the shown clock.
+On 0.4.76 (2026-11-15): shown position within 16-69 ms of the Web API on
+three tracks, pauses held exactly where Spotify stopped, each click on a row
+landed on that row, 30 of 31 line changes scrolled smoothly.
+
 ## Release
 
 1. Add the release's user-facing entry to `CHANGELOG` in `src/lib/changelog.ts`.

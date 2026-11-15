@@ -47,6 +47,31 @@ improve.
 Do not click the copy items of the lyric menu in a test: they overwrite the
 real clipboard. Do not toggle "start at login": it writes the real login items.
 
+## Comparing two builds of the lyrics provider
+
+After a change to `electron/lyrics-provider.ts`, run the old and the new build
+on songs of the user's library and read every difference. The provider HTTP is
+cached per song, so both builds see the same responses and a second run is
+offline. The 0.4.71 fixes were checked this way on 142 songs; the comparison
+found three side effects that no synthetic test had.
+
+```bash
+npm run build
+./node_modules/electron/dist/electron.exe scripts/qa/provider-compare/dump-originals.cjs .qa-user-data-preupdate-<n> .qa-scratch/library-originals.json
+bash scripts/qa/provider-compare/bundle.sh .qa-scratch/provider-old.mjs <git ref of the old build>
+bash scripts/qa/provider-compare/bundle.sh .qa-scratch/provider-new.mjs
+node scripts/qa/provider-compare/compare.mjs .qa-scratch/provider-old.mjs .qa-scratch/provider-new.mjs .qa-scratch/library-originals.json .qa-scratch/http-cache .qa-scratch/compare.json --every 3 --offset 0
+node scripts/qa/provider-compare/show.mjs .qa-scratch/compare.json
+node scripts/qa/provider-compare/inspect.mjs .qa-scratch/provider-old.mjs .qa-scratch/provider-new.mjs .qa-scratch/library-originals.json .qa-scratch/http-cache "<song name>" <from s> <to s>
+```
+
+`--every 3 --offset 0` takes every third song (about 70 of 213, twelve minutes
+with live requests); `--names names.json` takes the named songs. `inspect.mjs`
+prints the original rows of a time range, each build's translation rows there
+and the NetEase entries' own rows; add `romaji` as the last argument for the
+romanization. Rebuild `provider-new.mjs` after each edit. Everything written
+here is the user's library or provider responses and stays in `.qa-scratch/`.
+
 ## Release
 
 1. Add the release's user-facing entry to `CHANGELOG` in `src/lib/changelog.ts`.

@@ -25,7 +25,10 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // over a denser search-hit file, keeping its own translation rows.
 // Revision 43 drops a timeline that two agreeing providers prove is shifted,
 // instead of only reopening the quality race (where it could still win).
-const LYRICS_PROVIDER_REVISION = 43
+// Revision 44 re-aligns translations after the fifth review: a grouping must
+// explain a row better than its own match, merged rows keep their translations,
+// one long interlude admits only the same song, and a NetEase entry counts once.
+const LYRICS_PROVIDER_REVISION = 44
 /**
  * Raised when translation matching learns to find more (0.4.68: entries of
  * another length with the same words). A saved song without a Chinese

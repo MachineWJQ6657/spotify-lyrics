@@ -64,6 +64,9 @@ export function nearestLine(lines: LyricLine[], targetMs: number, toleranceMs = 
   return best && Math.abs(best.startMs - targetMs) <= toleranceMs ? best : undefined
 }
 
+/** Timestamps this close are the same line (rounding to 10 ms moves a stamp by up to 5 ms). */
+const SAME_STAMP_MS = 15
+
 /**
  * Align a supplemental provider timeline to the source-language rows. Some
  * providers split one Japanese sentence into two translated phrases while
@@ -74,9 +77,14 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
   const buckets: LyricLine[][] = Array.from({ length: baseLines.length }, () => [])
   if (!baseLines.length) return []
   for (const line of secondaryLines) {
-    const exactIndex = activeLineIndex(baseLines, line.startMs)
-    let index = exactIndex >= 0 && baseLines[exactIndex].startMs === line.startMs
-      ? exactIndex : activeLineIndex(baseLines, line.startMs + leadToleranceMs)
+    // The same timestamp, give or take rounding: provider tracks re-timed onto
+    // the original are written to 10 ms while the original keeps milliseconds
+    // (21.457 s against 21.46 s). Demanding equality sent such a row to the
+    // lead rule below, which picks the *next* line when lines are under 1.2 s
+    // apart: the translation showed one row late.
+    const sameIndex = activeLineIndex(baseLines, line.startMs + SAME_STAMP_MS)
+    let index = sameIndex >= 0 && Math.abs(baseLines[sameIndex].startMs - line.startMs) <= SAME_STAMP_MS
+      ? sameIndex : activeLineIndex(baseLines, line.startMs + leadToleranceMs)
     if (index < 0 && Math.abs(line.startMs - baseLines[0].startMs) <= 2200) index = 0
     if (index < 0) continue
     const base = baseLines[index]

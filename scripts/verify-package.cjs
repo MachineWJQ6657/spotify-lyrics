@@ -42,7 +42,7 @@ const checks = {
   acousticTokenTiming: main.includes('function dtwModelPreset(') && main.includes('token.t_dtw') && main.includes('"-nfa"'),
   untimedOriginalFallback: renderer.includes('暂无可信时间轴') && main.includes('comparableLength'),
   translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
-  providerRevision43: renderer.includes('LYRICS_PROVIDER_REVISION = 43') && main.includes('function kanaSkeletonMatches(') && main.includes('searchTimelineVersionDominated'),
+  providerRevision44: renderer.includes('LYRICS_PROVIDER_REVISION = 44') && main.includes('function kanaSkeletonMatches(') && main.includes('searchTimelineVersionDominated'),
   translationAlignmentVariants: main.includes('SPELLING_VARIANTS') && main.includes('FURIGANA_READING') && main.includes('uniqueGrouping'),
   siblingAndTextTranslation: main.includes('function withSiblingTranslation(') && main.includes('function enrichTranslationByLyricText(') && /type: ["']1006["']/.test(main),
   neteaseTimelinePreference: main.includes('function preferredNeteaseTimeline(') && main.includes('function onsetDistance('),
@@ -119,6 +119,9 @@ const checks = {
   mainAlignment: renderer.includes('mainAlignment') && /\.lyric-card\.lyrics-centered \.lyric-group\s*\{[^}]*text-align:\s*center/.test(rendererCss) && renderer.includes('主窗口歌词对齐'),
   // Fourth review (listening measurement): too few lines is never a verdict, once-only lines decide (repeated words can sit on another repetition), the search narrows only on agreeing once-only lines, an idle diagnostic session does not cancel the shared recognizer, a dropped session restarts.
   listeningEvidence: (main + native + pronunciationChunk).includes('function repeatedLineIndexes(') && (main + native + pronunciationChunk).includes('LISTEN_MIN_UNIQUE_LINES') && renderer.includes('function isConclusiveListen(') && renderer.includes('mayRestartSession'),
+  // 0.4.71, fifth review (lyrics provider): a grouping must explain a row better than its own match and merged rows keep their translations, a row cut at another place joins the displayed row it ends, lone short rows in the same slot pair up; one long interlude admits only the same song; a NetEase entry is fetched once and an unfinished lookup is not final; bodies are read under the timeout; the interleaved-translation layout must cover the song; stamps 15 ms apart are the same line.
+  providerAlignmentFixes: main.includes('grouped: true') && main.includes('> ownCloseness') && main.includes('targetEnd - 1300') && main.includes('textualBetween') && main.includes('const textualOwner = ') && renderer.includes('SAME_STAMP_MS'),
+  providerSelectionFixes: main.includes('function sharesLyricWords(') && main.includes('topHasLongGap') && main.includes('const fetched = ') && main.includes('let incomplete = false') && main.includes('function bufferedResponse(') && /alternatingPairs\.length \/ Math\.max\(1, japaneseRowCount\) >= 0?\.4/.test(main),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),
@@ -126,7 +129,8 @@ const checks = {
   romanizationRevision3: renderer.includes('ROMANIZATION_REVISION = 3') && main.includes('furiganaReadings') && main.includes('ヒトリ') && main.includes('ハルカゼ'),
   displayLayoutRecovery: main.includes('class OverlayLayoutGate') && main.includes('display-metrics-changed') && main.includes('overlay:layout-reset') && renderer.includes('onLayoutReset'),
   duplicateClockObservation: renderer.includes('this.rawAnchor') && renderer.includes('positionMs: this.anchor.positionMs'),
-  exactTranslationAnchor: renderer.includes('baseLines[exactIndex].startMs === line.startMs'),
+  // 0.4.71: "exact" allows for rounding (15 ms), since re-timed tracks are written to 10 ms.
+  exactTranslationAnchor: renderer.includes('Math.abs(baseLines[sameIndex].startMs - line.startMs) <= SAME_STAMP_MS'),
   displayedVersion: renderer.includes(`const version = "${expectedVersion}";`),
   unclippedOverlayPaint: !/overlayWindow\.setShape\(/.test(main) && main.includes('overlayShapeKey = "[]"'),
   separateOverlayInput: main.includes('function overlayInputState(') && main.includes('overlay:pointer-move') && preload.includes('overlay:pointer-move'),

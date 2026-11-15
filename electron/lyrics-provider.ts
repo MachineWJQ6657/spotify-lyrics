@@ -131,8 +131,13 @@ export function splitEmbeddedTranslation(result: LyricsResult): LyricsResult {
   })
   const japaneseRowCount = sourceTimedRows.filter(row => KANA.test(row.content)).length
   const hanOnlyRowCount = sourceTimedRows.filter(row => HAN.test(row.content) && !KANA.test(row.content) && !isLyricCredit(row.content)).length
+  // The layout also has to run through the song. Measured against the smaller
+  // count alone, four kanji-only sung rows (a hook like 「東京 東京」 after a
+  // kana row in each chorus) were the whole "translation": they left the
+  // original and appeared as the Chinese of the row before.
   const hasAlternatingEmbeddedTranslation = alternatingPairs.length >= 4
     && alternatingPairs.length / Math.max(1, Math.min(japaneseRowCount, hanOnlyRowCount)) >= .55
+    && alternatingPairs.length / Math.max(1, japaneseRowCount) >= .4
   const alternatingTranslationRows = new Set(hasAlternatingEmbeddedTranslation ? alternatingPairs.map(pair => pair.translation.physicalIndex) : [])
   const strippedRows = new Set([...knownTranslationRows, ...alternatingTranslationRows])
   const primaryLyrics = (hasKnownEmbeddedTranslation || hasAlternatingEmbeddedTranslation)
@@ -661,7 +666,12 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     sourceMs: ownerRows[anchor.subjectIndex].timeMs,
     targetMs: baseRows[anchor.referenceIndex].timeMs
   }))
-  type SupplementalAnchor = typeof anchors[number] & { targetIndices?: number[] }
+  type SupplementalAnchor = typeof anchors[number] & { targetIndices?: number[]; grouped?: boolean }
+  // How well two texts already explain each other. A grouping replaces a row's
+  // own one-to-one match only by explaining it better: "A" equal to "A" must
+  // not also take a short neighbour, although "A" + "Yeah" is still 90 %
+  // similar to "A". The neighbour then showed both surrounding translations.
+  const closeness = (left: string, right: string) => left === right ? 1 : Math.min(.999, normalizedTextSimilarity(left, right))
   const byOwner = new Map<number, SupplementalAnchor>(anchors.map(anchor => [anchor.subjectIndex, anchor]))
   // Prefer exact ordered-text proof; accept a near-identical grouping only
   // when it is the single candidate between the surrounding anchors.
@@ -674,7 +684,7 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     if (Array.from({ length: end - start + 1 }, (_, offset) => byOwner.get(start + offset))
       .some(existing => existing && existing.referenceIndex !== referenceIndex)) return
     for (let index = start; index <= end; index += 1) {
-      byOwner.set(index, { subjectIndex: index, referenceIndex, sourceMs: ownerRows[start].timeMs, targetMs: baseRows[referenceIndex].timeMs })
+      byOwner.set(index, { subjectIndex: index, referenceIndex, sourceMs: ownerRows[start].timeMs, targetMs: baseRows[referenceIndex].timeMs, grouped: true })
     }
   }
   // A base row may combine several provider rows. Recover those translations
@@ -689,6 +699,7 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     const after = anchors.find(anchor => anchor.referenceIndex > referenceIndex)
     const low = Math.max((before?.subjectIndex ?? -1) + 1, own.length ? own[0].subjectIndex - 3 : 0)
     const high = Math.min(after?.subjectIndex ?? ownerRows.length, own.length ? own[0].subjectIndex + 4 : ownerRows.length)
+    const ownCloseness = own.length ? closeness(ownerRows[own[0].subjectIndex].text, baseRows[referenceIndex].text) : 0
     const candidates: Array<{ value: [number, number]; exact: boolean }> = []
     for (let start = low; start < high; start += 1) {
       // Empty rows (instrumental "♪", blank separators) contribute no text,
@@ -699,7 +710,9 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
         if (!ownerRows[end].text) continue
         if (own.length && (own[0].subjectIndex < start || own[0].subjectIndex > end)) continue
         const joined = ownerRows.slice(start, end + 1).map(row => row.text).join('')
-        if (sameText(joined, baseRows[referenceIndex].text)) candidates.push({ value: [start, end], exact: joined === baseRows[referenceIndex].text })
+        if (sameText(joined, baseRows[referenceIndex].text) && closeness(joined, baseRows[referenceIndex].text) > ownCloseness) {
+          candidates.push({ value: [start, end], exact: joined === baseRows[referenceIndex].text })
+        }
       }
     }
     const group = uniqueGrouping(candidates)
@@ -712,6 +725,8 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     if (!ownerRows[ownerIndex].text) continue
     const before = anchors.filter(anchor => anchor.subjectIndex < ownerIndex).at(-1)
     const after = anchors.find(anchor => anchor.subjectIndex > ownerIndex)
+    const own = anchors.find(anchor => anchor.subjectIndex === ownerIndex)
+    const ownCloseness = own ? closeness(baseRows[own.referenceIndex].text, ownerRows[ownerIndex].text) : 0
     const candidates: Array<{ value: number[]; exact: boolean }> = []
     for (let start = (before?.referenceIndex ?? -1) + 1; start < (after?.referenceIndex ?? baseRows.length); start += 1) {
       // An instrumental "♪" row normalizes to empty text. Letting a candidate
@@ -721,7 +736,12 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
       for (let end = start + 1; end < Math.min(start + 4, after?.referenceIndex ?? baseRows.length); end += 1) {
         if (!baseRows[end].text) continue
         const joined = baseRows.slice(start, end + 1).map(row => row.text).join('')
-        if (sameText(joined, ownerRows[ownerIndex].text)) {
+        // A near-identical grouping has to include the row's own match. An
+        // exact one need not: 「本当に本当に綺麗だろうから」 matched the earlier row
+        // 「本当に綺麗だろうから」 by containment, while the two rows after it
+        // spell it out exactly.
+        if (own && joined !== ownerRows[ownerIndex].text && (own.referenceIndex < start || own.referenceIndex > end)) continue
+        if (sameText(joined, ownerRows[ownerIndex].text) && closeness(joined, ownerRows[ownerIndex].text) > ownCloseness) {
           candidates.push({ value: Array.from({ length: end - start + 1 }, (_, index) => start + index).filter(index => baseRows[index].text),
             exact: joined === ownerRows[ownerIndex].text })
         }
@@ -757,6 +777,47 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
         targetMs: baseRows[indices[0]].timeMs, targetIndices: indices })
     }
   }
+  // The two timelines can cut a sentence at different places: the displayed
+  // rows 「A」「B C」 against the provider's 「A B」「C」. 「A B」 is matched through
+  // its phrases; 「C」 alone matches nothing, and used to be taken for a part of
+  // the row after it. It belongs to the displayed row its neighbour maps to
+  // when that row ends (or starts) with exactly its words.
+  const textualOwner = ownerRows.flatMap((row, index) => row.text ? [index] : [])
+  for (const [position, ownerIndex] of textualOwner.entries()) {
+    // Four characters: an echo of the row's last word (「だけ」) is not a cut sentence.
+    if (byOwner.has(ownerIndex) || ownerRows[ownerIndex].text.length < 4) continue
+    const previous = byOwner.get(textualOwner[position - 1] ?? -1)
+    const next = byOwner.get(textualOwner[position + 1] ?? -1)
+    const previousTarget = previous ? previous.targetIndices?.at(-1) ?? previous.referenceIndex : -1
+    const nextTarget = next ? next.targetIndices?.[0] ?? next.referenceIndex : -1
+    const text = ownerRows[ownerIndex].text
+    const referenceIndex = previousTarget >= 0 && baseRows[previousTarget].text.length > text.length && baseRows[previousTarget].text.endsWith(text) ? previousTarget
+      : nextTarget >= 0 && baseRows[nextTarget].text.length > text.length && baseRows[nextTarget].text.startsWith(text) ? nextTarget : -1
+    if (referenceIndex < 0) continue
+    byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex, sourceMs: ownerRows[ownerIndex].timeMs, targetMs: baseRows[referenceIndex].timeMs, grouped: true })
+  }
+  // One unmatched short row on each side between the same two matched rows is
+  // one sung moment written two ways (「U&I」 / 「You and I」, 「嗚呼」 / 「ああ」):
+  // too short and too different to match as text. Longer rows stay unpaired; a
+  // different verse between two shared lines keeps no translation.
+  const targeted = new Set([...byOwner.values()].flatMap(anchor => anchor.targetIndices ?? [anchor.referenceIndex]))
+  const textualBetween = (rows: Array<{ text: string }>, low: number, high: number) =>
+    Array.from({ length: Math.max(0, high - low - 1) }, (_, offset) => low + 1 + offset).filter(position => rows[position].text)
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const before = anchors[index]
+    const after = anchors[index + 1]
+    const ownerBetween = textualBetween(ownerRows, before.subjectIndex, after.subjectIndex)
+    const baseBetween = textualBetween(baseRows, before.referenceIndex, after.referenceIndex)
+    if (ownerBetween.length !== 1 || baseBetween.length !== 1) continue
+    const [ownerIndex] = ownerBetween
+    const [referenceIndex] = baseBetween
+    if (byOwner.has(ownerIndex) || targeted.has(referenceIndex)) continue
+    if (Math.max(ownerRows[ownerIndex].text.length, baseRows[referenceIndex].text.length) > 8) continue
+    const ownerLag = ownerRows[ownerIndex].timeMs - before.sourceMs
+    const baseLag = baseRows[referenceIndex].timeMs - before.targetMs
+    if (Math.abs(ownerLag - baseLag) > 1200) continue
+    byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex, sourceMs: ownerRows[ownerIndex].timeMs, targetMs: baseRows[referenceIndex].timeMs })
+  }
   const ownerAt = (sourceMs: number) => {
     let ownerIndex = -1
     for (let index = 0; index < ownerRows.length; index += 1) {
@@ -785,8 +846,15 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     // A translated phrase belongs to its original provider row, not the
     // nearest shared anchor. Never extrapolate a divergent verse from a
     // whole-song median offset or snap an extra chorus to the beginning.
-    const mapped = anchor.targetMs + sourceMs - anchor.sourceMs
+    const offsetMs = anchor.targetMs + sourceMs - anchor.sourceMs
     const targetEnd = baseRows[(anchor.targetIndices?.at(-1) ?? anchor.referenceIndex) + 1]?.timeMs
+    // Provider rows merged into one displayed row: the text proves that their
+    // translations are that row's. A later half stamped within 1.2 s of the
+    // next row was taken for that row's early translation (by the bucket rule
+    // below and by the renderer), so it stays clear of that window.
+    const mapped = anchor.grouped && targetEnd != null
+      ? Math.max(anchor.targetMs, Math.min(offsetMs, targetEnd - 1300))
+      : offsetMs
     return mapped >= 0 && (targetEnd == null || mapped < targetEnd) ? [{ timeMs: mapped, text }] : []
   }
   const syncedLyrics = translatedRows.flatMap(row => remap(row.timeMs, row.text))
@@ -966,6 +1034,38 @@ export function hasParallelLyricRows(value: string | null | undefined) {
   return paired >= 4 && paired / Math.max(1, groups.size) >= .55
 }
 
+/**
+ * Share of one timeline's words that the other also has (bigram containment,
+ * the larger of both directions): near 1 for one song even when a copy stops
+ * early or has a hole, low between different songs. Measured on a 213-song
+ * library: 99.9 % of 45 000 different-song pairs under .30 (same artist: all
+ * under .31), the same song cut to 40 % of its rows at .99.
+ */
+const SAME_SONG_CONTAINMENT = .5
+function sharesLyricWords(left: LyricsResult, right: LyricsResult) {
+  const grams = (result: LyricsResult) => {
+    const text = timelineRows(result.syncedLyrics).map(row => alignmentText(row.rawText)).join('')
+    const counts = new Map<string, number>()
+    for (let index = 0; index < text.length - 1; index += 1) {
+      const gram = text.slice(index, index + 2)
+      counts.set(gram, (counts.get(gram) ?? 0) + 1)
+    }
+    return counts
+  }
+  const contained = (subject: Map<string, number>, reference: Map<string, number>) => {
+    let shared = 0
+    let total = 0
+    for (const [gram, count] of subject) {
+      total += count
+      shared += Math.min(count, reference.get(gram) ?? 0)
+    }
+    return total ? shared / total : 0
+  }
+  const leftGrams = grams(left)
+  const rightGrams = grams(right)
+  return Math.max(contained(leftGrams, rightGrams), contained(rightGrams, leftGrams)) >= SAME_SONG_CONTAINMENT
+}
+
 function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // Filter before choosing a winner inside each provider as well as in the
   // final cross-provider merge. Otherwise an impossible high-score search hit
@@ -989,10 +1089,13 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // healthy top tier within five points; a demonstrably incomplete leader
   // still reopens the full 20-point pool below.
   const topTier = wide.filter(item => item.confidence >= strongestIdentity - 5)
-  const topLooksTruncated = topTier.every(item => {
+  const coverage = (item: LyricsResult) => {
     const stats = timedLyricsStats(item.syncedLyrics, durationMs)
-    return stats.lineCount < 4 || stats.excessiveGapMs > 0 || stats.continuity < .82 || (durationMs > 0 && stats.tailCoverage < .55)
-  })
+    if (stats.lineCount < 4 || stats.continuity < .82 || (durationMs > 0 && stats.tailCoverage < .55)) return 'truncated'
+    return stats.excessiveGapMs > 0 ? 'long-gap' : 'healthy'
+  }
+  const topLooksTruncated = topTier.every(item => coverage(item) === 'truncated')
+  const topHasLongGap = !topLooksTruncated && topTier.every(item => coverage(item) !== 'healthy')
   const topHasProvenHole = topTier.some(item => isProvenIncomplete(item, wide))
   const topHasDetailedEquivalent = topTier.some(item => wide.some(reference => reference !== item
     && durationCompatible(item, reference)
@@ -1005,7 +1108,19 @@ function bestLyricsCandidate(candidates: LyricsResult[], durationMs = 0) {
   // hole/outlier, or simple coverage metrics show clear truncation.
   // Finer timing can reopen the pool only with identical ordered content;
   // approximate similarity must not replace a stronger original with omissions.
-  const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide : topTier
+  // One silence beyond the 18 s allowance is usually an ordinary interlude,
+  // and only the same song can show that it is a hole. It used to admit
+  // anything within 20 identity points like real truncation does, so another
+  // song by the artist whose title contains the played one (花 / 花に亡霊)
+  // won on its row count. Such a candidate now has to share the leaders'
+  // words, unless the two cannot be compared: a leader of under four usable
+  // rows, or lyrics written in another script.
+  const completesTop = (item: LyricsResult) => topTier.includes(item) || topTier.some(top =>
+    timelineRows(top.syncedLyrics).length < 4
+    || dominantLyricScript(parseTimedRows(top.syncedLyrics)) !== dominantLyricScript(parseTimedRows(item.syncedLyrics))
+    || sharesLyricWords(top, item))
+  const plausible = topLooksTruncated || topHasProvenHole || topHasDetailedEquivalent || topIsTimelineOutlier ? wide
+    : topHasLongGap ? wide.filter(completesTop) : topTier
   const undominated = plausible.filter(item => !isProvenIncomplete(item, plausible))
   const complete = undominated.length ? undominated : plausible
   const undominatedTimeline = complete.filter(item => !complete.some(other => equivalentTimelineDurationOrder(item, other) > 0
@@ -1619,6 +1734,20 @@ function waitWithSignal(milliseconds: number, signal?: AbortSignal) {
   })
 }
 
+/**
+ * Reads the whole body while the timeout and the caller's abort still apply.
+ * `fetch` resolves on the headers; returning at that point left the later
+ * `response.json()` unbounded, so a server that sent headers and then stalled
+ * kept the lookup, its in-flight entry and the song's "searching" state alive
+ * past every budget.
+ */
+async function bufferedResponse(response: Response): Promise<Response> {
+  // Test doubles are plain objects with their own json(); they have nothing to buffer.
+  if (typeof Response !== 'function' || !(response instanceof Response)) return response
+  const body = await response.arrayBuffer()
+  return new Response(body.byteLength ? body : null, { status: response.status, statusText: response.statusText, headers: response.headers })
+}
+
 export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 4200, retries = 2, parentSignal?: AbortSignal) {
   let lastError: unknown
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -1629,7 +1758,7 @@ export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutM
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(url, { ...init, signal: controller.signal })
-      if (!isTransientProviderStatus(response.status) || attempt === retries) return response
+      if (!isTransientProviderStatus(response.status) || attempt === retries) return await bufferedResponse(response)
       const retryAfter = Number(response.headers.get('retry-after')) * 1000
       await waitWithSignal(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 1800) : 300 * (attempt + 1), parentSignal)
     } catch (error) {
@@ -1938,6 +2067,14 @@ export async function enrichTranslationByLyricText(result: LyricsResult | null, 
 async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signal?: AbortSignal): Promise<LyricsResult | null> {
   const durationMs = referenceDurationMs(track)
   const allDetails: LyricsResult[] = []
+  // Entries whose lyrics were already fetched. The artist page returns the
+  // first search's entries again; fetched twice, one entry counted as two
+  // agreeing timelines and could outvote the right recording.
+  const fetched = new Set<number>()
+  // A search or a lyric request failed while others answered: the best entry
+  // may be among the missing ones, so the answer is not final.
+  let incomplete = false
+  const finish = (value: LyricsResult | null): LyricsResult | null => value && incomplete ? { ...value, transient: true } : value
   const collect = async (searches: string[], limit: number) => {
     const settled = await Promise.allSettled([...new Set(searches)].map(async search => {
       const form = new URLSearchParams({ s: search, type: '1', limit: String(limit), offset: '0' })
@@ -1950,15 +2087,16 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
     }))
     const songs = new Map<number, NeteaseSong>()
     for (const result of settled) if (result.status === 'fulfilled') for (const song of result.value) songs.set(song.id, song)
-    if (!songs.size) {
-      const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (failure) throw failure.reason
-    }
+    const searchFailure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (!songs.size && searchFailure) throw searchFailure.reason
+    if (searchFailure) incomplete = true
     const ranked = [...songs.values()].map(song => ({
       song,
       score: weightedScore(song.name, neteaseAttribution(song), neteaseDuration(song), { track: track.name, artist: track.artist, album: track.album, durationMs }, true, neteaseAlbum(song))
     })).sort((a, b) => b.score - a.score)
-    const detailResults = await Promise.allSettled(ranked.filter(item => item.score >= 55).slice(0, 8).map(async match => {
+    const wanted = ranked.filter(item => item.score >= 55 && !fetched.has(item.song.id)).slice(0, 8)
+    for (const item of wanted) fetched.add(item.song.id)
+    const detailResults = await Promise.allSettled(wanted.map(async match => {
       const lyricsResponse = await fetchWithTimeout(`${NETEASE_API}/song/lyric?id=${match.song.id}&lv=-1&tv=-1&rv=-1`, { headers: { ...headers, Referer: 'https://music.163.com/' } }, 4200, 2, signal)
       if (!lyricsResponse.ok) {
         if (isTransientProviderStatus(lyricsResponse.status)) throw new Error(`网易云歌词暂时不可用 (${lyricsResponse.status})`)
@@ -1976,10 +2114,9 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
     }))
     const details = detailResults.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
     allDetails.push(...details)
-    if (!details.length) {
-      const failure = detailResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (failure) throw failure.reason
-    }
+    const detailFailure = detailResults.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (!details.length && detailFailure) throw detailFailure.reason
+    if (detailFailure) incomplete = true
     return details
   }
   const primarySearches = [`${track.name} ${track.artist}`, `${cleanTrackTitle(track.name)} ${primaryArtist(track.artist)}`, cleanTrackTitle(track.name)]
@@ -1994,7 +2131,7 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
   // endpoint by more than ordinary provider rounding. This costs one request
   // only on ambiguous releases and avoids baking a 2s version offset into the
   // lyric clock before cross-provider alignment even begins.
-  if (primary && primary.confidence >= 88 && primaryDurationDelta <= 1200) return withSiblingTranslation(primary, allDetails)
+  if (primary && primary.confidence >= 88 && primaryDurationDelta <= 1200) return finish(withSiblingTranslation(primary, allDetails))
   // Localized titles can share no text at all (for example an English Spotify
   // title versus a Japanese provider title). A weak normal-query result can
   // also be an unrelated exact-Latin cover whose album contains the query.
@@ -2002,12 +2139,16 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
   // Script-aware identity plus the duration fingerprint keeps this bounded.
   const artistSearches = [track.artist, primaryArtist(track.artist)].filter(Boolean)
   try {
-    return withSiblingTranslation(bestLyricsCandidate([...primaryCandidates, ...await collect(artistSearches, 50)], durationMs) ?? primary, allDetails)
+    return finish(withSiblingTranslation(bestLyricsCandidate([...primaryCandidates, ...await collect(artistSearches, 50)], durationMs) ?? primary, allDetails))
   } catch (error) {
     // The first-stage result is already useful. If the shared provider budget
-    // expires during the optional ambiguity search, preserve it instead of
-    // turning a completed NetEase timeline into a total provider failure.
-    if (signal?.aborted) return withSiblingTranslation(primary, allDetails)
+    // expires during the wider search, it is shown instead of turning a
+    // completed NetEase timeline into a total provider failure, but as a
+    // transient answer: the search that would have found the right entry (and
+    // its translation) did not finish, and caching this as final left the
+    // song without translation until the app restarted.
+    const partial = signal?.aborted ? withSiblingTranslation(primary, allDetails) : null
+    if (partial) return { ...partial, transient: true }
     throw error
   }
 }

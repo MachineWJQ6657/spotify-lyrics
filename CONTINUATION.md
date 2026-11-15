@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.70 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.69-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.71 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.70-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (113 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (115 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,27 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.71 deployed: fifth review (lyrics provider), translation alignment and candidate selection, old-versus-new comparison on library songs
+
+- `release/current` = **0.4.71** (asar SHA256 `0b650ac34440df3865ac9c80b27b22adcbb704b10b33aefe5b299e7bd096850c`, verifier 115/115, 1260 tests). Rollback: `release/current-0.4.70-backup-20261115`; the 0.4.69 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0471`.
+- **Fifth independent review** (`electron/lyrics-provider.ts` at 98074c4): eight findings, all fixed. Regression tests: `electron/provider-review-fixes.test.ts`, `electron/fetch-body-timeout.test.ts`, `src/lib/align-rounding.test.ts`.
+  1. *A short row absorbed by its neighbours* (`alignSupplementalTimeline`). A fuzzy grouping (>= .85) was accepted although the row already had an exact one-to-one anchor, so "A" + "Yeah" mapped both onto A and the short row showed the translations before and after it. `closeness(joined, target) > ownCloseness` is now required in both grouping loops; in the inverse loop a near-identical grouping must include the row's own anchor, an exact one need not.
+  2. *One interlude treated as truncation* (`bestLyricsCandidate`). `coverage()` separates `truncated` (few rows, continuity < .82, tail < .55) from `long-gap` (`excessiveGapMs > 0` only). A long gap still widens the identity tier to 20 points, but only for candidates that `sharesLyricWords` with a leader (bigram containment >= `SAME_SONG_CONTAINMENT` .5), a leader of under four usable rows, or lyrics in another script.
+  3. *NetEase entry counted twice.* `fetched` (song ids) in `fetchNetease`: the artist page no longer re-fetches first-stage entries, and its eight slots go to new entries.
+  4. *Translation one row late* (renderer `alignSecondaryTrack`, `SAME_STAMP_MS` 15): re-timed tracks are written to 10 ms, the original keeps milliseconds.
+  5. *Second half of a split row on the next row.* Group members (`grouped: true`) are clamped to `targetEnd - 1300` so neither `supplementalBuckets` nor the renderer's 1.2 s early-translation rule gives them to the next line; a member past the row's end is kept instead of dropped.
+  6. *Kanji-only sung rows taken as an embedded translation* (`splitEmbeddedTranslation`): the alternating layout must also cover 40 % of the kana rows.
+  7. *Unfinished NetEase lookups cached as final.* `incomplete` (a search or lyric request failed while others answered) and budget expiry in the artist-page stage now return `transient: true`.
+  8. *Unbounded body read.* `fetchWithTimeout` returns `bufferedResponse(response)`: the body is read while the timeout and the parent abort still apply.
+- **Old against new on the user's library.** `<scratchpad>/review5/ab.mjs` (in-memory replay) and `ab2.mjs` / `dbg2.mjs` (HTTP cached per song in `.qa-scratch/http-cache/`, offline on a second run) run `fetchLyrics` of an esbuild bundle of 98074c4 (`lp.orig.mjs`) and of the working tree (`lp.mjs`, rebuilt by `rebuild.sh`) on songs from `.qa-scratch/library-originals.json` (dumped read-only from the profile backup by a variant of `scripts/qa/library-stats.cjs`). 142 songs: 119 identical, 23 differ; every difference was inspected against the provider rows. The comparison found three side effects of the first version of the fixes, now covered by tests:
+  - A provider row that is the tail of the displayed row its neighbour maps to (displayed "A" / "B C", provider "A B" / "C") lost its translation: it is mapped to that row when the row ends (or starts) with exactly its words, four characters or more.
+  - Requiring the row's own anchor inside a grouping sent an exactly spelled-out sentence to an earlier row that only contained it; exact groupings are exempt.
+  - A short row both timelines have but spell differently ("U&I" / "You and I") used to get its translation by accident (absorbed, then moved by the lead rule). Lone unmatched rows of at most eight characters in the same slot at the same lag (1.2 s) are paired; longer ones stay unpaired, as `rejects translations of divergent original rows even between matching anchors` demands.
+- `LYRICS_PROVIDER_REVISION` 43 -> 44: saved songs are looked up again on their next play. `scripts/verify-package.cjs`: `providerRevision44`, `providerAlignmentFixes`, `providerSelectionFixes`, and `exactTranslationAnchor` now checks the 15 ms rule.
+- Changelog entry 0.4.71 in `src/lib/changelog.ts`.
+- **Sixth review** (renderer: `Overlay.tsx`, `OverlayControls.tsx`, `LyricsStage.tsx` and their helpers) was started as a subagent while 0.4.71 was being released; its findings are not in this release.
+- Not verified with live playback: everything above was checked with synthetic rows, recorded provider responses and the offline comparison.
 
 ## 2026-11-15 / 0.4.70 deployed: listening measurement fixes from a fourth review, centred lyrics in the main window
 

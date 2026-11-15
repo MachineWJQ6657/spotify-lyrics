@@ -11,7 +11,7 @@ const original = { id: 'o', language: 'ja', label: '日本語', kind: 'original'
   lines: Array.from({ length: 12 }, (_, index) => ({ startMs: 10_000 + index * 5000, text: `歌詞の行その${index}` })) }
 const listened = (state: ListenedOffset['state'], lines: number): ListenedOffset =>
   ({ timingKey: listenTimingKey(original)!, state, offsetMs: 0, lines, measuredAt: 1 })
-const document = (value: ListenedOffset): LyricsDocument => ({ trackId: track.id, track, providerRevision: 43, tracks: [original],
+const document = (value: ListenedOffset): LyricsDocument => ({ trackId: track.id, track, providerRevision: 44, tracks: [original],
   availableSources: [{ id: 'lrclib', lines: 12, agrees: true }, { id: 'netease', lines: 12, agrees: true }], listenedOffset: value })
 const decide = (lyrics: LyricsDocument) => listenTarget({ playback, lyrics, enabled: true, demoMode: false, manualActive: false })
 

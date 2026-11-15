@@ -96,3 +96,14 @@ describe('LRC parsing', () => {
     expect(visible.map(track => track.id)).toEqual(['original', 'translation'])
   })
 })
+
+import { visibleTracks as orderedVisibleTracks } from './lyrics'
+it('lists romaji before translations whatever order the providers answered in', () => {
+  const line = [{ startMs: 1000, text: 'a' }]
+  const document = { trackId: 't', tracks: [
+    { id: 'zh', language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: 'x', lines: line },
+    { id: 'ro', language: 'romaji', label: 'Romaji', kind: 'romanization' as const, source: 'x', lines: line },
+    { id: 'ja', language: 'ja', label: '日本語', kind: 'original' as const, source: 'x', lines: line }
+  ] }
+  expect(orderedVisibleTracks(document, ['ja', 'zh-Hans', 'romaji'], true).map(track => track.id)).toEqual(['ja', 'ro', 'zh'])
+})

@@ -556,3 +556,30 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   .app-backdrop-art { animation: none; }
   .lyric-group, .lyric-seek-hint, .progress-track, .switch i { transition: none; }
 }
+
+/* ---------- Typography (0.4.61) ----------
+   Microsoft YaHei UI has only Regular and Bold, so every 500/600 label fell to
+   one of those two. Noto Sans SC (installed with current Windows 11) has a true
+   Medium; use it where the text is large enough to show the difference: page
+   and section titles and the lyric lines. Small UI text stays on YaHei UI,
+   which is hinted for 12–13 px. Latin and digits keep Segoe UI Variable, with
+   its Display optical size for titles. The overlay keeps its own fonts. */
+.app-shell h1, .app-shell h2, .app-shell h3,
+.panel-heading h2, .content-page-header h1, .editor-header h2, .empty-lyrics h3, .library-empty h3 {
+  font-family: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
+}
+.content-page-header h1 { font-weight: 700; letter-spacing: 0; }
+.now-header h1 { letter-spacing: 0; }
+/* Chinese lyric lines and translations: real weights instead of YaHei's two. */
+.app-shell .lyric-primary.chinese-text, .app-shell .lyric-secondary.chinese-text {
+  font-family: 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI Variable Text', sans-serif !important;
+}
+.app-shell .lyric-secondary.chinese-text { font-weight: 500; letter-spacing: .01em; }
+.app-shell .lyric-primary.chinese-text { font-weight: 700; }
+/* Romaji reads better slightly open, in the text optical size. */
+.lyric-secondary.romanization { font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif !important; font-weight: 500; letter-spacing: .015em; }
+/* Section labels: Medium where the font has it, never synthetic bold. */
+.setting-label, .switch-row strong, .section-heading strong { font-synthesis: none; }
+.content-page-header p, .info-note, .source-card-grid p, .help-grid span { text-wrap: pretty; }
+/* Numbers that change in place keep their width. */
+.setting-label small, .progress-row, .lyric-seek-hint, .version, .library-toolbar > span { font-variant-numeric: tabular-nums; }

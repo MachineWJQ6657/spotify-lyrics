@@ -76,6 +76,9 @@ const checks = {
   lyricsSourceSwitch: main.includes('function assembleProviderSet(') && main.includes('reuseProviderResults') && renderer.includes('function sourceOptions(') && renderer.includes('setLyricsSource'),
   relistenOnDemand: renderer.includes('function relistenCurrentSong(') && renderer.includes('立即重新校准'),
   plainCopy: !/不保存、不上传|不代表时间同步|未验证听感|未接管歌词时钟|待核验/.test(renderer),
+  // 0.4.61: main window remembers its place, optional start at login (tray only), Noto Sans SC for large Chinese text.
+  mainWindowStateAndLogin: main.includes('function fitWindowToWorkArea(') && /--syllable-autostart/.test(main) && /app:set-login-item/.test(main) && renderer.includes('开机启动'),
+  typography: /Noto Sans SC/.test(rendererCss) && /Segoe UI Variable Display/.test(rendererCss),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

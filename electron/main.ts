@@ -11,6 +11,7 @@ import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-
 import { inspectWindowRegion } from './windows-window-region'
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { createErrorLog } from './error-log'
+import { createMainWindowStateWriter, fitWindowToWorkArea, readMainWindowState } from './main-window-state'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
 import { PlaybackDiagnostics } from './playback-diagnostics'
@@ -126,6 +127,9 @@ const qaView = process.argv.find(value => value.startsWith('--syllable-qa-view='
 const qaLogPath = process.argv.find(value => value.startsWith('--syllable-qa-log='))?.slice('--syllable-qa-log='.length)
 const forceOverlayForQa = process.argv.includes('--syllable-force-overlay')
 const secondaryMonitorQa = process.argv.includes('--syllable-secondary-test') || process.env.SYLLABLE_SECONDARY_TEST === '1'
+/** Started by the Windows login item: stay in the tray, show only the desktop lyrics. */
+const startedAtLogin = process.argv.includes('--syllable-autostart')
+const LOGIN_ITEM_ARGS = ['--syllable-autostart']
 const liveAudioQa = qaView === 'audio-sync-live' || qaView === 'audio-phoneme-live'
 // Offscreen audio-panel checks must not interrupt the user's active desktop.
 // This mode requires explicit QA capture arguments and an isolated profile.
@@ -704,9 +708,16 @@ function createWindows() {
   const testArea = secondaryMonitorQa ? secondaryDisplay().workArea : null
   const mainWidth = testArea ? Math.min(1120, testArea.width) : 1120
   const mainHeight = testArea ? Math.min(720, testArea.height) : 720
+  // Reopen where the user left the window. Tests always use the secondary
+  // display and never restore or save a position.
+  const mainStateFile = path.join(app.getPath('userData'), 'main-window.json')
+  const savedMain = testArea || headlessAudioQa ? null : readMainWindowState(mainStateFile)
+  const restoredMain = savedMain ? fitWindowToWorkArea(savedMain, screen.getDisplayMatching(savedMain).workArea, { width: 1024, height: 680 }) : null
   mainWindow = new BrowserWindow({
-    show: !headlessAudioQa,
+    // A login-item start stays in the tray: only the desktop lyrics appear.
+    show: !headlessAudioQa && !startedAtLogin,
     width: mainWidth, height: mainHeight,
+    ...(restoredMain ?? {}),
     ...(testArea ? {
       x: Math.round(testArea.x + (testArea.width - mainWidth) / 2),
       y: Math.round(testArea.y + (testArea.height - mainHeight) / 2)
@@ -715,6 +726,20 @@ function createWindows() {
     backgroundColor: '#000000', titleBarStyle: 'hidden', icon: appIcon(),
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: !headlessAudioQa, offscreen: headlessAudioQa }
   })
+  if (savedMain?.maximized && !startedAtLogin) mainWindow.maximize()
+  if (!testArea && !headlessAudioQa) {
+    const writeMainState = createMainWindowStateWriter(mainStateFile)
+    let mainStateTimer: NodeJS.Timeout | null = null
+    const saveMainState = () => {
+      if (mainStateTimer) clearTimeout(mainStateTimer)
+      mainStateTimer = setTimeout(() => {
+        mainStateTimer = null
+        if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return
+        void writeMainState({ ...mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() })
+      }, 400)
+    }
+    for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const) mainWindow.on(event as 'resize', saveMainState)
+  }
   bindRenderVisibility(mainWindow)
   void mainWindow.loadURL(rendererUrl())
   mainWindow.webContents.on('render-process-gone', () => {
@@ -2000,6 +2025,18 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   })
   ipcMain.handle('overlay:movable', (_event, value: boolean) => {
     return setOverlayMovable(value)
+  })
+  // "开机启动": a per-user login item for the installed build only (a dev
+  // build would register Electron itself).
+  const loginItem = () => app.isPackaged
+    ? { supported: true, enabled: app.getLoginItemSettings({ path: process.execPath, args: LOGIN_ITEM_ARGS }).openAtLogin }
+    : { supported: false, enabled: false }
+  ipcMain.handle('app:login-item', event => event.sender === mainWindow?.webContents ? loginItem() : { supported: false, enabled: false })
+  ipcMain.handle('app:set-login-item', (event, enabled: unknown) => {
+    if (event.sender !== mainWindow?.webContents || !app.isPackaged) return { supported: false, enabled: false }
+    app.setLoginItemSettings({ openAtLogin: enabled === true, path: process.execPath, args: LOGIN_ITEM_ARGS })
+    qaLog(`login item: ${enabled === true}`)
+    return loginItem()
   })
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
   ipcMain.handle('window:visibility', event => {

@@ -59,6 +59,8 @@ interface SyllableApi {
   }
   window: { show(section?: 'overlay-settings'): Promise<boolean>; onShowSection?(callback: (section: string) => void): () => void; minimize(): Promise<void>; maximize(): Promise<void>; close(): Promise<void>;
     visibility(): Promise<boolean>; onVisibilityChanged(callback: (visible: boolean) => void): () => void }
+  /** Windows login item (installed build only). */
+  app?: { loginItem(): Promise<{ supported: boolean; enabled: boolean }>; setLoginItem(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }> }
   meta: { redirectUri: string }
 }
 

@@ -103,7 +103,10 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
   if (document.untimedOriginal) return []
   const creditTimes = new Set(document.tracks.filter(track => track.kind === 'original')
     .flatMap(track => track.lines.filter(line => isLyricCredit(line.text)).map(line => line.startMs)))
-  return document.tracks
+  // Providers list supplemental tracks in whatever order they answered; show
+  // them in one fixed order: original, romaji, then translations.
+  const rank = (track: LyricTrack) => track.kind === 'original' ? 0 : track.kind === 'romanization' ? 1 : 2
+  return [...document.tracks].sort((left, right) => rank(left) - rank(right))
     // The source-language track is the alignment anchor and must never be
     // replaced by a selected translation merely because its language toggle is
     // off. Language switches control supplemental tracks around that anchor.

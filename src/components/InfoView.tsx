@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Captions, CheckCircle2, CircleHelp, Clock3, Download, ExternalLink, Keyboard, MonitorUp, Settings2, Wifi } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Captions, CheckCircle2, CircleHelp, Clock3, Download, ExternalLink, Keyboard, MonitorUp, Power, Settings2, Wifi } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
@@ -16,6 +16,18 @@ export function listenedClockLabel(measuredDeltaMs: number) {
 
 export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; openEditor(): void }) {
   const [exporting, setExporting] = useState(false)
+  // Windows login item; only the installed build can register one.
+  const [loginItem, setLoginItem] = useState<{ supported: boolean; enabled: boolean } | null>(null)
+  useEffect(() => {
+    let current = true
+    void window.syllable.app?.loginItem().then(value => { if (current) setLoginItem(value) }).catch(() => undefined)
+    return () => { current = false }
+  }, [])
+  const toggleLoginItem = async () => {
+    if (!loginItem?.supported) return
+    const next = await window.syllable.app?.setLoginItem(!loginItem.enabled).catch(() => null)
+    if (next) setLoginItem(next)
+  }
   const [exportStatus, setExportStatus] = useState('')
   const exportDiagnostics = async () => {
     if (exporting) return
@@ -52,6 +64,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <article><MonitorUp /><div><strong>桌面歌词</strong><span>{settings.overlayVisible ? '正在显示' : '当前隐藏'}</span></div><button onClick={() => void toggleOverlay()}>{settings.overlayVisible ? '隐藏' : '显示'}</button></article>
       <article><Clock3 /><div><strong>本曲时间校准</strong><span>{offsetMs > 0 ? '+' : ''}{offsetMs} ms · {clockMode}</span></div><button onClick={() => manual ? clearSessionCalibration() : activeLyrics ? setLyricsOffset(0) : patchSettings({ offsetMs: 0 })}>{manual ? '撤销本次' : '归零'}</button></article>
       <article><Captions /><div><strong>歌词字号</strong><span>{settings.fontSize}px</span></div><button onClick={() => patchSettings({ fontSize: 56 })}>设为 56px</button></article>
+      {loginItem?.supported && <article><Power /><div><strong>开机启动</strong><span>{loginItem.enabled ? '登录 Windows 后自动在后台启动，只显示桌面歌词' : '登录 Windows 后不自动启动'}</span></div><button onClick={() => void toggleLoginItem()}>{loginItem.enabled ? '关闭' : '开启'}</button></article>}
       <article><Settings2 /><div><strong>逐行编辑</strong><span>搜索、改词与取当前时间</span></div><button onClick={openEditor}>打开</button></article>
     </div>
     <div className="info-note">更细的语言、字号、偏移、悬浮窗外观和锁定选项都可直接在右侧调整。</div>

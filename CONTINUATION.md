@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.60 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.59-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.61 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.60-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (85 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (87 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,14 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.61 deployed: typography, main-window memory, start at login
+
+- `release/current` = **0.4.61** (asar SHA256 `0c1cc99951feebc598593e0d4b474799fae03b661ba7fdd4f22bcd44add608d3`, verifier 87/87, 1111 tests). Rollback: `release/current-0.4.60-backup-20261115`; the 0.4.59 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0461`.
+- **Fonts.** The machine has Noto Sans SC (Thin to Black, static families). Microsoft YaHei UI has only Light, Regular and Bold, so 500/600 collapsed to Regular/Bold. `app.css` now uses Noto Sans SC for headings and for `.chinese-text` lyric rows in the main window (translations at 500); small UI text stays on YaHei UI; Latin and digits use Segoe UI Variable (Display for titles). The overlay's fonts are unchanged.
+- **Track order.** `visibleTracks` sorts original → romanization → translation for the main view and the overlay.
+- **Main window state.** `electron/main-window-state.ts`: read synchronously before the window is created, `fitWindowToWorkArea` clamps to the matching display, saved (400 ms debounce) on resize/move/maximize to `<userData>/main-window.json`. Secondary-display test runs neither restore nor save.
+- **Start at login.** `app:login-item` / `app:set-login-item` (packaged build only) register `Syllable.exe --syllable-autostart`; that start keeps the main window hidden (tray + overlay only). Toggle on the 偏好设置 page. In the smoke test the setting was only read, never changed, so the user's real login items were not touched.
 
 ## 2026-11-15 / 0.4.60 deployed: lyrics source menu, re-run listening calibration, plain copy
 

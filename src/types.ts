@@ -140,4 +140,6 @@ export interface AppSettings {
   lineHeight: number
   cornerRadius: number
   positionLocked: boolean
+  /** Show the next line under the one being sung, when the overlay has room for it. */
+  overlayNextLine?: boolean
 }

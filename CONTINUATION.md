@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.63 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.62-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.64 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.63-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (90 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (93 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,15 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.64 deployed: optional next-line preview in the overlay, find in lyrics, provider tag in the library
+
+- `release/current` = **0.4.64** (asar SHA256 `7529b7eea6e17579b1e04d69ebdfda510f2f271c4662196f759001e61a448447`, verifier 93/93, 1130 tests). Rollback: `release/current-0.4.63-backup-20261115`; the 0.4.62 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0464`.
+- **Next-line preview** (`AppSettings.overlayNextLine`, off by default; 设置 → 悬浮窗 → 显示下一句). `upcomingLine(lines, index)` in `src/lib/overlay-content.ts` returns the next row that has words (interludes are skipped, index -1 gives the first line). `Overlay.tsx` renders it as `.overlay-secondary.next-line` **outside** `.overlay-line-content`, so the shrink-to-fit search never counts it; a layout effect sets `display: none` on the element when `fit < 1` or when content + preview exceed the box. It never shrinks the line being sung. One row with an ellipsis (`src/styles.css`, end of file). Measured: shown at 721×211 and 820×220 with a one-row lyric, hidden at 820×190 and below.
+- **Find in lyrics** (`src/lib/find-lyrics.ts`, UI in `LyricsStage.tsx`): Ctrl+F or the magnifier that appears over the lyrics. `foldForFind` normalises NFKC, case, runs of spaces and katakana to hiragana. Latin-only queries keep word boundaries; a query with kana or kanji also matches with spaces removed. Enter / Shift+Enter step (`stepMatch`), Ctrl+Enter seeks to the match, Esc closes; the first match is the one at or after the line being sung (`nearestMatch`). IME-confirming Enter is ignored (`isComposing`). The bar closes on a song change and is not offered for untimed lyrics or while the editor is open.
+- **Library**: `librarySourceTag(document)` names the provider of the original track, or 本地 for a track in `userEditedTrackIds`.
+- No main-process changes in this release.
+- The repo root holds 25 `.qa-user-data-preupdate-*` profile backups (384 MB, git-ignored). They are safe to prune by hand; nothing reads them.
 
 ## 2026-11-15 / 0.4.63 deployed: listening tries another source when the shown one is inconsistent (not yet verified live)
 

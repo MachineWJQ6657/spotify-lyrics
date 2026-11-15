@@ -23,6 +23,17 @@ export function overlayContent(playback: PlaybackSnapshot | null, document: Lyri
   return { kind: 'title', title: track.name.trim(), subtitle }
 }
 
+/**
+ * The next line that has words, for the optional preview row under the line
+ * being sung. Empty rows (interludes) are skipped, so the preview during an
+ * interlude or the intro is the line that comes after it.
+ */
+export function upcomingLine(lines: LyricLine[] | undefined, index: number): LyricLine | undefined {
+  if (!lines) return undefined
+  for (let next = Math.max(-1, index) + 1; next < lines.length; next++) if (lines[next].text.trim()) return lines[next]
+  return undefined
+}
+
 /** Smallest scale a long line may be shrunk to before it is clipped instead. */
 export const MIN_OVERLAY_FIT = .6
 

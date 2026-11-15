@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, LocateFixed, Music2, Play, RefreshCw, Search } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronUp, LocateFixed, Music2, Play, RefreshCw, Search, X } from 'lucide-react'
 import type { LyricLine, LyricTrack, LyricsDocument } from '../types'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from '../lib/lyrics'
 import { lyricScrollTarget } from '../lib/lyrics-scroll'
+import { findLineMatches, nearestMatch, stepMatch } from '../lib/find-lyrics'
 
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
   onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
@@ -20,12 +21,14 @@ interface LineGroupProps {
   onHeard?: (index: number) => void
   onSeek?: (index: number) => void
   seekLabel?: string
+  /** Find-in-lyrics: this row contains the query (`current` is the one scrolled to). */
+  found?: 'match' | 'current'
 }
 
-const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard, onSeek, seekLabel }: LineGroupProps) {
+const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard, onSeek, seekLabel, found }: LineGroupProps) {
   const baseClass = language === 'ja' ? 'japanese-grid' : language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
   const seekable = Boolean(onSeek && !onHeard)
-  return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''} ${seekable ? 'seekable' : ''}`}
+  return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''} ${seekable ? 'seekable' : ''} ${found ? `find-${found}` : ''}`}
     title={seekable && seekLabel ? `从 ${seekLabel} 播放这一句` : undefined}
     onClick={seekable ? () => {
       // Selecting text with the mouse also ends in a click; that is not a seek.
@@ -86,6 +89,43 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
   }, [active])
 
   useEffect(() => setFollowing(true), [document?.trackId, base?.id])
+
+  // Find in lyrics (Ctrl+F): rows whose original, romaji or translation
+  // contains the query are marked, and Enter walks through them.
+  const [find, setFind] = useState<{ query: string; cursor: number } | null>(null)
+  const findInput = useRef<HTMLInputElement>(null)
+  const rowTexts = useMemo(() => groups.map(group => [group.line.text, ...group.secondary.map(item => item.line.text)]), [groups])
+  const matches = useMemo(() => find?.query ? findLineMatches(rowTexts, find.query) : [], [rowTexts, find?.query])
+  const findCursor = find && matches.length ? Math.min(find.cursor, matches.length - 1) : -1
+  const currentMatch = findCursor >= 0 ? matches[findCursor] : -1
+  const searchable = groups.length > 0 && !document?.untimedOriginal
+  const openFind = useCallback(() => {
+    setFind(current => current ?? { query: '', cursor: 0 })
+    findInput.current?.focus()
+    findInput.current?.select()
+  }, [])
+  useEffect(() => {
+    if (!searchable) return
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'f') return
+      // The lyrics editor has its own search box.
+      if (window.document.querySelector('.editor-backdrop')) return
+      event.preventDefault()
+      openFind()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [searchable, openFind])
+  useEffect(() => setFind(null), [document?.trackId])
+  useEffect(() => {
+    if (currentMatch < 0) return
+    const viewport = viewportRef.current
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-line-index="${currentMatch}"]`)
+    const top = viewport ? lyricScrollTarget(currentMatch, viewport.clientHeight, row) : null
+    if (!viewport || top == null) return
+    setFollowing(false)
+    viewport.scrollTo({ top, behavior: 'smooth' })
+  }, [currentMatch, find?.query])
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -148,9 +188,28 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
           active={index === active} past={index < active} positionMs={index === active && line.words?.length ? positionMs : undefined}
           onHeard={calibrating && onHeardLine ? markHeard : undefined}
           onSeek={onSeekLine ? seekLine : undefined} seekLabel={onSeekLine && seekLabel ? seekLabel(line) : undefined}
+          found={index === currentMatch ? 'current' : find?.query && matches.includes(index) ? 'match' : undefined}
         />)}
       </div>
     </div>
+    {find ? <div className="lyrics-find" role="search">
+      <Search size={14} aria-hidden="true" />
+      <input ref={findInput} autoFocus value={find.query} placeholder="在歌词中查找" aria-label="在歌词中查找" spellCheck={false}
+        onChange={event => { const query = event.target.value; setFind({ query, cursor: nearestMatch(findLineMatches(rowTexts, query), active) }) }}
+        onKeyDown={event => {
+          // Enter that confirms an IME candidate is not "next match".
+          if (event.nativeEvent.isComposing) return
+          if (event.key === 'Escape') { event.preventDefault(); setFind(null) }
+          if (event.key !== 'Enter') return
+          event.preventDefault()
+          if (event.ctrlKey && currentMatch >= 0 && onSeekLine) seekLine(currentMatch)
+          else if (matches.length) setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, event.shiftKey ? -1 : 1) })
+        }} />
+      <span className="lyrics-find-count" role="status">{!find.query.trim() ? '' : matches.length ? `${findCursor + 1} / ${matches.length}` : '没有找到'}</span>
+      <button title="上一处（Shift+Enter）" aria-label="上一处" disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, -1) })}><ChevronUp size={15} /></button>
+      <button title="下一处（Enter）" aria-label="下一处" disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, 1) })}><ChevronDown size={15} /></button>
+      <button title="关闭（Esc）" aria-label="关闭查找" onClick={() => setFind(null)}><X size={15} /></button>
+    </div> : searchable && <button className="lyrics-find-open" title="在歌词中查找（Ctrl+F）" aria-label="在歌词中查找" onClick={openFind}><Search size={14} /></button>}
     {!following && <button className="lyrics-follow-button" title="同步到正在播放的歌词" onClick={() => {
       // Explicit recovery must not depend on requestAnimationFrame: Chromium
       // can suspend rAF in a minimized/background desktop window, leaving an

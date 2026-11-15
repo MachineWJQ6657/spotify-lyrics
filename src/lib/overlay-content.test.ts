@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlaybackSnapshot } from '../types'
-import { FIT_START, fitSearchStep, MIN_OVERLAY_FIT, overlayContent } from './overlay-content'
+import { FIT_START, fitSearchStep, MIN_OVERLAY_FIT, overlayContent, upcomingLine } from './overlay-content'
 
 const playback = (name = '春泥棒', artist = 'ヨルシカ') => ({
   track: { id: 't', name, artist, album: '', coverUrl: '', durationMs: 240_000 }, positionMs: 0, observedAtMs: 0, isPlaying: true
@@ -46,5 +46,22 @@ describe('overlay shrink-to-fit', () => {
   })
   it('settles on the floor when nothing fits', () => {
     expect(simulate(() => false).value).toBe(MIN_OVERLAY_FIT)
+  })
+})
+
+describe('next line preview', () => {
+  const lines = [{ startMs: 1000, text: '一行目' }, { startMs: 5000, text: '' }, { startMs: 9000, text: '二行目' }, { startMs: 12_000, text: ' ' }]
+  it('is the next line that has words', () => {
+    expect(upcomingLine(lines, 0)?.text).toBe('二行目')
+    expect(upcomingLine(lines, 1)?.text).toBe('二行目')
+  })
+  it('previews the first line during the intro', () => {
+    expect(upcomingLine(lines, -1)?.text).toBe('一行目')
+  })
+  it('is empty after the last sung line and without lyrics', () => {
+    expect(upcomingLine(lines, 2)).toBeUndefined()
+    expect(upcomingLine(lines, 3)).toBeUndefined()
+    expect(upcomingLine(undefined, 0)).toBeUndefined()
+    expect(upcomingLine([], -1)).toBeUndefined()
   })
 })

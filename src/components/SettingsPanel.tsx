@@ -191,6 +191,7 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
           <Range min={500} max={850} step={50} value={settings.fontWeight} onChange={fontWeight => patchSettings({ fontWeight })} label="文字字重" />
           <label className="setting-label top-gap">歌词行距 <small>{settings.lineHeight}%</small></label>
           <Range min={100} max={160} step={2} value={settings.lineHeight} onChange={lineHeight => patchSettings({ lineHeight })} label="歌词行距" />
+          <label className="switch-row"><div><strong>显示下一句</strong><span>在当前歌词下面用较小的字预告下一句；窗口放不下时自动隐藏</span></div><Switch label="显示下一句" value={settings.overlayNextLine === true} onChange={overlayNextLine => patchSettings({ overlayNextLine })} /></label>
         </section>
         <section>
           <label className="switch-row" style={{ marginTop: 0 }}><div><strong>锁定悬浮窗</strong><span>{settings.positionLocked ? '已锁定：歌词不挡鼠标，点击会穿透到下面的窗口；鼠标在歌词上停一下会出现控制条' : '未锁定：拖动歌词移动、拖边缘缩放、Ctrl+滚轮调字号、双击打开客户端'}</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>

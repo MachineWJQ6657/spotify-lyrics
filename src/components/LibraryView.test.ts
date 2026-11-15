@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { listenTimingKey } from '../lib/listened-offset'
-import { libraryTimingTag, matchesLibraryQuery } from './LibraryView'
+import { librarySourceTag, libraryTimingTag, matchesLibraryQuery } from './LibraryView'
 
 const document = (name: string, artist: string, album = '') => ({ trackId: name, track: { id: name, name, artist, album, coverUrl: '', durationMs: 1 } })
 
@@ -27,5 +27,12 @@ describe('library timing tag', () => {
     expect(libraryTimingTag({ trackId: 'a', tracks: [original],
       listenedOffset: { timingKey: listenTimingKey(original), state: 'decided', offsetMs: 7120, measuredDeltaMs: 7265, lines: 7, measuredAt: 1 } })).toBe('听音 · 延后 7.12 秒')
     expect(libraryTimingTag({ trackId: 'a', tracks: [original] })).toBe('')
+  })
+  it('names the provider, or says the lyrics are local', () => {
+    expect(librarySourceTag({ trackId: 'a', tracks: [{ ...original, source: '网易云音乐 · 搜索候选' }] })).toBe('网易云音乐')
+    expect(librarySourceTag({ trackId: 'a', tracks: [{ ...original, source: 'LRCLIB · 精确匹配' }] })).toBe('LRCLIB')
+    expect(librarySourceTag({ trackId: 'a', tracks: [{ ...original, source: '网易云音乐 · 搜索候选' }], userEditedTrackIds: [original.id] })).toBe('本地')
+    expect(librarySourceTag({ trackId: 'a', tracks: [{ ...original, source: 'song.ja.lrc' }] })).toBe('')
+    expect(librarySourceTag({ trackId: 'a', tracks: [] })).toBe('')
   })
 })

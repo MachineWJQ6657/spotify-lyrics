@@ -7,7 +7,7 @@ import { activeLineIndex, alignSecondaryTrack, visibleTracks } from './lib/lyric
 import { useWindowSync } from './hooks/useWindowSync'
 import { displayLyricsOffset } from './lib/listened-offset'
 import { displayedLyricPosition } from './lib/session-calibration'
-import { FIT_START, fitSearchStep, overlayContent, type FitSearch } from './lib/overlay-content'
+import { FIT_START, fitSearchStep, overlayContent, upcomingLine, type FitSearch } from './lib/overlay-content'
 import { scriptPresentation } from './lib/script'
 import { msUntilNextLyricChange, wallDelayMs } from './lib/lyric-clock'
 import { activeAcousticAnchor } from './lib/clock'
@@ -34,8 +34,9 @@ export function Overlay() {
   const alignedSecondaries = useMemo(() => base ? tracks.filter(track => track.id !== base.id).map(track => ({ track, lines: alignSecondaryTrack(base.lines, track.lines) })) : [], [base, tracks])
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
   const content = overlayContent(playback, activeLyrics, line)
+  const upcoming = settings.overlayNextLine && content.kind !== 'idle' && !activeLyrics?.untimedOriginal ? upcomingLine(base?.lines, index) : undefined
   const titlePresentation = content.kind === 'title' ? scriptPresentation(content.title, `${playback?.track?.artist ?? ''} ${playback?.track?.album ?? ''}`, base?.language) : null
-  const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), content.kind, content.kind === 'title' ? [content.title, content.subtitle] : line?.text, ...secondaries.map(item => [item.track.id, item.line?.text])])
+  const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), content.kind, content.kind === 'title' ? [content.title, content.subtitle] : line?.text, ...secondaries.map(item => [item.track.id, item.line?.text]), upcoming?.text])
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
   const layoutGeneration = useRef(0)
   const [layoutRevision, setLayoutRevision] = useState(0)
@@ -44,6 +45,7 @@ export function Overlay() {
   // rows. Re-measured whenever the text, type settings, window or fonts change.
   const lyricsRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const nextRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState(() => `${window.innerWidth}x${window.innerHeight}`)
   const [fontsRevision, setFontsRevision] = useState(0)
   useEffect(() => {
@@ -70,6 +72,18 @@ export function Overlay() {
     if (fits && fitSearch === FIT_START) return
     setFitState({ key: fitKey, search: fitSearchStep(fitSearch, fits) })
   }, [fitKey, fitSearch])
+  // The preview of the next line never shrinks the line being sung: it is
+  // shown only when it fits under it at full size. Set on the element itself
+  // (before paint), so deciding it costs no extra render.
+  useLayoutEffect(() => {
+    const box = lyricsRef.current, inner = contentRef.current, next = nextRef.current
+    if (!box || !inner || !next) return
+    next.style.display = ''
+    const style = getComputedStyle(box)
+    const available = box.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+    const needed = inner.scrollHeight + next.offsetHeight + parseFloat(getComputedStyle(next).marginTop)
+    if (fit < 1 || !(available > 0) || needed > available + .5) next.style.display = 'none'
+  }, [fitKey, fit])
   useEffect(() => {
     let frame = 0
     let pending = false
@@ -225,6 +239,7 @@ export function Overlay() {
           })}
           {activeLyrics?.untimedOriginal && <div className="overlay-secondary chinese-text" lang="zh-CN">暂无可信时间轴 · 原文可在客户端查看</div>}
         </div>
+        {upcoming && <div ref={nextRef} lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary next-line ${baseClass}`}>{upcoming.text}</div>}
       </div>
       <span className="overlay-resize-cue" aria-hidden="true" />
     </div>

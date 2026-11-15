@@ -84,6 +84,10 @@ const checks = {
   recentErrorsCard: /app:recent-errors/.test(main) && main.includes('function recentErrorEntries(') && renderer.includes('最近的程序错误'),
   // 0.4.63: when listening finds the shown source inconsistent it measures another provider's timeline instead.
   listeningPicksSource: renderer.includes('function afterVerdict(') && renderer.includes('function nextSourceToTry(') && renderer.includes('source-inconsistent') && renderer.includes('recordSourceTrial'),
+  // 0.4.64: optional next-line preview in the overlay (never shrinks the line being sung), find in lyrics (Ctrl+F), provider tag on library rows.
+  overlayNextLine: renderer.includes('function upcomingLine(') && renderer.includes('overlayNextLine') && /\.overlay-secondary\.next-line\s*\{[^}]*text-overflow:\s*ellipsis/.test(rendererCss),
+  findInLyrics: renderer.includes('function findLineMatches(') && renderer.includes('lyrics-find-open') && /\.lyric-group\.find-current::after/.test(rendererCss),
+  librarySourceTag: renderer.includes('function librarySourceTag(') && /\.library-copy i\.source-tag/.test(rendererCss),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

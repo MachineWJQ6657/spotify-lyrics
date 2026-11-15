@@ -1,4 +1,5 @@
 import type { LyricsDocument } from '../types'
+import { keepRank } from './library-budget'
 
 /**
  * Backup of the saved lyrics library (lyrics, per-song offsets, listening
@@ -45,9 +46,11 @@ export function parseLibraryBackup(text: string): ParsedBackup {
 export interface BackupMerge { library: Record<string, LyricsDocument>; added: number; updated: number; kept: number }
 
 /**
- * Adds a backup's songs to the library. A song already in the library is
- * replaced only by a newer copy (later `updatedAt`); otherwise the library's
- * own copy stays.
+ * Adds a backup's songs to the library. For a song in both, the copy with more
+ * of the user's own work wins (edited or imported lyrics, then a manual
+ * offset); between equals, the newer one (later `updatedAt`). Newer alone used
+ * to decide: after a reinstall, a song that had been looked up again
+ * automatically beat the backup's edited lyrics.
  */
 export function mergeLibraryBackup(current: Record<string, LyricsDocument>, incoming: LyricsDocument[]): BackupMerge {
   const library = { ...current }
@@ -55,7 +58,7 @@ export function mergeLibraryBackup(current: Record<string, LyricsDocument>, inco
   for (const document of incoming) {
     const existing = library[document.trackId]
     if (!existing) { library[document.trackId] = document; added += 1 }
-    else if ((document.updatedAt ?? 0) > (existing.updatedAt ?? 0)) { library[document.trackId] = document; updated += 1 }
+    else if (keepRank(document) !== keepRank(existing) ? keepRank(document) > keepRank(existing) : (document.updatedAt ?? 0) > (existing.updatedAt ?? 0)) { library[document.trackId] = document; updated += 1 }
     else kept += 1
   }
   return { library, added, updated, kept }

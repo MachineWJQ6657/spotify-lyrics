@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Check, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, Move, PanelRightClose, RefreshCw, RotateCcw } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
-import { languageFromFilename, makeTrack } from '../lib/lyrics'
+import { decodeLyricFile, importLyricFiles, importMessage } from '../lib/lyrics-import'
 import { currentListenDecision, listeningTrackId, relistenCurrentSong, subscribeListening } from '../lib/listen-controller'
 import { listenStatus } from '../lib/listen-status'
 
@@ -98,22 +98,17 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setConnecting(false) }
   }
-  const importFiles = async (files: FileList | null) => {
-    if (!files?.length) return
-    const currentTrack = useAppStore.getState().playback?.track ?? undefined
-    const base = lyrics && lyrics.trackId === currentTrack?.id ? lyrics : { trackId: currentTrack?.id ?? 'local', track: currentTrack, tracks: [] }
-    const additions = await Promise.all([...files].map(async (file, index) => {
-      const language = languageFromFilename(file.name)
-      return makeTrack(`local-${Date.now()}-${index}`, language.code, language.label, language.kind, await file.text(), file.name)
-    }))
-    const codes = [...new Set([...settings.enabledLanguages, ...additions.map(track => track.language)])]
-    setLyrics({
-      ...base,
-      tracks: [...base.tracks.filter(track => !additions.some(item => item.language === track.language)), ...additions],
-      userEditedTrackIds: [...new Set([...(base.userEditedTrackIds ?? []), ...additions.map(track => track.id)])],
-      updatedAt: Date.now()
-    })
-    patchSettings({ enabledLanguages: codes }); setMessage(`已导入 ${additions.length} 条歌词轨道`)
+  const importFiles = async (files: File[]) => {
+    if (!files.length) return
+    const texts = await Promise.all(files.map(async file => ({ name: file.name, text: decodeLyricFile(await file.arrayBuffer()) })))
+    // The song and its document as they are now: the files were read meanwhile.
+    const state = useAppStore.getState()
+    const result = importLyricFiles(state.lyrics, state.playback?.track ?? undefined, texts)
+    if (result.document) {
+      setLyrics(result.document)
+      patchSettings({ enabledLanguages: [...new Set([...state.settings.enabledLanguages, ...result.imported.map(track => track.language)])] })
+    }
+    setMessage(importMessage(result))
   }
 
   const tabs: Array<{ id: PanelTab; label: string }> = [{ id: 'lyrics', label: '歌词' }, { id: 'timing', label: '同步' }, { id: 'overlay', label: '悬浮窗' }, { id: 'connect', label: '连接' }]
@@ -137,7 +132,12 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
           <div className="segmented"><button className={settings.mainAlignment !== 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'left' })}>靠左</button><button className={settings.mainAlignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'center' })}>居中</button></div>
         </section>
         <section>
-          <input ref={inputRef} hidden multiple type="file" accept=".lrc,.txt" onChange={event => void importFiles(event.target.files)} />
+          <input ref={inputRef} hidden multiple type="file" accept=".lrc,.txt" onChange={event => {
+            // Cleared at once, so choosing the same file again (after fixing it) is a change too.
+            const files = [...(event.target.files ?? [])]
+            event.target.value = ''
+            void importFiles(files)
+          }} />
           <button className="wide-button" onClick={() => inputRef.current?.click()}><FileUp size={16} />导入多语言 LRC</button>
           <p className="setting-hint">也可以直接把 LRC 文件拖进窗口；文件名带语言后缀（如 song.zh.lrc）会自动归到对应语言。</p>
           {message && <div className="inline-message">{message}</div>}

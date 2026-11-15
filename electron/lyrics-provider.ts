@@ -40,6 +40,12 @@ export interface LyricsResult {
   transient?: boolean
   /** A verified provider record says this recording has no vocals/lyrics. */
   instrumental?: boolean
+  /**
+   * Sung words (alignment text) and their Chinese translation, from every
+   * entry of this song the provider looked at. Used only while merging, to
+   * translate displayed rows that the chosen translation track left empty.
+   */
+  translationMemory?: Array<[string, string]>
 }
 
 export interface LyricsCandidate {
@@ -801,10 +807,13 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
   // - a displayed row there with exactly the same words (the monotonic match
   //   gave 「本当に本当に綺麗だろうから」 the row 「本当に綺麗だろうから」 that the
   //   provider's own 「本当に綺麗だろうから」 should have had, then moved on);
-  // - or, when it is the only row there on both sides and both are short, the
-  //   same sung moment written two ways (「U&I」 / 「You and I」, 「嗚呼」 /
-  //   「ああ」). Longer rows stay unpaired: a different verse between two shared
-  //   lines keeps no translation.
+  // - or, when the place holds as many free rows as unmatched ones, at the same distance
+  //   from the row before, and either both are short (the same sung moment
+  //   written two ways: 「U&I」 / 「You and I」, 「嗚呼」 / 「ああ」) or most of
+  //   the words agree (a spelling the row match is too strict for:
+  //   「ずっと想っていたこと」 / 「ずっと思っていたこと」, 「聞いてほしくって」 /
+  //   「聞いて欲しくて」). Rows with other words stay unpaired: a different
+  //   verse between two shared lines keeps no translation.
   const targetsOf = (anchor: SupplementalAnchor) => anchor.targetIndices ?? [anchor.referenceIndex]
   const targeted = new Set([...byOwner.values()].flatMap(targetsOf))
   for (const [position, ownerIndex] of textualOwner.entries()) {
@@ -823,11 +832,15 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     const text = ownerRows[ownerIndex].text
     const sameWords = free.filter(candidate => baseRows[candidate].text === text)
     let referenceIndex = sameWords.length === 1 ? sameWords[0] : -1
-    if (referenceIndex < 0 && !sameWords.length && after - before === 2 && free.length === 1
-      && Math.max(text.length, baseRows[free[0]].text.length) <= 8) {
+    // As many free rows as unmatched ones (three at most): the first goes
+    // with the first, and so on.
+    const unmatched = after - before - 1
+    const candidate = free.length === unmatched && unmatched <= 3 ? free[position - before - 1] : undefined
+    if (referenceIndex < 0 && !sameWords.length && candidate != null
+      && (Math.max(text.length, baseRows[candidate].text.length) <= 8 || normalizedTextSimilarity(text, baseRows[candidate].text) >= .6)) {
       const ownerLag = ownerRows[ownerIndex].timeMs - previous.sourceMs
-      const baseLag = baseRows[free[0]].timeMs - previous.targetMs
-      if (Math.abs(ownerLag - baseLag) <= 1200) referenceIndex = free[0]
+      const baseLag = baseRows[candidate].timeMs - previous.targetMs
+      if (Math.abs(ownerLag - baseLag) <= 1200) referenceIndex = candidate
     }
     if (referenceIndex < 0) continue
     byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex, sourceMs: ownerRows[ownerIndex].timeMs, targetMs: baseRows[referenceIndex].timeMs })
@@ -1012,32 +1025,103 @@ function supplementalBuckets(track: SupplementalLyrics, base: LyricsResult) {
   return { baseRows, buckets, coverage: baseRows.length ? buckets.size / baseRows.length : 0 }
 }
 
-function mergeChineseSupplementals(items: OwnedSupplemental[], base: LyricsResult) {
-  if (!items.length) return null
+/**
+ * Sung words to their Chinese translation, from the entries of one song (the
+ * chosen one first). Only rows whose translation carries exactly their
+ * timestamp count, and not a row "translated" as itself (U&I / U&I).
+ */
+function translationMemoryOf(entries: LyricsResult[]): Array<[string, string]> {
+  const memory = new Map<string, string>()
+  for (const entry of entries) {
+    const translation = entry.additionalTracks?.find(track => track.kind === 'translation' && track.language === 'zh-Hans')
+    if (!translation || !entry.syncedLyrics) continue
+    const translated = new Map(parseTimedRows(translation.syncedLyrics).map(row => [row.timeMs, row.text.trim()]))
+    for (const row of parseTimedRows(entry.syncedLyrics)) {
+      const words = alignmentText(row.text)
+      const text = translated.get(row.timeMs)
+      if (words.length < 2 || !text || alignmentText(text) === words || memory.has(words)) continue
+      memory.set(words, text)
+    }
+  }
+  return [...memory]
+}
+
+/**
+ * Translations for the rows that `covered` leaves empty, by identical words:
+ * the translation another row of this song already has (translators often
+ * translate a chorus once), then `memory`.
+ */
+function sameWordsFill(baseRows: TimedLyricsRow[], covered: ReadonlyMap<number, string>, memory: ReadonlyMap<string, string>) {
+  const sameWords = new Map<string, string>()
+  for (const [index, text] of [...covered].sort(([left], [right]) => left - right)) {
+    // One translated sentence shown on each of the rows it spans is not the
+    // translation of any one of them: 「说着智慧之语 让他去吧」 on "Speaking words
+    // of wisdom" and on "Let it be" must not become every "Let it be".
+    if (covered.get(index - 1) === text || covered.get(index + 1) === text) continue
+    const words = alignmentText(baseRows[index].text)
+    if (words.length >= 2 && !sameWords.has(words)) sameWords.set(words, text)
+  }
+  const filled = new Map<number, string>()
+  baseRows.forEach((row, index) => {
+    if (covered.has(index)) return
+    const words = alignmentText(row.text)
+    const text = words.length >= 2 ? sameWords.get(words) ?? memory.get(words) : undefined
+    if (text) filled.set(index, text)
+  })
+  return filled
+}
+
+/** A translation track already on `base`'s timeline, with its empty rows filled by identical words. */
+function withSameWordsFill(translation: SupplementalLyrics, base: LyricsResult, memory: ReadonlyMap<string, string>): SupplementalLyrics {
+  const { baseRows, buckets } = supplementalBuckets(translation, base)
+  const filled = sameWordsFill(baseRows, buckets, memory)
+  if (!filled.size) return translation
+  const rows = [...parseTimedRows(translation.syncedLyrics).map(row => ({ timeMs: row.timeMs, text: row.text })),
+    ...[...filled].map(([index, text]) => ({ timeMs: baseRows[index].timeMs, text }))].sort((left, right) => left.timeMs - right.timeMs)
+  return { ...translation, syncedLyrics: rows.map(row => `${lrcTimestamp(row.timeMs)}${row.text}`).join('\n') }
+}
+
+function mergeChineseSupplementals(items: OwnedSupplemental[], base: LyricsResult, memory: ReadonlyMap<string, string> = new Map()) {
+  if (!items.length && !memory.size) return null
   const scored = items.map(item => ({ ...item, ...supplementalBuckets(item.track, base) }))
     .filter(item => item.buckets.size > 0)
     .sort((left, right) => right.coverage - left.coverage)
-  if (!scored.length) return null
+  if (!scored.length && !memory.size) return null
   const best = scored[0]
   const bestNetease = scored.filter(item => item.track.source.includes('网易云')).sort((left, right) => right.coverage - left.coverage)[0]
   // Prefer NetEase wording when it is nearly as complete, but never trade a
   // mostly populated translation for a sparse 2-line tlyric.
   const selected = bestNetease && bestNetease.coverage + .2001 >= best.coverage ? bestNetease : best
-  const merged = new Map(selected.buckets)
-  const usedSources = new Set([selected.track.source])
+  const baseRows = selected?.baseRows ?? parseTimedRows(base.syncedLyrics)
+  const merged = new Map(selected?.buckets ?? [])
+  const usedSources = new Set(selected ? [selected.track.source] : [])
   for (const fallback of scored) {
     if (fallback === selected) continue
     for (const [index, text] of fallback.buckets) {
       if (!merged.has(index)) { merged.set(index, text); usedSources.add(fallback.track.source) }
     }
   }
+  // A row still without a translation takes the one its exact words have
+  // elsewhere: on another row of this song (translators often translate a
+  // chorus once), or in another entry of the song that the provider looked at.
+  // The second case was the larger one: 猫日 showed 18 of its 38 rows
+  // translated because the translation came through an entry cut into 104
+  // rows, while a third entry translated all 38 rows word for word.
+  const fill = sameWordsFill(baseRows, merged, memory)
+  const filled = fill.size
+  for (const [index, text] of fill) merged.set(index, text)
+  if (!merged.size) return null
+  // Without a translation track of its own, the memory has to cover the song.
+  const sungRows = baseRows.filter(row => alignmentText(row.text).length >= 2).length
+  if (!selected && merged.size < Math.max(4, sungRows * .5)) return null
   const syncedLyrics = [...merged.entries()].sort(([left], [right]) => left - right)
-    .map(([index, text]) => `${lrcTimestamp(selected.baseRows[index].timeMs)}${text}`)
+    .map(([index, text]) => `${lrcTimestamp(baseRows[index].timeMs)}${text}`)
     .join('\n')
+  const track: SupplementalLyrics = selected?.track ?? { language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: '', source: '网易云音乐 · 翻译（同曲其他条目）' }
   return {
-    ...selected.track,
+    ...track,
     syncedLyrics,
-    source: usedSources.size > 1 ? `${selected.track.source} + 缺行补全` : selected.track.source
+    source: selected && (usedSources.size > 1 || filled > 0) ? `${track.source} + 缺行补全` : track.source
   }
 }
 
@@ -1322,7 +1406,8 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   const timedBase = repairRepeatedWords(repairBoundedGaps(selectedBase, repairPool), repairPool)
   const compatibleSupplementalOwners = normalized.filter(owner => supplementalOwnerCompatible(owner, selectedBase))
   const supplementalCandidates: OwnedSupplemental[] = compatibleSupplementalOwners.flatMap(owner => (owner.additionalTracks ?? []).map(track => ({ owner, track: alignSupplementalTimeline(track, owner, timedBase) })))
-  const chinese = mergeChineseSupplementals(supplementalCandidates.filter(item => item.track.language === 'zh-Hans' && item.track.kind === 'translation'), timedBase)
+  const translationMemory = new Map(compatibleSupplementalOwners.flatMap(owner => owner.translationMemory ?? []).reverse())
+  const chinese = mergeChineseSupplementals(supplementalCandidates.filter(item => item.track.language === 'zh-Hans' && item.track.kind === 'translation'), timedBase, translationMemory)
   const supplementalSlots = new Map<string, OwnedSupplemental[]>()
   for (const item of supplementalCandidates) {
     if (item.track.language === 'zh-Hans') continue
@@ -1341,7 +1426,9 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   if (chinese) additionalTracks.push(chinese)
   const textReference = spotifyText ? compareOriginalText(parseTimedRows(timedBase.syncedLyrics).map(row => row.text).join('\n'),
     spotifyText.plainLyrics!, spotifyText.source) : null
-  return { ...timedBase, additionalTracks, ...(textReference ? { textReference } : {}) }
+  // The memory served the merge; it is not part of the answer.
+  const { translationMemory: _memory, ...answer } = timedBase
+  return { ...answer, additionalTracks, ...(textReference ? { textReference } : {}) }
 }
 
 export function mergeProviderResults(primary: LyricsResult | null, supplemental: LyricsResult | null, durationMs = 0): LyricsResult | null {
@@ -2069,7 +2156,13 @@ export async function enrichTranslationByLyricText(result: LyricsResult | null, 
     const owner: LyricsResult = { syncedLyrics: best.original, plainLyrics: null, source: '网易云音乐 · 歌词匹配', confidence: 80, matchedDurationMs: neteaseDuration(best.song) }
     const extras: SupplementalLyrics[] = []
     const translation = alignSupplementalTimeline({ language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: best.lyrics.tlyric!.lyric!, source: '网易云音乐 · 翻译' }, owner, result)
-    if (parseTimedRows(translation.syncedLyrics).length >= Math.max(3, rows.length * .4)) extras.push({ ...translation, source: '网易云音乐 · 翻译（按歌词匹配）' })
+    if (parseTimedRows(translation.syncedLyrics).length >= Math.max(3, rows.length * .4)) {
+      // Rows the matched entry leaves empty take the translation of the same
+      // words: from another row, or from the other entries found by the text.
+      const memory = new Map(translationMemoryOf(candidates.map(candidate => ({ syncedLyrics: candidate.original, plainLyrics: null, source: owner.source, confidence: 80,
+        additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation' as const, syncedLyrics: candidate.lyrics.tlyric!.lyric!, source: '网易云音乐 · 翻译' }] }))))
+      extras.push({ ...withSameWordsFill(translation, result, memory), source: '网易云音乐 · 翻译（按歌词匹配）' })
+    }
     const hasRomanization = result.additionalTracks?.some(extra => extra.kind === 'romanization')
     if (extras.length && !hasRomanization && script === 'ja' && isTimedLyrics(best.lyrics.romalrc?.lyric)) {
       const romaji = alignSupplementalTimeline({ language: 'romaji', label: 'Romaji', kind: 'romanization', syncedLyrics: best.lyrics.romalrc!.lyric!, source: '网易云音乐 · 罗马音' }, owner, result)
@@ -2093,7 +2186,14 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
   // A search or a lyric request failed while others answered: the best entry
   // may be among the missing ones, so the answer is not final.
   let incomplete = false
-  const finish = (value: LyricsResult | null): LyricsResult | null => value && incomplete ? { ...value, transient: true } : value
+  // The translations of every entry with the chosen one's words, for rows the
+  // chosen translation leaves empty once it is on the displayed timeline.
+  const remember = (value: LyricsResult | null): LyricsResult | null => {
+    if (!value?.syncedLyrics) return value
+    const translationMemory = translationMemoryOf([value, ...allDetails.filter(entry => entry.syncedLyrics !== value.syncedLyrics && sharesLyricWords(value, entry))])
+    return translationMemory.length ? { ...value, translationMemory } : value
+  }
+  const finish = (value: LyricsResult | null): LyricsResult | null => remember(value && incomplete ? { ...value, transient: true } : value)
   const collect = async (searches: string[], limit: number) => {
     const settled = await Promise.allSettled([...new Set(searches)].map(async search => {
       const form = new URLSearchParams({ s: search, type: '1', limit: String(limit), offset: '0' })
@@ -2167,7 +2267,7 @@ async function fetchNetease(track: NonNullable<PlaybackSnapshot['track']>, signa
     // its translation) did not finish, and caching this as final left the
     // song without translation until the app restarted.
     const partial = signal?.aborted ? withSiblingTranslation(primary, allDetails) : null
-    if (partial) return { ...partial, transient: true }
+    if (partial) return remember({ ...partial, transient: true })
     throw error
   }
 }

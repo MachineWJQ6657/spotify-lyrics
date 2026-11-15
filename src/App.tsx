@@ -13,7 +13,7 @@ import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { useWindowSync } from './hooks/useWindowSync'
-import { languageFromFilename, makeTrack } from './lib/lyrics'
+import { decodeLyricFile, importLyricFiles, importMessage } from './lib/lyrics-import'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
 import { recordSurfaceRender } from './lib/render-probe'
@@ -131,22 +131,15 @@ export function App() {
     event.preventDefault()
     const files = [...event.dataTransfer.files].filter(file => /\.(?:lrc|txt)$/i.test(file.name))
     if (!files.length) { setDropMessage('只支持 LRC 或 TXT 歌词文件'); return }
+    const texts = await Promise.all(files.map(async file => ({ name: file.name, text: decodeLyricFile(await file.arrayBuffer()) })))
     const state = useAppStore.getState()
-    const currentTrack = state.playback?.track ?? undefined
-    const base = state.lyrics && state.lyrics.trackId === currentTrack?.id ? state.lyrics : { trackId: currentTrack?.id ?? 'local', track: currentTrack, tracks: [] }
-    const additions = await Promise.all(files.map(async (file, index) => {
-      const language = languageFromFilename(file.name)
-      return makeTrack(`local-${Date.now()}-${index}`, language.code, language.label, language.kind, await file.text(), file.name)
-    }))
-    setLyrics({
-      ...base,
-      tracks: [...base.tracks.filter(track => !additions.some(item => item.language === track.language)), ...additions],
-      userEditedTrackIds: [...new Set([...(base.userEditedTrackIds ?? []), ...additions.map(track => track.id)])],
-      updatedAt: Date.now()
-    })
-    patchSettings({ enabledLanguages: [...new Set([...state.settings.enabledLanguages, ...additions.map(track => track.language)])] })
-    setDropMessage(`已导入 ${additions.length} 条歌词轨道`)
-    window.setTimeout(() => setDropMessage(''), 2400)
+    const result = importLyricFiles(state.lyrics, state.playback?.track ?? undefined, texts)
+    if (result.document) {
+      setLyrics(result.document)
+      patchSettings({ enabledLanguages: [...new Set([...state.settings.enabledLanguages, ...result.imported.map(track => track.language)])] })
+    }
+    setDropMessage(importMessage(result))
+    window.setTimeout(() => setDropMessage(''), result.document ? 2400 : 5000)
   }
 
   useEffect(() => {

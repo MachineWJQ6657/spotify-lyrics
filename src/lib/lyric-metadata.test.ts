@@ -21,6 +21,18 @@ describe('shared lyric credit recognition', () => {
   it.each(['歌唱しよう今', '唄う君の声', 'Music is my life', 'vocal cords tremble', '作詞/作曲', '歌：'])('preserves sung text that only begins like a credit %s', text => {
     expect(isLyricCredit(text)).toBe(false)
   })
+  it.each(['Guitar：Takumi Otsu', 'Bass：Name', 'Drums：Name', 'Piano：Name', 'Strings Direction：Name', '1st Violin：Name', 'Viola：Name', 'Cello：Name',
+    'Recording & Mixing Engineer：Name', 'Recorded and Mixed by：Name', 'Lyrics by：Max Martin', 'Composed by：Max Martin', 'Music & Lyrics：Name', 'Sound Producer：Name', 'Management：Name', 'Vocal/Pf：Name',
+    '吉他：某人', '电吉他：某人', '木吉他：某人', '低音吉他：某人', '贝斯：某人', '鼓：某人', '钢琴：某人', '键盘：某人', '合成器：某人', '弦乐：某乐团', '和声：某人', '合声编写：某人', '主人声：某人',
+    '人声录音：某人', '人声编辑：某人', '录音助理：某人', '混音助理：某人', '音频助理：某人', '录音棚：某处', '录音工程：某人', '混音工程：某人', '录音混音：某人', '编程：某人', '打击乐：某人', '手风琴：某人',
+    '和弦：某人', '制作发行：某公司', '专辑：某专辑', 'ギター：誰か', 'ドラム：誰か'])('recognises the staff credit %s', label => {
+    // Provider credit blocks list the players and the studio staff; these rows were shown as the song's first lyrics.
+    expect(isLyricCredit(label)).toBe(true)
+    expect(parseLrc(`[00:04.00]${label}\n[00:12.00]actual lyric`).map(row => row.text)).toEqual(['actual lyric'])
+  })
+  it.each(['Bass drop: now', 'Piano man sings: la', 'guitar solo', 'ピアノを弾く君', '鼓动的心：', '吉他声响起', '钢琴上的灰尘', 'Chorus: la la la', '貝殻：拾った', 'Music is my life', 'Drums of war: begin'])('keeps sung text that only resembles a staff credit %s', text => {
+    expect(isLyricCredit(text)).toBe(false)
+  })
   it('removes a bracketed title header but keeps a sung title refrain', () => {
     const lrc = '[00:00.00]「空中散歩」\n[00:01.00]歌唱：CIEL\n[00:02.00]作詞/作曲/編曲：MIMI\n[00:12.00]空中散歩\n[00:16.00]ふわり浮かんだ'
     expect(parseTimedRows(stripTimedTrackMetadata(lrc, { name: '空中散歩', artist: 'CIEL' })).map(row => row.text)).toEqual(['空中散歩', 'ふわり浮かんだ'])

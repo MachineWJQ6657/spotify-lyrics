@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { detectLyricsLanguage, makeRomanizedTrack, makeTrack } from '../lib/lyrics'
 import type { LyricTrack, LyricsDocument, PlaybackSnapshot } from '../types'
+import { isUserOwnedTrack } from '../lib/user-tracks'
 
 const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(value)
 // Revision 28 rechecks edition identity and monotonic supplemental alignment,
@@ -30,7 +31,10 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // one long interlude admits only the same song, and a NetEase entry counts once.
 // Revision 45: an unmatched provider row takes the free displayed row with
 // identical words, and merged translation rows go to the nearer row start.
-const LYRICS_PROVIDER_REVISION = 45
+// Revision 46 fills untranslated rows from identical words (another row, another
+// entry of the song), pairs rows spelled differently in the same place, and no
+// longer counts staff credits as lyric rows when choosing the original.
+const LYRICS_PROVIDER_REVISION = 46
 /**
  * Raised when translation matching learns to find more (0.4.68: entries of
  * another length with the same words). A saved song without a Chinese
@@ -99,14 +103,14 @@ export function shouldBypassProviderCache(previousRetryToken: number | undefined
   return previousRetryToken !== undefined && currentRetryToken > previousRetryToken
 }
 
-export function isUserOwnedTrack(track: LyricTrack, baseline: LyricsDocument) {
-  return Boolean(baseline.userEditedTrackIds?.includes(track.id)
-    || (track.id.startsWith('local-') && !track.id.startsWith(`${baseline.trackId}-`)))
-}
+export { isUserOwnedTrack }
 
 export function mergeUserEditedTracks(providerTracks: LyricTrack[], baseline?: LyricsDocument | null) {
   if (!baseline?.tracks.length) return providerTracks
-  const preserved = baseline.tracks.filter(track => isUserOwnedTrack(track, baseline))
+  // A user-owned track without a single line (a file without timestamps,
+  // imported by a version that accepted it) protects nothing: as an empty
+  // "original" it displaced the provider's lyrics on every lookup.
+  const preserved = baseline.tracks.filter(track => isUserOwnedTrack(track, baseline) && track.lines.length > 0)
   if (!preserved.length) return providerTracks
   const conflicts = new Set(preserved.map(track => `${track.kind}\0${track.language}`))
   return [...providerTracks.filter(track => !(track.kind === 'original' && preserved.some(item => item.kind === 'original'))

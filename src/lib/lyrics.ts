@@ -136,6 +136,9 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
   return aligned
 }
 
+/** Languages the settings can switch on and off. A track in any other one (a custom translation) has no switch and is always shown. */
+const SWITCHED_LANGUAGES = new Set(['ja', 'romaji', 'zh-Hans', 'en'])
+
 export function visibleTracks(document: LyricsDocument | null, enabled: string[], romanization: boolean) {
   if (!document) return []
   if (document.untimedOriginal) return []
@@ -148,7 +151,7 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
     // The source-language track is the alignment anchor and must never be
     // replaced by a selected translation merely because its language toggle is
     // off. Language switches control supplemental tracks around that anchor.
-    .filter(track => (track.kind === 'original' || enabled.includes(track.language)) && (track.kind !== 'romanization' || romanization))
+    .filter(track => (track.kind === 'original' || enabled.includes(track.language) || !SWITCHED_LANGUAGES.has(track.language)) && (track.kind !== 'romanization' || romanization))
     .map(track => {
       // Also sanitize already-persisted tracks created by older versions.
       const lines = track.lines.filter(line => line.text.trim() && !isLyricCredit(line.text)
@@ -196,6 +199,8 @@ export function serializeLrc(track: LyricTrack) {
 }
 
 export function retimeLines(lines: LyricLine[], deltaMs: number) {
-  const shifted = lines.map(line => ({ ...line, startMs: Math.max(0, line.startMs + deltaMs) })).sort((a, b) => a.startMs - b.startMs)
+  // Word timings move with their line; left behind, the words lit up at the old times.
+  const shifted = lines.map(line => ({ ...line, startMs: Math.max(0, line.startMs + deltaMs),
+    ...(line.words ? { words: line.words.map(word => ({ ...word, startMs: Math.max(0, word.startMs + deltaMs) })) } : {}) })).sort((a, b) => a.startMs - b.startMs)
   return shifted.map((line, index) => ({ ...line, endMs: shifted[index + 1]?.startMs }))
 }

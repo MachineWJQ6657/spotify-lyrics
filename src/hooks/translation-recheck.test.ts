@@ -4,7 +4,7 @@ import { needsTranslationRecheck, TRANSLATION_RECHECK_REVISION } from './usePlay
 
 const track = (kind: LyricTrack['kind'], language: string, id = `song-${kind}`): LyricTrack =>
   ({ id, kind, language, label: language, source: 'LRCLIB · 精确匹配', lines: [{ startMs: 1000, text: 'a' }] })
-const document = (tracks: LyricTrack[], extra: Partial<LyricsDocument> = {}): LyricsDocument => ({ trackId: 'song', tracks, providerRevision: 45, ...extra })
+const document = (tracks: LyricTrack[], extra: Partial<LyricsDocument> = {}): LyricsDocument => ({ trackId: 'song', tracks, providerRevision: 46, ...extra })
 
 describe('one more lookup for saved songs without a Chinese translation', () => {
   it('asks for a Japanese or English song that has none', () => {

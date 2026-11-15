@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.72 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.71-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.73 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.72-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (120 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (123 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,32 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.73 deployed: translation fill by identical words, staff credits, seventh review (lyric clock), eighth review (editor / library / settings)
+
+- `release/current` = **0.4.73** (asar SHA256 `45b2eb53db56432c2d733d25d127974b8c7f9a8a4395af83975852c1ab13cf13`, verifier 123/123, 1366 tests). Rollback: `release/current-0.4.72-backup-20261115`; the 0.4.71 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0473`.
+- **Translation coverage, found by measuring the library** (`.qa-scratch/gap-fill-potential.mjs`, `untranslated.mjs`, `gap-song.mjs` on the per-song HTTP cache):
+  - `sameWordsFill` (lyrics-provider.ts): a displayed row the merged Chinese track leaves empty takes the translation of identical alignment text, first from another row of the song (not from a sentence translation spread over neighbouring rows), then from `translationMemory`, which `fetchNetease` attaches to its result from every fetched entry that `sharesLyricWords` with the chosen one. Used by `mergeChineseSupplementals` (which can also build the whole track from the memory when it covers half of the rows) and by the text-match path (`withSameWordsFill`). The memory is stripped from the merged answer.
+  - Slot pairing, third branch: as many free displayed rows as unmatched provider rows (three at most) between the same matched neighbours pair in order when short or >= .6 similar and at the same lag.
+  - Untranslated rows on 92 cached songs: 173 -> 89 of about 4000.
+- **Staff credits** (`src/lib/lyric-metadata.ts`, `STAFF_ROLE`): instrument and studio roles in Chinese, English and Japanese. All 49 credit-like labels in the user's library are recognised; look-alikes ("Bass drop: now", 「鼓动的心：」) are not. Because provider rows are parsed without credits, nine library songs change their original (credit rows had "proved" LRCLIB incomplete).
+- **Seventh review (lyric clock; findings in `.qa-scratch/review7-findings.md`)**, all six handled:
+  1. `advanceStartupClockGate(previous, state, now, announced)`: after a track change (`startupGateAnnounced` in the worker) a correction of 150 ms releases the gate (1500 ms at app startup, unchanged).
+  2. `observeNativeClock`: a status change that repeats the already-seen raw position while playing holds the projected position (`rawPositionMs` keeps the raw value for the repeat test).
+  3. Same gate: paused -> playing on an announced track is published after 180 ms instead of restarting the 5 s wait.
+  4. `LocalSpotifyService.seek` moves `this.state` to the target once the worker accepts, so main's refresh 180 ms later no longer broadcasts the old position.
+  5. The worker re-anchors its native clock at the seek target when the command is accepted (keeping the old raw position as "seen"), so a second seek to the same millisecond is not taken for a repeated sample.
+  6. `carrySessionCalibration` (store): an edit of the original re-keys a heard-line calibration.
+  - Simulations: the reviewer's harness (real worker body on a virtual clock) was copied to `.qa-scratch/review7/` and its bundles rebuilt from the working tree (`esbuild electron/local-spotify.ts ... --external:libspotifyctl --alias:node:worker_threads=./.qa-scratch/review7/worker-threads-stub.mjs`); `sim-s1`, `sim-s2-s3-s5`, `sim-s2b`, `sim-s4`, `sim-s5b`, `check-editor-stamp` and the new `sim-repeat-seek.mjs` show the corrected behaviour. Tests: `electron/clock-review-fixes.test.ts`.
+- **Eighth review (editor, library, settings; findings in `.qa-scratch/review8-findings.md`)**, all eleven handled:
+  - `src/lib/lyrics-import.ts`: `decodeLyricFile` (UTF-8, UTF-16 BOM, GB18030 or Shift_JIS by which reads as its language) and `importLyricFiles` (skips files without a timed line, the song's own language is its original, an unsuffixed file is the original of a song without a timed one, the "local" scratch document is reused); both import paths (drop in `App.tsx`, the settings button) use it. `mergeUserEditedTracks` ignores user-owned tracks without lines.
+  - Store: `carryListenedOffset` re-keys a decided listened offset across `updateLyricLine` / `shiftLyricTrack`; `updateLyricLine` drops a line's word timings when its text changes and moves them with its start; `retimeLines` moves word timings; `addLyricTrack` starts the playing song's document when the lookup has not answered; `setLyricsSource` keeps the manual offset when the original is the user's (`src/lib/user-tracks.ts` holds `isUserOwnedTrack`).
+  - `mergeLibraryBackup` prefers the copy with the higher `keepRank`, then the newer. `visibleTracks` always shows tracks in a language without a switch (custom translations). `LyricsEditor.addTranslation` switches the new language on.
+  - Deliberately unchanged: untimed provider text still hides a user translation that has no timed original (a flow test pins it); the demo document is still not saved.
+  - Tests: `src/lib/lyrics-import.test.ts`, `src/store/editor-review-fixes.test.ts`.
+- `LYRICS_PROVIDER_REVISION` 45 -> 46. Verifier: `translationSameWordsFill`, `clockReviewFixes` (reads the `native` chunk, where local-spotify is built), `editorReviewFixes`.
+- **Whole-library comparison** against 98074c4, all 213 songs replayed offline from `.qa-scratch/http-cache2/`: 148 identical, 38 with more translation rows, 9 with another original (credits), 7 with fewer translation rows (echo rows and merged rows, each inspected).
+- Not verified with live playback: the clock changes (track change, pause, seek) ran only in the simulation and unit tests.
 
 ## 2026-11-15 / 0.4.72 deployed: sixth review (overlay and lyric list), smooth scrolling, selectable lyrics, nearest-row rule for secondary rows
 

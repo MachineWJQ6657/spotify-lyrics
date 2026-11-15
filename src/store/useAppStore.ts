@@ -3,9 +3,38 @@ import { persist, type PersistStorage, type StorageValue } from 'zustand/middlew
 import { LIBRARY_BUDGET_CHARS, pruneLibrary } from '../lib/library-budget'
 import { mergeLibraryBackup } from '../lib/library-backup'
 import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, LyricsSourceId, PlaybackSnapshot, SessionCalibration } from '../types'
-import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
+import { continuesCalibration, createSessionCalibration, currentSessionCalibration, originalTimingKey } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
 import { retimeLines } from '../lib/lyrics'
+import { listenTimingKey } from '../lib/listened-offset'
+import { isUserOwnedTrack } from '../lib/user-tracks'
+
+/**
+ * A user's edit of the original keeps the listening result that belonged to
+ * it. The result is keyed to the lines' times and words, so any edit used to
+ * drop it and the lyrics jumped by the whole listened offset: with +850 ms
+ * listened, a "+100ms" nudge showed every line 750 ms earlier, and fixing one
+ * word did the same.
+ */
+/**
+ * The same for a "跟歌声校准" session: it is keyed to the exact original, so the
+ * editor's "取当前" stamp or a 100 ms nudge ended it, and the line just stamped
+ * on the calibrated clock was shown off by the whole session offset.
+ */
+function carrySessionCalibration(session: SessionCalibration | null, before: LyricsDocument, after: LyricsDocument): SessionCalibration | null {
+  const was = before.tracks.find(track => track.kind === 'original')
+  const now = after.tracks.find(track => track.kind === 'original')
+  if (!session || !was || !now || was === now || was.id !== now.id || session.trackId !== before.trackId || session.originalKey !== originalTimingKey(before)) return session
+  return { ...session, originalKey: originalTimingKey(after) }
+}
+
+function carryListenedOffset(before: LyricsDocument, after: LyricsDocument): LyricsDocument {
+  const listened = before.listenedOffset
+  const was = before.tracks.find(track => track.kind === 'original')
+  const now = after.tracks.find(track => track.kind === 'original')
+  if (!listened || listened.state !== 'decided' || !was || !now || was === now || was.id !== now.id || listenTimingKey(was) !== listened.timingKey) return after
+  return { ...after, listenedOffset: { ...listened, timingKey: listenTimingKey(now) } }
+}
 
 interface AppState {
   connected: boolean
@@ -247,14 +276,19 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     return state.lyrics === compacted ? state : { lyrics: compacted, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, compacted) }
   }),
   addLyricTrack: track => set(state => {
-    if (!state.lyrics) return state
+    // While the automatic lookup is still running there is no document yet:
+    // the track starts the playing song's document (the lookup then merges
+    // around it) instead of being dropped while the editor reports success.
+    const playing = state.demoMode ? null : state.playback?.track
+    const current: LyricsDocument | null = state.lyrics ?? (playing ? { trackId: playing.id, track: playing, tracks: [] } : null)
+    if (!current) return state
     const document = {
-      ...state.lyrics,
-      textReference: track.kind === 'original' ? undefined : state.lyrics.textReference,
-      untimedOriginal: track.kind === 'original' ? undefined : state.lyrics.untimedOriginal,
-      tracks: [...state.lyrics.tracks.filter(item => item.id !== track.id
+      ...current,
+      textReference: track.kind === 'original' ? undefined : current.textReference,
+      untimedOriginal: track.kind === 'original' ? undefined : current.untimedOriginal,
+      tracks: [...current.tracks.filter(item => item.id !== track.id
         && !(item.kind === track.kind && (track.kind === 'original' || item.language === track.language))), track],
-      userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), track.id])],
+      userEditedTrackIds: [...new Set([...(current.userEditedTrackIds ?? []), track.id])],
       updatedAt: Date.now()
     }
     return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
@@ -272,22 +306,32 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     if (!state.lyrics) return state
     const tracks = state.lyrics.tracks.map(track => {
       if (track.id !== trackId) return track
-      const lines = track.lines.map((line, index) => index === lineIndex ? { ...line, ...patch } : line).sort((a, b) => a.startMs - b.startMs)
+      const lines = track.lines.map((line, index) => {
+        if (index !== lineIndex) return line
+        const next = { ...line, ...patch }
+        // Word timings belong to the old words and the old start. The rows
+        // render their words, so a corrected text kept showing the old one.
+        if (line.words && patch.text !== undefined && patch.text !== line.text) delete next.words
+        else if (line.words && patch.startMs !== undefined && patch.startMs !== line.startMs) {
+          next.words = line.words.map(word => ({ ...word, startMs: Math.max(0, word.startMs + patch.startMs! - line.startMs) }))
+        }
+        return next
+      }).sort((a, b) => a.startMs - b.startMs)
       return { ...track, lines: lines.map((line, index) => ({ ...line, endMs: lines[index + 1]?.startMs })) }
     })
-    const document = { ...state.lyrics, tracks, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
-      userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])], updatedAt: Date.now() }
-    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    const document = carryListenedOffset(state.lyrics, { ...state.lyrics, tracks, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
+      userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])], updatedAt: Date.now() })
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(carrySessionCalibration(state.sessionCalibration, state.lyrics, document), state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   shiftLyricTrack: (trackId, deltaMs) => set(state => {
     if (!state.lyrics) return state
-    const document = {
+    const document = carryListenedOffset(state.lyrics, {
       ...state.lyrics,
       tracks: state.lyrics.tracks.map(track => track.id === trackId ? { ...track, lines: retimeLines(track.lines, deltaMs) } : track),
       userEditedTrackIds: [...new Set([...(state.lyrics.userEditedTrackIds ?? []), trackId])],
       updatedAt: Date.now()
-    }
-    return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
+    })
+    return { lyrics: document, sessionCalibration: currentSessionCalibration(carrySessionCalibration(state.sessionCalibration, state.lyrics, document), state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   setLyricsOffset: offsetMs => set(state => {
     if (!state.lyrics) return state
@@ -370,8 +414,11 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       if (chosenBy === 'user') delete next.sourceTrials
       delete next.sourceUnavailable
       // A manual offset was tuned against the previous file's timing. A listened
-      // offset carries its own timing key and simply stops applying.
-      delete next.offsetMs
+      // offset carries its own timing key and simply stops applying. The
+      // user's own original stays whatever the source is, and so does the
+      // offset tuned for it.
+      const original = document.tracks.find(item => item.kind === 'original')
+      if (!(original?.lines.length && isUserOwnedTrack(original, document))) delete next.offsetMs
       return next
     }
     const pending = choose(baseline ?? { trackId: track.id, track, tracks: [] })

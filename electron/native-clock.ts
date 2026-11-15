@@ -10,6 +10,8 @@ export interface NativeClockSample {
 export interface NativeClockAnchor {
   trackIdentity: string
   positionMs: number
+  /** The raw position of the sample this anchor came from, when `positionMs` is a projection of it. */
+  rawPositionMs?: number
   durationMs: number
   statusName: string
   observedAtMs: number
@@ -26,9 +28,17 @@ export function observeNativeClock(previous: NativeClockAnchor | null, sample: N
   const trackIdentity = `${sample.artist || ''}\0${sample.title}\0${sample.album || ''}`
   const positionMs = Math.max(0, Number(sample.positionMs) || 0)
   const durationMs = Math.max(0, Number(sample.durationMs) || 0)
-  if (previous && previous.trackIdentity === trackIdentity
-    && previous.positionMs === positionMs && previous.statusName === sample.statusName) {
-    return { ...previous, durationMs }
+  if (previous && previous.trackIdentity === trackIdentity && (previous.rawPositionMs ?? previous.positionMs) === positionMs) {
+    if (previous.statusName === sample.statusName) return { ...previous, durationMs }
+    // The status changed and the position is the one already seen: this is a
+    // notification, not a new measurement. Pausing then holds the clock where
+    // it has run to. Anchoring at the old raw position (up to 4.5 s back)
+    // showed an earlier line for the 4-70 ms until the paused position came.
+    // (Kept free of calls to other functions: the source is injected into the worker.)
+    if (previous.statusName === 'PLAYING') {
+      const heldMs = Math.min(durationMs || Infinity, previous.positionMs + Math.max(0, now - previous.observedAtMs))
+      return { trackIdentity, positionMs: heldMs, rawPositionMs: positionMs, durationMs, statusName: sample.statusName, observedAtMs: now }
+    }
   }
   return { trackIdentity, positionMs, durationMs, statusName: sample.statusName, observedAtMs: now }
 }

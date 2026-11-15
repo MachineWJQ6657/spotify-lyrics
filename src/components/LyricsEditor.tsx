@@ -102,7 +102,9 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
     const language = detectLyricsLanguage(candidate.syncedLyrics)
     const label = language === 'ja' ? '日本語' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
     const original = makeTrack(`remote-${candidate.id}`, language, label, 'original', candidate.syncedLyrics, `${candidate.provider} · 手动选择`)
-    addLyricTrack(original); setActiveId(original.id); setResults([]); setMessage('已应用候选歌词')
+    addLyricTrack(original)
+    if (!useAppStore.getState().lyrics?.tracks.some(track => track.id === original.id)) { setMessage('没有正在播放的歌曲，候选歌词没有应用'); return }
+    setActiveId(original.id); setResults([]); setMessage('已应用候选歌词')
     const song = useAppStore.getState().lyrics?.trackId
     if (language === 'ja') {
       try {
@@ -122,6 +124,9 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
     const next = !existing.has('zh-Hans') ? { language: 'zh-Hans', label: '中文' } : !existing.has('en') ? { language: 'en', label: 'English' } : { language: `custom-${Date.now()}`, label: '自定义翻译' }
     const track: LyricTrack = { id: `translation-${Date.now()}`, ...next, kind: 'translation', source: '本地编辑', lines: original.lines.map(line => ({ startMs: line.startMs, endMs: line.endMs, text: '' })) }
     addLyricTrack(track); setActiveId(track.id)
+    // A language with a switch is switched on, or the new track would be stored but not shown.
+    const { settings, patchSettings } = useAppStore.getState()
+    if (!next.language.startsWith('custom') && !settings.enabledLanguages.includes(next.language)) patchSettings({ enabledLanguages: [...settings.enabledLanguages, next.language] })
   }
   const exportTrack = async () => {
     if (!active) return

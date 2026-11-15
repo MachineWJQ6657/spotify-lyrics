@@ -42,7 +42,7 @@ const checks = {
   acousticTokenTiming: main.includes('function dtwModelPreset(') && main.includes('token.t_dtw') && main.includes('"-nfa"'),
   untimedOriginalFallback: renderer.includes('暂无可信时间轴') && main.includes('comparableLength'),
   translationOwnership: main.includes('translationCounts.get(ownerIndex) === 1') && main.includes('anchor.targetIndices'),
-  providerRevision45: renderer.includes('LYRICS_PROVIDER_REVISION = 45') && main.includes('function kanaSkeletonMatches(') && main.includes('searchTimelineVersionDominated'),
+  providerRevision46: renderer.includes('LYRICS_PROVIDER_REVISION = 46') && main.includes('function kanaSkeletonMatches(') && main.includes('searchTimelineVersionDominated'),
   translationAlignmentVariants: main.includes('SPELLING_VARIANTS') && main.includes('FURIGANA_READING') && main.includes('uniqueGrouping'),
   siblingAndTextTranslation: main.includes('function withSiblingTranslation(') && main.includes('function enrichTranslationByLyricText(') && /type: ["']1006["']/.test(main),
   neteaseTimelinePreference: main.includes('function preferredNeteaseTimeline(') && main.includes('function onsetDistance('),
@@ -129,6 +129,12 @@ const checks = {
   overlayIdleWithoutTrack: renderer.includes('playback?.track ? base?.lines[index]') && renderer.includes('Number.POSITIVE_INFINITY'),
   // An unmatched provider row takes the free displayed row with identical words; lone short rows in one slot pair up.
   providerSlotPairing: main.includes('sameWords') && main.includes('const targetsOf = '),
+  // 0.4.73. Provider: rows the translation leaves empty take the translation of identical words (another row, another entry of the song); staff credits ("Guitar：", "贝斯：", "Lyrics by：") are not lyric rows.
+  translationSameWordsFill: main.includes('function sameWordsFill(') && main.includes('function translationMemoryOf(') && main.includes('STAFF_ROLE') && renderer.includes('STAFF_ROLE'),
+  // Seventh review (lyric clock): a status-only pause notification holds the projected position; after a track change corrections of 150 ms release the gate and a paused arrival that starts playing is published at once; an accepted seek moves the worker's and the service's clock.
+  clockReviewFixes: native.includes('rawPositionMs') && native.includes('startupGateAnnounced') && native.includes('announced ? 150 : 1500'),
+  // Eighth review (editor, library, settings): one import path that skips files without timed lines, reads legacy encodings and recognises the song's own language; edits keep the listened offset and a heard-line calibration; a backup's copy with the user's work wins; custom-language tracks need no switch.
+  editorReviewFixes: renderer.includes('function importLyricFiles(') && renderer.includes('function decodeLyricFile(') && renderer.includes('shift_jis') && renderer.includes('function carryListenedOffset(') && renderer.includes('function carrySessionCalibration(') && renderer.includes('SWITCHED_LANGUAGES') && renderer.includes('keepRank(document) !== keepRank(existing)'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

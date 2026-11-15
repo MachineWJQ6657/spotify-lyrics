@@ -101,13 +101,25 @@ export function adoptQueuedTrackDuration(previous: LocalState | null, incoming: 
  * large raw-clock correction or a bounded fallback. Paused samples are already
  * exact and therefore need only a tiny coalescing window. The helper is kept
  * pure because its exact implementation is injected into the native Worker.
+ *
+ * `announced` is the gate after a track change, where the new song's first
+ * sample has already been published (the app-startup gate publishes nothing
+ * until it opens). There the gate no longer protects a first publication; it
+ * only delayed what came next:
+ * - a correction under 1500 ms waited for the 5 s fallback, so the lyrics of a
+ *   new song ran early by that much (median 66 ms, a third over 150 ms, up to
+ *   884 ms in the logs) for its first five seconds. 150 ms now releases it.
+ * - a song reached by skipping while paused arrives PAUSED and turns PLAYING a
+ *   moment later; restarting the 5 s wait left it shown paused at 0 for five
+ *   seconds. The paused position was exact, so playing is published at once.
  */
-export function advanceStartupClockGate(previous: StartupClockGate | null, state: Pick<LocalState, 'artist' | 'title' | 'album' | 'positionMs' | 'statusName'>, now: number): StartupClockGate | null {
+export function advanceStartupClockGate(previous: StartupClockGate | null, state: Pick<LocalState, 'artist' | 'title' | 'album' | 'positionMs' | 'statusName'>, now: number, announced = false): StartupClockGate | null {
   if (!state?.title) return previous
   const trackIdentity = `${state.artist || ''}\0${state.title || ''}\0${state.album || ''}`
   const positionMs = Math.max(0, Number(state.positionMs) || 0)
   const playing = state.statusName === 'PLAYING'
   if (!previous || previous.trackIdentity !== trackIdentity || (previous.statusName !== 'PLAYING' && playing)) {
+    const resumed = Boolean(announced && previous && previous.trackIdentity === trackIdentity)
     return {
       trackIdentity,
       anchorPositionMs: positionMs,
@@ -115,7 +127,7 @@ export function advanceStartupClockGate(previous: StartupClockGate | null, state
       statusName: state.statusName,
       // Live SMTC observations can be ~4.5 s apart. A 3.2 s fallback
       // exposed an uncorrected startup anchor before the next observation.
-      readyAtMs: now + (playing ? 5000 : 120),
+      readyAtMs: now + (playing ? (resumed ? 180 : 5000) : 120),
       startedAtMs: now,
       correctionDetected: false
     }
@@ -131,7 +143,7 @@ export function advanceStartupClockGate(previous: StartupClockGate | null, state
   }
   if (previous.correctionDetected) return { ...previous, statusName: state.statusName }
   const projectedPosition = previous.anchorPositionMs + Math.max(0, now - previous.anchorAtMs)
-  if (Math.abs(positionMs - projectedPosition) < 1500) return { ...previous, statusName: state.statusName }
+  if (Math.abs(positionMs - projectedPosition) < (announced ? 150 : 1500)) return { ...previous, statusName: state.statusName }
   return {
     ...previous,
     anchorPositionMs: positionMs,
@@ -317,7 +329,16 @@ export class LocalSpotifyService {
 
   async seek(positionMs: number) {
     if (!this.worker || !this.state?.title) throw new Error('尚未检测到 Spotify 桌面端媒体会话')
-    await this.request({ type: 'seek', positionMs: Math.max(0, Math.round(positionMs)) })
+    const target = Math.max(0, Math.round(positionMs))
+    const identity = localTrackIdentity(this.state)
+    await this.request({ type: 'seek', positionMs: target })
+    // The service's clock moves with the accepted command too. It used to stay
+    // at the old position until the worker reported the seek, and the refresh
+    // main sends 180 ms after a seek then put the lyrics back on the old line.
+    if (this.state && localTrackIdentity(this.state) === identity) {
+      this.state = { ...this.state, positionMs: Math.min(this.state.durationMs || Number.MAX_SAFE_INTEGER, target), sampledAtMs: Date.now() }
+      this.listener?.(this.current())
+    }
   }
 
   /**
@@ -404,6 +425,8 @@ export class LocalSpotifyService {
         let firstStateReadyAt = Date.now() + 600
         let startupClockGate = null
         let startupClockReady = false
+        // True once a track change has published the new song's first sample (see advanceStartupClockGate).
+        let startupGateAnnounced = false
         let settledTrackKey = ''
         let nativeClock = null
         let nativeBoundaryPending = null
@@ -491,6 +514,7 @@ export class LocalSpotifyService {
             // position rather than inventing zero (Mix may start mid-song).
             startupClockReady = false
             startupClockGate = null
+            startupGateAnnounced = true
             firstStateReadyAt = Date.now() + 5000
             settledTrackKey = localTrackIdentity(lastState)
             if (pendingStateTimer) clearTimeout(pendingStateTimer)
@@ -505,7 +529,7 @@ export class LocalSpotifyService {
           if (!startupClockReady) {
             const now = Date.now()
             if (lastState && lastState.title) {
-              startupClockGate = advanceStartupClockGate(startupClockGate, { ...lastState, positionMs: nativeClockPosition(nativeClock, performance.now()) }, now)
+              startupClockGate = advanceStartupClockGate(startupClockGate, { ...lastState, positionMs: nativeClockPosition(nativeClock, performance.now()) }, now, startupGateAnnounced)
               firstStateReadyAt = startupClockGate ? startupClockGate.readyAtMs : firstStateReadyAt
             }
             if (now < firstStateReadyAt) {
@@ -584,7 +608,19 @@ export class LocalSpotifyService {
           try {
             if (!client) throw new Error('本地 Spotify 服务尚未启动')
             let ok
-            if (message.type === 'seek') ok = client.seekMs(message.positionMs)
+            if (message.type === 'seek') {
+              ok = client.seekMs(message.positionMs)
+              // The clock moves with the accepted command. The old raw position
+              // stays the "already seen" one, so a queued pre-seek snapshot is
+              // still a repeat, and Spotify's own report of the seek re-anchors
+              // unless it names that same position: a second seek to the line
+              // just played was taken for a repeat and the lyrics ran on from
+              // the first one, early by the time between the two clicks.
+              if (ok && nativeClock) {
+                nativeClock = { ...nativeClock, positionMs: Math.min(nativeClock.durationMs || Infinity, Math.max(0, message.positionMs)),
+                  rawPositionMs: nativeClock.rawPositionMs ?? nativeClock.positionMs, observedAtMs: performance.now() }
+              }
+            }
             else if (message.command === 'next' || message.command === 'previous') {
               const now = Date.now()
               const currentTrackKey = ((lastState && lastState.artist) || '') + '\\0' + ((lastState && lastState.title) || '') + '\\0' + ((lastState && lastState.album) || '')

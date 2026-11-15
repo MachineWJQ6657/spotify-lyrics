@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, shell, Tray } from 'electron'
+import { OVERLAY_GRIP_PX, visibleOverlayPlacement } from './overlay-placement'
 import path from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -208,14 +209,8 @@ function defaultOverlayBounds(width = 820, height = 220, display = secondaryMoni
 }
 
 function visibleOverlayBounds(bounds: StoredWindowBounds) {
-  const area = screen.getDisplayMatching(bounds).workArea
-  const width = Math.min(Math.max(480, bounds.width), area.width)
-  const height = Math.min(Math.max(140, bounds.height), area.height)
-  return {
-    width, height,
-    x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
-    y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height))
-  }
+  // A place the drag allows stays; only an overlay out of reach is brought back (overlay-placement.ts).
+  return visibleOverlayPlacement(bounds, screen.getDisplayMatching(bounds).workArea)
 }
 
 function publishOverlayVisibility(visible: boolean) {
@@ -2030,7 +2025,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     const x = origin.bounds.x + point.x - origin.cursor.x
     const y = origin.bounds.y + point.y - origin.cursor.y
     const area = screen.getDisplayNearestPoint(point).workArea
-    const visibleGrip = 48
+    const visibleGrip = OVERLAY_GRIP_PX
     const targetX = Math.max(area.x - origin.bounds.width + visibleGrip, Math.min(Math.round(x), area.x + area.width - visibleGrip))
     const targetY = Math.max(area.y, Math.min(Math.round(y), area.y + area.height - visibleGrip))
     const current = overlayWindow.getBounds()

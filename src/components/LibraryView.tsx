@@ -51,19 +51,21 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
   const restoreDocument = useAppStore(state => state.restoreLibraryDocument)
   const documents = Object.values(library).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
   const [query, setQuery] = useState('')
-  const [removed, setRemoved] = useState<LyricsDocument | null>(null)
+  // Every song removed within the undo window comes back with one click. A
+  // second removal used to replace the first, which could then not be undone.
+  const [removed, setRemoved] = useState<LyricsDocument[]>([])
   const undoTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(undoTimer.current), [])
   const remove = (document: LyricsDocument) => {
     deleteDocument(document.trackId)
-    setRemoved(document)
+    setRemoved(current => [...current.filter(item => item.trackId !== document.trackId), document])
     window.clearTimeout(undoTimer.current)
-    undoTimer.current = window.setTimeout(() => setRemoved(null), 6000)
+    undoTimer.current = window.setTimeout(() => setRemoved([]), 6000)
   }
   const undo = () => {
-    if (removed) restoreDocument(removed)
+    for (const document of removed) restoreDocument(document)
     window.clearTimeout(undoTimer.current)
-    setRemoved(null)
+    setRemoved([])
   }
   const shown = documents.filter(document => matchesLibraryQuery(document, query))
   // Backup and restore of the whole library (lyrics, offsets, listening results).
@@ -128,13 +130,13 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     </div>}
     {!documents.length && <div className="library-toolbar">{backupControls}</div>}
     {backupMessage && <div className="library-undo" role="status"><span>{backupMessage}</span></div>}
-    {removed && <div className="library-undo" role="status"><span>已移除「{removed.track?.name ?? removed.trackId}」</span><button onClick={undo}><Undo2 size={13} />撤销</button></div>}
+    {removed.length > 0 && <div className="library-undo" role="status"><span>{removed.length === 1 ? `已移除「${removed[0].track?.name ?? removed[0].trackId}」` : `已移除 ${removed.length} 首歌`}</span><button onClick={undo}><Undo2 size={13} />撤销</button></div>}
     {!documents.length ? <div className="library-empty"><BookOpen size={31} /><h3>资料库还是空的</h3><p>播放一首 Spotify 歌曲并搜索或导入歌词后，它会出现在这里。</p><button onClick={openEditor}><Search size={14} />搜索歌词</button></div>
     : !shown.length ? <div className="library-empty"><Search size={28} /><h3>没有匹配的歌曲</h3><p>换个关键词试试，歌名、艺人和专辑都可以。</p><button onClick={() => setQuery('')}><X size={14} />清除筛选</button></div>
     : <div className="library-grid">{shown.map(document => <article key={document.trackId}>
       <div className="library-cover" style={document.track?.coverUrl ? undefined : { '--tile-hue': coverTile(document.track?.name).hue } as React.CSSProperties}>{document.track?.coverUrl ? <img src={document.track.coverUrl} /> : <span className="cover-initial" aria-hidden="true">{coverTile(document.track?.name).initial}</span>}</div>
       <div className="library-copy"><strong {...libraryTrackPresentation(document, 'name')}>{document.track?.name ?? document.trackId}</strong><span><span {...libraryTrackPresentation(document, 'artist')}>{document.track?.artist ?? '本地歌词'}</span> · {document.tracks.length} 条轨道</span><div>{document.tracks.map(track => <i key={track.id}>{track.label}</i>)}{librarySourceTag(document) && <i className="source-tag" title="歌词来源">{librarySourceTag(document)}</i>}{libraryTimingTag(document) && <i className="timing-tag" title="这首歌的歌词时间已整体校正">{libraryTimingTag(document)}</i>}</div></div>
-      <div className="library-actions"><button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`, serializeLrc(track)) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
+      <div className="library-actions"><button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`.replace(/[<>:"/\\|?*]/g, '_'), serializeLrc(track)).catch(() => undefined) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
     </article>)}</div>}
   </div>
 }

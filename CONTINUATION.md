@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.74 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.73-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.75 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.74-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (124 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (125 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,17 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.75 deployed: overlay placement kept through unlock and resume, library undo and export names
+
+- `release/current` = **0.4.75** (asar SHA256 `edd7b1dbca0a8a60fab315f1ccf3aed321424fed5f9848b01769c4707d5b4683`, verifier 125/125, 1386 tests). Rollback: `release/current-0.4.74-backup-20261115`; the 0.4.73 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0475`.
+- **Tenth review** (read-only: `electron/main.ts` windows / tray / shortcuts / IPC, `electron/preload.ts`, `LibraryView.tsx`; findings in `.qa-scratch/review10-findings.md`). Three of six fixed:
+  1. `electron/overlay-placement.ts` (`visibleOverlayPlacement`, `OVERLAY_GRIP_PX`): the bounds used by `showOverlay`, startup restore and `recoverOverlayDisplay` keep a position the drag allows (y down to 48 px above the work area's bottom, at least half the width on the display) and bring back only an axis that is out of reach. `visibleOverlayBounds` in main.ts delegates to it; the drag clamp uses the same grip constant.
+  2. `LibraryView`: `removed` is a list, undo restores every song removed within the 6 s window.
+  5. `LibraryView` per-song export sanitises the file name like the editor's export and no longer leaves a rejected promise.
+- Left for later: no reload when a renderer dies mid-session (#3), overlay size changed while hidden is lost on quit (#4), the lock shortcut shows a hidden overlay (#6, possibly intended).
+- Measured before this release: on the saved library (213 songs, 397 secondary tracks) the row assignment of 0.4.74 equals 0.4.73 and differs from 98074c4 in 13 tracks, all intended (`.qa-scratch/align-saved.mjs`, three bundles of `src/lib/lyrics.ts`).
+- Not verified: the placement rule has unit tests only; no real lock / sleep was performed.
 
 ## 2026-11-15 / 0.4.74 deployed: regressions found by reviewing the day's own changes
 

@@ -6,8 +6,9 @@
 // The song is restored to the automatic choice at the end.
 //
 // Run it only against an ISOLATED test profile, never the user's own:
-//   electron . --user-data-dir=<isolated profile> --remote-debugging-port=9333 --syllable-secondary-test
+//   bash scripts/qa/launch-test-instance.sh
 //   node scripts/verify-source-chain.mjs
+//   bash scripts/qa/quit-test-instance.sh
 // A song with timed lyrics must be on screen (Spotify may be paused).
 const targets = await (await fetch('http://127.0.0.1:9333/json')).json()
 const target = targets.find(t => t.type === 'page' && t.url.endsWith('index.html'))

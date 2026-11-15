@@ -706,3 +706,11 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   background: rgba(0, 0, 0, .18); color: var(--sy-text-2);
 }
 .source-badges .header-focus:hover, .source-badges .header-focus[aria-pressed='true'] { border-color: var(--sy-stroke-strong); color: var(--sy-text); }
+
+/* 0.4.70: lyric rows can be centred in the main window (设置 → 歌词). */
+.lyric-card.lyrics-centered .lyric-group { align-items: center; text-align: center; }
+.lyric-card.lyrics-centered .lyrics-viewport { padding-left: 12px; }
+.lyric-card.lyrics-centered .lyric-group.find-match::after, .lyric-card.lyrics-centered .lyric-group.find-current::after {
+  left: 25%; right: 25%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .34), transparent);
+}
+.lyric-card.lyrics-centered .lyric-group.find-current::after { background: linear-gradient(90deg, transparent, var(--sy-accent), transparent); }

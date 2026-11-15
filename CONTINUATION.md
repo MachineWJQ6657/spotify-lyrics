@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.69 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.68-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.70 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.69-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (111 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (113 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,21 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.70 deployed: listening measurement fixes from a fourth review, centred lyrics in the main window
+
+- `release/current` = **0.4.70** (asar SHA256 `6d8f1f8d1702f3e5278186d1b80cf2c2084d3e1f5ac9aeb6c910349e74101277`, verifier 113/113, 1244 tests). Rollback: `release/current-0.4.69-backup-20261115`; the 0.4.68 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0470`.
+- **Fourth independent review** (listening measurement, at 3719447): five findings, all fixed.
+  1. *Alias on repeated sections.* With no estimate yet the timing prior picks the repetition nearest the file's own time; a file off by more than half the repetition distance made a whole chorus agree on the wrong repetition. `repeatedLineIndexes(lines)` (lyric-offset.ts) marks lines whose phones equal or open another line's; `measureWindow` sets `LineDelta.repeated`. `LyricOffsetEstimator.decision()`: once six once-only lines from two windows exist they alone decide (and only they can return `inconsistent`); before that an offset from mixed lines needs `LISTEN_MIN_UNIQUE_LINES` (2) once-only lines within 350 ms of it, otherwise `collecting`.
+  2. *Too few lines was stored as "inconsistent".* Fewer than `LISTEN_MIN_LINES` located lines now always returns `collecting`; the renderer's `MAX_BLOCKS` ends such a session as a failed attempt with nothing stored. Stored results of that kind (state `inconsistent`, `lines < 6`; six of the user's ten) are no longer conclusive: `isConclusiveListen` in listened-offset.ts gates `listenTarget` (`already-measured`), `adoptEarlierVerdict` and the status text, so those songs are measured again and their provider is not blamed.
+  3. *One line pinned the search.* `estimator.prior` (used by the session instead of `center`) exists only when at least three once-only lines mostly agree; until then the search stays at ±30 s.
+  4. *A seek failed the attempt.* `PhonemeSession.clear()` cancelled the shared recognizer even when idle; it now cancels only a run it owns, and `LyricOffsetSession.process` answers `cancelled` for a recognizer cancellation.
+  5. *Restarting the song ended listening.* On `inactive` / `lyrics-changed` the renderer stops and calls `reconcile()` again (`mayRestartSession`, three per timeline per run).
+- **Offline validation**: `.qa-listen/` (git-ignored copy of the recorded clips and tools). `cd .qa-listen && node build-offset.mjs && node summary.mjs <names>`; `emulate.mjs` there now passes `estimator.prior`. Before and after: 6 of 32 songs decided, offsets identical or within 20 ms (`.qa-scratch/listen-baseline.txt`, `listen-alias.txt`). The reviewer's synthetic reproductions (`scratchpad/review4/repro*.mjs`, run with `node --experimental-strip-types`) now decide the true offset or stay undecided.
+- The session test fixture has twelve different lines: a song of two alternating phrases is, correctly, no longer decided.
+- **Main window**: `settings.mainAlignment` ('left' | 'center', 设置 → 歌词) puts `lyrics-centered` on `.lyric-card`; the help page lists Space and the arrow keys.
+- The QA hook's simulated verdict stores `lines: 8` so it counts as conclusive.
+- Not verified with live audio: the repeated-section rule, and listening resuming after a seek or a restart of the song.
 
 ## 2026-11-15 / 0.4.69 deployed: focus mode, opacity sliders renamed, QA scripts in the repo
 

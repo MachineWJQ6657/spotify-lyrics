@@ -182,7 +182,7 @@ export function App() {
           </div>
           <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-focus" aria-pressed={focusActive} aria-label="专注模式" title={focusActive ? '退出专注模式（Esc 或 F11）' : '专注模式：只显示歌词（F11）'} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
-        <div className="lyric-card">
+        <div className={`lyric-card ${settings.mainAlignment === 'center' ? 'lyrics-centered' : ''}`}>
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>
         <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics}
           onSeekLine={seekLine} seekLabel={seekLabel} onSearch={openEditor} />

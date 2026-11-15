@@ -24,8 +24,16 @@ function output(samples: number, startMediaMs: number, sung: Array<{ atMs: numbe
 }
 
 const words = (text: string): JapaneseWord[] => [{ surface_form: text, reading: text, pronunciation: text }]
-const PHRASES: Record<string, string[]> = { かなしい: ['ka', 'na', 'shi', 'i'], ともるよ: ['to', 'mo', 'ru', 'yo'] }
-const lines = Array.from({ length: 12 }, (_, index) => ({ text: index % 2 ? 'ともるよ' : 'かなしい', startMs: 20_000 + index * 3000 }))
+// Twelve different lines, like a verse: a line whose words are sung only once
+// places itself, which is what lets the estimator decide (a song made of two
+// alternating phrases could match any repetition and is left undecided).
+const KANA: Record<string, { phone: string; arpabet: string }> = {
+  か: { phone: 'ka', arpabet: 'K AA1' }, な: { phone: 'na', arpabet: 'N AA1' }, し: { phone: 'shi', arpabet: 'SH IY1' }, い: { phone: 'i', arpabet: 'IY1' },
+  と: { phone: 'to', arpabet: 'T OW1' }, も: { phone: 'mo', arpabet: 'M OW1' }, る: { phone: 'ru', arpabet: 'R UW1' }, よ: { phone: 'yo', arpabet: 'Y OW1' }
+}
+const TEXTS = ['かなしい', 'ともるよ', 'なかよし', 'いるかも', 'しるよと', 'もとなか', 'よいかる', 'るもしな', 'かよとい', 'なしもる', 'いとかよ', 'もなるし']
+const PHRASES: Record<string, string[]> = Object.fromEntries(TEXTS.map(text => [text, [...text].map(kana => KANA[kana].phone)]))
+const lines = TEXTS.map((text, index) => ({ text, startMs: 20_000 + index * 3000 }))
 
 function setup(offsetMs: number, language = 'ja') {
   let now = 1_000_000
@@ -40,7 +48,7 @@ function setup(offsetMs: number, language = 'ja') {
   let mediaStart = 0
   const analyze = vi.fn(async (texts: string[]) => texts.map(words))
   // English readings that map onto the same test labels (K AA -> ka, SH IY -> shi ...).
-  const ARPABET: Record<string, string[]> = { かなしい: ['K AA1', 'N AA1', 'SH IY1', 'IY1'], ともるよ: ['T OW1', 'M OW1', 'R UW1', 'Y OW1'] }
+  const ARPABET: Record<string, string[]> = Object.fromEntries(TEXTS.map(text => [text, [...text].map(kana => KANA[kana].arpabet)]))
   const pronounce = vi.fn(async (texts: string[]) => texts.map(text => (ARPABET[text] ?? []).map((reading): PronunciationToken => ({ kind: 'word', text, reading }))))
   const session = new LyricOffsetSession(engine, analyze, () => now, pronounce)
   const playback = (positionMs: number, observedAtMs: number, isPlaying = true): PlaybackSnapshot => ({ track: { id: 'song', name: 'x', artist: 'y', album: 'z', coverUrl: '', durationMs: 200_000 }, positionMs, observedAtMs, isPlaying, sampleId: 1, playbackSource: 'local' })

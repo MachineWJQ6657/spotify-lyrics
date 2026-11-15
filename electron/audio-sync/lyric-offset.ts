@@ -229,7 +229,11 @@ export interface WindowGeometry {
   receptiveFieldSamples: number
 }
 
-export interface LineDelta { index: number; lineMs: number; sungMs: number; deltaMs: number; score: number; phones: number }
+export interface LineDelta {
+  index: number; lineMs: number; sungMs: number; deltaMs: number; score: number; phones: number
+  /** The line's words are sung more than once in the song (see repeatedLineIndexes). */
+  repeated?: boolean
+}
 
 /** Search range before anything is known: whole-file shifts of up to 30 s
  * occur (Spotify relinked ケセラセラ to a 305 s recording; every provider's
@@ -259,6 +263,26 @@ export function linesForWindow(lines: PhoneLine[], startMediaMs: number, endMedi
   return lines.filter(line => requiredPhones(line.phones) >= 3 && line.startMs + expectedOffsetMs >= startMediaMs - slackMs && line.startMs + expectedOffsetMs <= endMediaMs + slackMs)
 }
 
+const repeatedCache = new WeakMap<PhoneLine[], Set<number>>()
+/**
+ * Indexes of lines whose words are sung more than once in the song: the same
+ * phones as another line, or phones that open another line. Hearing one of
+ * them does not say which repetition it was, so when the file is off by more
+ * than half the distance between two repetitions every line of the section
+ * matches the wrong one, and they all agree on a wrong offset.
+ */
+export function repeatedLineIndexes(lines: PhoneLine[]): Set<number> {
+  const cached = repeatedCache.get(lines)
+  if (cached) return cached
+  const keys = lines.map(line => `${line.phones.join(' ')} `)
+  const repeated = new Set<number>()
+  for (let left = 0; left < keys.length; left += 1) for (let right = left + 1; right < keys.length; right += 1) {
+    if (keys[left].startsWith(keys[right]) || keys[right].startsWith(keys[left])) { repeated.add(lines[left].index); repeated.add(lines[right].index) }
+  }
+  repeatedCache.set(lines, repeated)
+  return repeated
+}
+
 /** Located lines in one window, as sung-vs-file deltas (positive = file is early). */
 export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: WindowGeometry, options: AlignOptions & { expectedOffsetMs?: number; minScore?: number } = {}): LineDelta[] {
   const logp = logSoftmax(output)
@@ -273,6 +297,7 @@ export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: W
     onsetCost: (k, frame) => selected[k].phones.length * timingPrior(geometry.startMediaMs + frameMs(frame) - (selected[k].startMs + expected)),
     ...options
   })
+  const repeated = repeatedLineIndexes(lines)
   const deltas: LineDelta[] = []
   aligned.forEach((item, position) => {
     if (!item) return
@@ -282,7 +307,8 @@ export function measureWindow(output: CtcOutput, lines: PhoneLine[], geometry: W
     // A line cut by the window edge has an unreliable onset.
     if (sungMs < geometry.startMediaMs + 400 || endMs > endMediaMs - 300) return
     if (item.score < (options.minScore ?? MIN_LINE_SCORE) || item.phones < MIN_LINE_PHONES) return
-    deltas.push({ index: line.index, lineMs: line.startMs, sungMs: Math.round(sungMs), deltaMs: Math.round(sungMs - line.startMs), score: item.score, phones: item.phones })
+    deltas.push({ index: line.index, lineMs: line.startMs, sungMs: Math.round(sungMs), deltaMs: Math.round(sungMs - line.startMs), score: item.score, phones: item.phones,
+      ...(repeated.has(line.index) ? { repeated: true } : {}) })
   })
   return deltas
 }
@@ -312,6 +338,8 @@ export const LISTEN_MIN_LINES = 6
 export const LISTEN_MIN_WINDOWS = 2
 export const LISTEN_MAX_SPREAD_MS = 160
 export const LISTEN_MAX_WINDOWS = 8
+/** Lines that occur once in the song and must agree with an offset taken mostly from repeated words. */
+export const LISTEN_MIN_UNIQUE_LINES = 2
 
 /**
  * Accumulates located lines across windows of one song with one lyric timing.
@@ -320,7 +348,7 @@ export const LISTEN_MAX_WINDOWS = 8
  * this recording (another edit, wrong song, tempo change): never guess then.
  */
 export class LyricOffsetEstimator {
-  private deltas: LineDelta[] = []
+  private deltas: Array<LineDelta & { window: number }> = []
   private windows = 0
   private windowsWithLines = 0
   add(window: LineDelta[]) {
@@ -330,8 +358,8 @@ export class LyricOffsetEstimator {
     let added = false
     for (const delta of window) {
       const existing = this.deltas.findIndex(item => item.index === delta.index)
-      if (existing >= 0) { if (delta.score > this.deltas[existing].score) this.deltas[existing] = delta; continue }
-      this.deltas.push(delta); added = true
+      if (existing >= 0) { if (delta.score > this.deltas[existing].score) this.deltas[existing] = { ...delta, window: this.windows }; continue }
+      this.deltas.push({ ...delta, window: this.windows }); added = true
     }
     if (added) this.windowsWithLines += 1
     return this.decision()
@@ -339,22 +367,53 @@ export class LyricOffsetEstimator {
   decision(): OffsetDecision {
     const lines = this.deltas.length
     const base = { lines, windows: this.windowsWithLines }
-    if (lines < LISTEN_MIN_LINES || this.windowsWithLines < LISTEN_MIN_WINDOWS) {
-      return { state: this.windows >= LISTEN_MAX_WINDOWS ? 'inconsistent' : 'collecting', ...base }
-    }
-    const values = this.deltas.map(item => item.deltaMs)
+    // Too little evidence is never a verdict. An intro, an instrumental break
+    // or lines cut by block edges only mean that not enough was heard yet;
+    // calling that "inconsistent" marked the file as bad (6 of the first 10
+    // such verdicts in real use had 4-5 lines and no spread) and, later, sent
+    // listening to another provider. The caller's block limit ends such a
+    // session without a result.
+    if (lines < LISTEN_MIN_LINES || this.windowsWithLines < LISTEN_MIN_WINDOWS) return { state: 'collecting', ...base }
+    // Words sung once place themselves; repeated words can all match another
+    // repetition and still agree with each other. Once enough once-only lines
+    // were heard they alone decide, and only they can call a file inconsistent.
+    const unique = this.deltas.filter(item => !item.repeated)
+    const conclusive = unique.length >= LISTEN_MIN_LINES && new Set(unique.map(item => item.window)).size >= LISTEN_MIN_WINDOWS
+    const values = (conclusive ? unique : this.deltas).map(item => item.deltaMs)
     const center = median(values)!
     const spread = median(values.map(value => Math.abs(value - center)))!
+    const measured = { measuredDeltaMs: Math.round(center), spreadMs: Math.round(spread) }
     // Most lines must sit near the center, not just half of them.
     const close = values.filter(value => Math.abs(value - center) <= 350).length
-    if (spread > LISTEN_MAX_SPREAD_MS || close < Math.ceil(lines * 0.7)) {
-      return { state: this.windows >= LISTEN_MAX_WINDOWS ? 'inconsistent' : 'collecting', ...base, measuredDeltaMs: Math.round(center), spreadMs: Math.round(spread) }
+    if (spread > LISTEN_MAX_SPREAD_MS || close < Math.ceil(values.length * 0.7)) {
+      return { state: conclusive && this.windows >= LISTEN_MAX_WINDOWS ? 'inconsistent' : 'collecting', ...base, ...measured }
+    }
+    // Mostly repeated words so far: the offset stands only if lines that occur
+    // once agree with it; otherwise it may be the offset of another repetition.
+    if (!conclusive && unique.filter(item => Math.abs(item.deltaMs - center) <= 350).length < LISTEN_MIN_UNIQUE_LINES) {
+      return { state: 'collecting', ...base, ...measured }
     }
     const correction = center - LISTEN_LEAD_MS
     const offsetMs = Math.abs(correction) < LISTEN_MIN_CORRECTION_MS ? 0 : Math.round(correction / 10) * 10
-    return { state: 'decided', offsetMs, measuredDeltaMs: Math.round(center), spreadMs: Math.round(spread), ...base }
+    return { state: 'decided', offsetMs, ...measured, ...base }
   }
   get observations() { return this.deltas.slice() }
-  /** Current median delta, used as the next window's timing prior. */
+  /** Current median delta. */
   get center() { return median(this.deltas.map(item => item.deltaMs)) ?? undefined }
+  /**
+   * The offset to search around in the next window: the median, once at least
+   * three located lines mostly agree on it. One line can be a false match, and
+   * narrowing the search to +/-6 s around it kept every later window from
+   * finding the real lines (one line 24 s off on a correctly timed file ended
+   * the session with a single line). Until then the search stays wide.
+   * Repeated words do not count: they can agree on the wrong repetition.
+   */
+  get prior() {
+    // Lines that occur once only: repeated words may sit on another repetition.
+    const values = this.deltas.filter(item => !item.repeated).map(item => item.deltaMs)
+    if (values.length < 3) return undefined
+    const center = median(values)!
+    const close = values.filter(value => Math.abs(value - center) <= 350).length
+    return close >= Math.ceil(values.length * 0.6) ? center : undefined
+  }
 }

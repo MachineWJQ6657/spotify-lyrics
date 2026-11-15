@@ -178,11 +178,14 @@ export class LyricOffsetSession {
       if (this.phones.length < 4) return result('no-lines')
       const deltas = measureWindow(output, this.phones, { startMediaMs, sampleRate: 16000,
         strideSamples: output.geometry.strideSamples, receptiveFieldSamples: output.geometry.receptiveFieldSamples },
-      { expectedOffsetMs: this.estimator.center, minScore: language === 'ja' ? undefined : PRONOUNCED_MIN_LINE_SCORE })
+      { expectedOffsetMs: this.estimator.prior, minScore: language === 'ja' ? undefined : PRONOUNCED_MIN_LINE_SCORE })
       const decision = this.estimator.add(deltas)
       return result('measured', decision, deltas.length)
     } catch (error) {
       if (!current()) return result('cancelled')
+      // The recognizer is shared. Something else cancelling it (a seek handled
+      // elsewhere) is not a failure of this song's measurement: skip the block.
+      if (error instanceof Error && /已取消/.test(error.message)) return result('cancelled')
       throw error
     } finally {
       clearTimeout(timeout)

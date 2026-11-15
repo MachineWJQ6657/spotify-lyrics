@@ -133,6 +133,8 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
         <section>
           <label className="setting-label">歌词字号 <small>{settings.fontSize}px</small></label>
           <Range min={34} max={88} value={settings.fontSize} onChange={fontSize => patchSettings({ fontSize })} label="歌词字号" />
+          <label className="setting-label top-gap">主窗口歌词对齐</label>
+          <div className="segmented"><button className={settings.mainAlignment !== 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'left' })}>靠左</button><button className={settings.mainAlignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'center' })}>居中</button></div>
         </section>
         <section>
           <input ref={inputRef} hidden multiple type="file" accept=".lrc,.txt" onChange={event => void importFiles(event.target.files)} />

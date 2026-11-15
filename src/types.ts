@@ -148,6 +148,8 @@ export interface AppSettings {
   positionLocked: boolean
   /** Show the next line under the one being sung, when the overlay has room for it. */
   overlayNextLine?: boolean
+  /** How lyric rows are aligned in the main window (the overlay has its own `alignment`). */
+  mainAlignment?: 'left' | 'center'
   /** Fade the locked overlay out after playback has been paused for a while; it returns when playback resumes. */
   overlayHideWhenPaused?: boolean
 }

@@ -115,6 +115,10 @@ const checks = {
   // 0.4.69: focus mode in the main window (F11); the opacity sliders are named 不透明度 so 100% reads as solid.
   focusMode: renderer.includes('syllable-ui-focus') && /\.body-grid\.focus-mode\s*\{/.test(rendererCss) && renderer.includes('专注模式'),
   opacityNaming: renderer.includes('文字不透明度') && renderer.includes('背景不透明度') && !/label: ["']文字透明度["']/.test(renderer),
+  // 0.4.70: lyric rows can be centred in the main window; the help page lists the playback keys.
+  mainAlignment: renderer.includes('mainAlignment') && /\.lyric-card\.lyrics-centered \.lyric-group\s*\{[^}]*text-align:\s*center/.test(rendererCss) && renderer.includes('主窗口歌词对齐'),
+  // Fourth review (listening measurement): too few lines is never a verdict, once-only lines decide (repeated words can sit on another repetition), the search narrows only on agreeing once-only lines, an idle diagnostic session does not cancel the shared recognizer, a dropped session restarts.
+  listeningEvidence: (main + native + pronunciationChunk).includes('function repeatedLineIndexes(') && (main + native + pronunciationChunk).includes('LISTEN_MIN_UNIQUE_LINES') && renderer.includes('function isConclusiveListen(') && renderer.includes('mayRestartSession'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

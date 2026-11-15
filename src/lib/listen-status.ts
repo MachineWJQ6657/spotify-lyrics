@@ -1,5 +1,5 @@
 import type { LyricsDocument } from '../types'
-import { listenTimingKey } from './listened-offset'
+import { isConclusiveListen, listenTimingKey } from './listened-offset'
 import { shiftAmount, shiftDirection } from './timing-status'
 import { LYRICS_SOURCES } from './lyrics-source'
 
@@ -36,8 +36,9 @@ export interface ListenStatus {
 export function listenStatus(input: { document: LyricsDocument | null; listening: boolean; enabled: boolean; playing: boolean; reason?: string }): ListenStatus {
   const { document } = input
   const original = document?.untimedOriginal ? undefined : document?.tracks.find(track => track.kind === 'original')
+  // A result from too few lines (stored as "inconsistent" before 0.4.70) is not a measurement.
   const measured = document?.listenedOffset && original && document.listenedOffset.timingKey === listenTimingKey(original)
-    ? document.listenedOffset : null
+    && isConclusiveListen(document.listenedOffset) ? document.listenedOffset : null
   const again = Boolean(measured || document?.offsetMs || input.reason === 'attempts-exhausted' || input.reason === 'source-inconsistent')
   const action = again ? '立即重新校准' : '立即校准'
   if (!input.enabled) return { text: '听音自动校准已关闭，打开上面的开关后可以使用。', action, canRun: false }

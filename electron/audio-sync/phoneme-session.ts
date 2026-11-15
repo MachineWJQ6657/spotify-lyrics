@@ -34,9 +34,14 @@ export class PhonemeSession {
   constructor(private engine: PhonemeEngine, private match: PhonemeMatcher, private analyze = analyzeJapaneseLines) {}
   start(trackId: string, now = Date.now()) { this.clear(); this.owner = trackId; this.startedAtMs = now }
   clear() {
+    // The engine is shared with listening calibration. An idle diagnostic
+    // session (it is cleared on every seek and playback jump) must not cancel a
+    // recognition it does not own: that failed the listening attempt in flight.
+    const active = Boolean(this.owner || this.abort)
     this.revision++; this.owner = ''; this.latestCapture = 0; this.latestEnd = 0
     this.sourceKey = ''; this.readings = null; this.hypotheses.clear()
-    this.abort?.abort(); this.abort = null; this.engine.cancel()
+    this.abort?.abort(); this.abort = null
+    if (active) this.engine.cancel()
   }
   observePlayback(next: PlaybackSnapshot | null) {
     const before = this.playback

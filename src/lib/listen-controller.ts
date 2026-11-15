@@ -2,7 +2,7 @@ import { useAppStore } from '../store/useAppStore'
 import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
-import { listenLines, listenTimingKey } from './listened-offset'
+import { isConclusiveListen, listenLines, listenTimingKey } from './listened-offset'
 import { automaticSourceOf, nextSourceToTry, sourcesVetted } from './lyrics-source'
 import { currentSessionCalibration } from './session-calibration'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
@@ -47,13 +47,23 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   if (lines.length < 8 || lines.length > 400) return { reason: 'too-few-lines' }
   const timingKey = listenTimingKey(original)
   if (!timingKey) return { reason: 'invalid-lines' }
-  if (lyrics.listenedOffset?.timingKey === timingKey) return { reason: 'already-measured' }
+  if (lyrics.listenedOffset?.timingKey === timingKey && isConclusiveListen(lyrics.listenedOffset)) return { reason: 'already-measured' }
   // This provider's timeline was already found inconsistent for the song (a
   // lookup may have rebuilt it with a different timing key): do not listen again.
   const shownSource = automaticSourceOf(lyrics)
   if (shownSource && lyrics.sourceTrials?.[shownSource] === 'inconsistent') return { reason: 'source-inconsistent' }
   if ((attempts.get(`${playback.track.id}\0${timingKey}`) ?? 0) >= MAX_SESSION_ATTEMPTS) return { reason: 'attempts-exhausted' }
   return { target: { trackId: playback.track.id, timingKey, language, lines } }
+}
+
+// Sessions restarted after the main process dropped them: at most three per timeline in one run.
+const sessionRestarts = new Map<string, number>()
+function mayRestartSession(key: string) {
+  const count = sessionRestarts.get(key) ?? 0
+  if (count >= 3) return false
+  if (sessionRestarts.size >= 200) sessionRestarts.delete(sessionRestarts.keys().next().value!)
+  sessionRestarts.set(key, count + 1)
+  return true
 }
 
 let active: { target: ListenTarget; stop: () => Promise<void> } | null = null
@@ -205,6 +215,10 @@ async function begin(target: ListenTarget) {
         if (unusable) failed()
         if (unusable || result.reason === 'inactive' || result.reason === 'lyrics-changed') await stop()
         if (unusable) giveUpUnmeasuredTrial(target.trackId, target.timingKey)
+        // The main process dropped the session (the song was restarted from
+        // the player bar, the lyrics changed). Track and play state did not
+        // change, so nothing else would start listening again for this play.
+        else if ((result.reason === 'inactive' || result.reason === 'lyrics-changed') && mayRestartSession(key)) queueMicrotask(() => { void reconcile() })
       } catch { failed(); await stop(); giveUpUnmeasuredTrial(target.trackId, target.timingKey) }
       finally { processing = false }
     }
@@ -302,7 +316,7 @@ export function resetSourceAdvanceForTests() { availabilityAsked.clear() }
  */
 export function adoptEarlierVerdict() {
   const document = useAppStore.getState().lyrics
-  if (document?.listenedOffset?.state !== 'inconsistent' || document.untimedOriginal) return
+  if (document?.listenedOffset?.state !== 'inconsistent' || !isConclusiveListen(document.listenedOffset) || document.untimedOriginal) return
   const original = document.tracks.find(track => track.kind === 'original')
   const shown = automaticSourceOf(document)
   // Only the verdict for the timeline on screen, and only once per provider.
@@ -353,7 +367,7 @@ function simulateVerdict(state: 'decided' | 'inconsistent') {
   const original = document?.untimedOriginal ? undefined : document?.tracks.find(track => track.kind === 'original')
   const timingKey = original ? listenTimingKey(original) : null
   if (!document || !timingKey || store.playback?.track?.id !== document.trackId) return false
-  store.setListenedOffset(document.trackId, { timingKey, state, offsetMs: 0, measuredDeltaMs: 0, lines: 0, measuredAt: Date.now() })
+  store.setListenedOffset(document.trackId, { timingKey, state, offsetMs: 0, measuredDeltaMs: 0, lines: 8, measuredAt: Date.now() })
   afterVerdict(document.trackId, state)
   return true
 }

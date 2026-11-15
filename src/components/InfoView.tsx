@@ -104,6 +104,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>
+      <article><Keyboard /><strong>F11</strong><span>专注模式：主窗口只留歌名、歌词和播放条，Esc 或再按一次 F11 退出</span></article>
       <article><Keyboard /><strong>Ctrl + F</strong><span>在当前歌词里查找：原文、罗马音和翻译都能搜，Enter 跳到下一处，Ctrl+Enter 从那一句开始播放</span></article>
       <article><MousePointerClick /><strong>右键歌词</strong><span>复制这一句或整首歌词（可带罗马音和翻译），或从这一句开始播放</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + L</strong><span>显示或隐藏桌面悬浮歌词</span></article>

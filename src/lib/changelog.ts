@@ -5,6 +5,10 @@
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.69', date: '2026-11-15', items: [
+    '主窗口新增专注模式（F11 或歌名右侧的按钮）：只留歌名、歌词和播放条',
+    '悬浮窗设置里的「文字透明度」「背景透明度」改名为「不透明度」：100% 是完全不透明，数值越小越淡（原来的名字容易让人往反方向调）'
+  ] },
   { version: '0.4.68', date: '2026-11-15', items: [
     '更多歌曲能配上中文翻译：Spotify 播放的是 MV 版等长度不同的版本时，也会用同一首歌的翻译并按歌词逐句对齐',
     '悬浮窗新增「暂停时隐藏」：锁定的悬浮窗在暂停 10 秒后淡出，继续播放时自动出现（设置 → 悬浮窗）',

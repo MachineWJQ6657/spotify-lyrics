@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.68 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.67-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.69 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.68-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (109 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (111 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,17 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.69 deployed: focus mode, opacity sliders renamed, QA scripts in the repo
+
+- `release/current` = **0.4.69** (asar SHA256 `716274a932a1d02ffba366a52dadbf06e566b0a16e6fbafcb01278188e730e8b`, verifier 111/111, 1228 tests). Rollback: `release/current-0.4.68-backup-20261115`; the 0.4.67 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0469`. First release built, smoke-tested and deployed with the repo's `scripts/qa/` tools.
+- **Focus mode** (`App.tsx`, `syllable-ui-focus` in localStorage, class `focus-mode` on `.body-grid`): F11 or the button next to the source badge hides the sidebar and the settings panel on the 正在播放 view. Esc leaves it unless the editor, the find bar, the lyric menu or the source menu is open. The overlay's "悬浮窗设置" shortcut leaves focus mode so the panel it opens is visible.
+- **Opacity naming**: the sliders showed `textOpacity` / `backgroundOpacity` under the label 透明度 (transparency), so 100% meant solid and lowering "transparency" made the text fainter. They are now 文字不透明度 / 背景不透明度 with a one-line hint.
+- **The user's overlay is switched off** (found 2026-11-15, not changed): every profile backup since the 0.4.59 deploy has `overlayVisible: false` and `textOpacity: 45`, the two before it `true` and `100`. A graceful quit does not write the setting (checked on the test instance), only an explicit hide does (`publishOverlayVisibility(false)` is called from `hideOverlay` alone). The likely story is the 0.4.57 pause-dimming plus the misleading slider name. Do not assume the overlay is what the user looks at; do not change these settings for them; it has been reported to the user.
+- **QA and release scripts are in the repo**: `scripts/qa/` (`README.md` there). Isolated profile `<repo>/.qa-test-profile`, logs and scratch files `<repo>/.qa-scratch/` (git-ignored; the publication guard also refuses `.qa*` paths). `.gitattributes` keeps `*.sh` on LF. The older copies in the session scratchpad are obsolete.
+- Read-only library statistics are still done with a hidden Electron window over a **copy** of a profile backup (the `dump-*.cjs` pattern from the session scratchpad; recreate it from `scripts/inspect-saved-lyrics.cjs` if the scratchpad is gone).
+- `scripts/qa/library-stats.cjs <profile backup>` prints the read-only library summary (languages, sources, verdicts, songs without a translation, provider revisions, display settings).
+- `scripts/qa/deploy.ps1` must stay pure ASCII: Windows PowerShell 5.1 reads a BOM-less file in the ANSI code page, and a non-ASCII character in its `node -e` line broke the final verification on its first use (the deploy itself had completed; fixed and re-verified).
 
 ## 2026-11-15 / 0.4.68 deployed: translations across versions of another length, hide while paused, lookup-lifecycle fixes from a third review
 

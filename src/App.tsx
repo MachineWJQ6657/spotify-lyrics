@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
 import './app.css'
 import { sourceLabel } from './lib/source-label'
-import { Languages, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
+import { Languages, Maximize2, Minimize2, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
@@ -31,6 +31,8 @@ import type { LyricLine } from './types'
 const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
 const PANEL_KEY = 'syllable-ui-panel-collapsed'
 const readPanelCollapsed = () => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } }
+const FOCUS_KEY = 'syllable-ui-focus'
+const readFocus = () => { try { return localStorage.getItem(FOCUS_KEY) === '1' } catch { return false } }
 
 /**
  * Blurred album art behind the whole window. The previous cover stays under
@@ -70,11 +72,32 @@ export function App() {
     try { localStorage.setItem(PANEL_KEY, value ? '0' : '1') } catch { /* view-only preference */ }
     return !value
   }), [])
+  // Focus mode: only the song header, the lyrics and the player bar. F11
+  // toggles it; Esc leaves it when nothing else is open to close first.
+  const [focus, setFocus] = useState(readFocus)
+  const toggleFocus = useCallback(() => setFocus(value => {
+    try { localStorage.setItem(FOCUS_KEY, value ? '0' : '1') } catch { /* view-only preference */ }
+    return !value
+  }), [])
+  const focusActive = focus && view === 'now'
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'F11') { event.preventDefault(); if (view === 'now') toggleFocus(); return }
+      if (event.key !== 'Escape' || !focusActive || event.defaultPrevented) return
+      if (document.querySelector('.editor-backdrop, .lyrics-find, .lyric-menu, .source-popover')) return
+      toggleFocus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view, focusActive, toggleFocus])
   // "悬浮窗设置" on the overlay's control bar: expand the panel at its overlay tab.
   useEffect(() => window.syllable.window.onShowSection?.(section => {
     if (section !== 'overlay-settings') return
     try { localStorage.setItem(TAB_KEY, 'overlay'); localStorage.setItem(PANEL_KEY, '0') } catch { /* view-only preference */ }
     setPanelCollapsed(false)
+    // The panel is hidden in focus mode: leave it so the settings asked for are visible.
+    try { localStorage.setItem(FOCUS_KEY, '0') } catch { /* view-only preference */ }
+    setFocus(false)
     window.dispatchEvent(new CustomEvent(PANEL_TAB_EVENT, { detail: 'overlay' }))
   }), [])
   const listening = useSyncExternalStore(subscribeListening, listeningTrackId) === (playback?.track?.id ?? null) && Boolean(playback?.track)
@@ -144,7 +167,7 @@ export function App() {
   return <div className="app-shell" onDragOver={event => event.preventDefault()} onDrop={event => void importDroppedLyrics(event)} style={{ '--lyric-size': `${settings.fontSize}px` } as React.CSSProperties}>
     <Backdrop cover={playback?.track?.coverUrl || undefined} />
     <Titlebar title={VIEW_TITLES[view]} />
-    <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''}`}>
+    <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''} ${focusActive ? 'focus-mode' : ''}`}>
       <Sidebar active={view} onChange={setView} news={news} />
       <main className="main-content">
         {view === 'library' || view === 'sources' ? <LibraryView mode={view} openEditor={openEditor} /> : view === 'settings' || view === 'help' ? <InfoView mode={view} openEditor={openEditor} /> : <>
@@ -157,7 +180,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-focus" aria-pressed={focusActive} aria-label="专注模式" title={focusActive ? '退出专注模式（Esc 或 F11）' : '专注模式：只显示歌词（F11）'} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
         <div className="lyric-card">
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>

@@ -31,6 +31,19 @@ Checks that need no audio:
 - `./node_modules/electron/dist/electron.exe scripts/verify-overlay-contrast.cjs`
   and `scripts/verify-overlay-paint.cjs` check the overlay's styles.
 
+## What the user's library looks like
+
+```bash
+./node_modules/electron/dist/electron.exe scripts/qa/library-stats.cjs .qa-user-data-preupdate-<n>
+```
+
+A read-only summary of a profile **backup** (never the profile of a running
+app): songs by language and source, listening verdicts, songs without a Chinese
+translation, provider revisions, and the display settings. Real data found the
+missing translations for music-video cuts, the songs that predate the provider
+list, and that the overlay was switched off; look at it before deciding what to
+improve.
+
 Do not click the copy items of the lyric menu in a test: they overwrite the
 real clipboard. Do not toggle "start at login": it writes the real login items.
 

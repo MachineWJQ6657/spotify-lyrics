@@ -36,5 +36,5 @@ if ($Recycle -and (Test-Path "release\$Recycle")) {
 if (Test-Path "$profile\error.log") { 'error.log tail:'; Get-Content "$profile\error.log" -Tail 4 } else { 'no error.log in user profile' }
 $report = Join-Path $env:TEMP 'syllable-verify-current.json'
 node scripts/verify-package.cjs release/current 2>&1 | Out-File -Encoding ascii $report
-node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8').replace(/^﻿/,'')); const e=Object.entries(r.checks||r).filter(([k,v])=>typeof v==='boolean'); console.log('deployed', r.version ?? '', 'pass', e.filter(([,v])=>v).length, '/', e.length, 'sha', r.archiveSha256)" $report
+node -e "const text=require('fs').readFileSync(process.argv[1],'utf8'); const r=JSON.parse(text.slice(text.indexOf('{'))); const e=Object.entries(r.checks||r).filter(([k,v])=>typeof v==='boolean'); console.log('deployed', r.version ?? '', 'pass', e.filter(([,v])=>v).length, '/', e.length, 'sha', r.archiveSha256)" $report
 "backup: current-$Old-backup-$stamp"

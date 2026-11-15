@@ -171,8 +171,8 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
         </section>
         <section>
           <label className="switch-row" style={{ marginTop: 0 }}><div><strong>显示背景</strong><span>关闭后只保留歌词文字</span></div><Switch label="显示悬浮窗背景" value={settings.backgroundEnabled} onChange={backgroundEnabled => patchSettings({ backgroundEnabled })} /></label>
-          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>背景透明度 <small>{settings.backgroundOpacity}%</small></label>
-          <Range disabled={!settings.backgroundEnabled} min={10} max={100} value={settings.backgroundOpacity} onChange={backgroundOpacity => patchSettings({ backgroundOpacity })} label="背景透明度" />
+          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>背景不透明度 <small>{settings.backgroundOpacity}%</small></label>
+          <Range disabled={!settings.backgroundEnabled} min={10} max={100} value={settings.backgroundOpacity} onChange={backgroundOpacity => patchSettings({ backgroundOpacity })} label="背景不透明度" />
           <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>背景模糊 <small>{settings.blur}px</small></label>
           <Range disabled={!settings.backgroundEnabled} min={0} max={36} value={settings.blur} onChange={blur => patchSettings({ blur })} label="背景模糊" />
           <label className="setting-label top-gap">圆角 <small>{settings.cornerRadius}px</small></label>
@@ -185,8 +185,9 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
           <div className="segmented three"><button className={settings.textColor === 'white' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'white' })}>纯白</button><button className={settings.textColor === 'green' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'green' })}>Spotify 绿</button><button className={settings.textColor === 'warm' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'warm' })}>暖白</button></div>
           <label className="setting-label top-gap">文字对齐</label>
           <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>左对齐</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>居中</button></div>
-          <label className="setting-label top-gap">文字透明度 <small>{settings.textOpacity}%</small></label>
-          <Range min={45} max={100} value={settings.textOpacity} onChange={textOpacity => patchSettings({ textOpacity })} label="文字透明度" />
+          <label className="setting-label top-gap">文字不透明度 <small>{settings.textOpacity}%</small></label>
+          <Range min={45} max={100} value={settings.textOpacity} onChange={textOpacity => patchSettings({ textOpacity })} label="文字不透明度" />
+          <p className="setting-hint">100% 是完全不透明，数值越小文字越淡。</p>
           <label className="setting-label top-gap">文字字重 <small>{settings.fontWeight}</small></label>
           <Range min={500} max={850} step={50} value={settings.fontWeight} onChange={fontWeight => patchSettings({ fontWeight })} label="文字字重" />
           <label className="setting-label top-gap">歌词行距 <small>{settings.lineHeight}%</small></label>

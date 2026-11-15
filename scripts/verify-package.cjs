@@ -112,6 +112,9 @@ const checks = {
   translationRecheck: renderer.includes('function needsTranslationRecheck(') && renderer.includes('translationRechecked'),
   // Third review (lookup lifecycle and library): a dropped answer is asked for again, a failed lookup says so, deleting the song on screen resets it, re-match and source choice never save an empty entry, search candidates stay with their song, credit headers are filtered.
   lookupLifecycleFixes: renderer.includes('function mayRerunDiscardedLookup(') && renderer.includes('rerunLyricsLookup') && renderer.includes('lookupFailed') && renderer.includes('歌词源暂时不可用') && renderer.includes('savedDocument') && renderer.includes('CREDIT_ROLE') && main.includes('bracketedTitle'),
+  // 0.4.69: focus mode in the main window (F11); the opacity sliders are named 不透明度 so 100% reads as solid.
+  focusMode: renderer.includes('syllable-ui-focus') && /\.body-grid\.focus-mode\s*\{/.test(rendererCss) && renderer.includes('专注模式'),
+  opacityNaming: renderer.includes('文字不透明度') && renderer.includes('背景不透明度') && !/label: ["']文字透明度["']/.test(renderer),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

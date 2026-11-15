@@ -1,1 +1,3 @@
 scripts/git-hooks/* text eol=lf
+# Shell scripts must keep LF line endings: bash cannot run a CRLF script.
+*.sh text eol=lf

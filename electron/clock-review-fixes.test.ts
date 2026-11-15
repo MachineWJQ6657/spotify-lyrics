@@ -29,9 +29,18 @@ describe('pausing', () => {
 
   it('resumes from the held position', () => {
     const paused = observeNativeClock(observeNativeClock(null, song, 1000), { ...song, statusName: 'PAUSED' }, 4787)
-    const resumed = observeNativeClock(paused, song, 10_000)
-    // The raw position is still the old one: the clock goes on from where it was held.
-    expect(nativeClockPosition(resumed, 10_500)).toBe(173_421)
+    // Playing again within moments, the raw position still the old one: the clock goes on from where it was held.
+    const quick = observeNativeClock(paused, song, 5500)
+    expect(nativeClockPosition(quick, 6000)).toBe(173_421)
+    // After a longer pause the raw position is taken, as before 0.4.73.
+    const later = observeNativeClock(paused, song, 10_000)
+    expect(nativeClockPosition(later, 10_500)).toBe(169_634)
+  })
+
+  it('restarts at 0 when a track that ended is played again', () => {
+    // PAUSED at 0:00 after the end, repeating a raw 0 seen long ago; played again a minute later.
+    const ended = observeNativeClock(observeNativeClock(null, { ...song, positionMs: 0 }, 0), { ...song, positionMs: 0, statusName: 'PAUSED' }, 200_000)
+    expect(nativeClockPosition(observeNativeClock(ended, { ...song, positionMs: 0 }, 260_000), 261_000)).toBe(1000)
   })
 
   it('is not set back by a status flap while the audio runs on', () => {

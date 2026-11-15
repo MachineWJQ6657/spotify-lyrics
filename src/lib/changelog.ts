@@ -5,6 +5,9 @@
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.76', date: '2026-11-15', items: [
+    '收紧上两版放得过宽的几条规则：只有几句歌词的短轨道不再被整体挪一行；歌词里夹着的汉字词（永遠、運命）不再被当成中文翻译；“编曲：fox capture plan”这类小写名字的制作名单照常隐藏；暂停较久后再播放时位置照常以 Spotify 报告的为准'
+  ] },
   { version: '0.4.75', date: '2026-11-15', items: [
     '悬浮窗拖到屏幕下方（压在任务栏上）之后，解锁电脑、从睡眠恢复或重启时不再被自动挪回上面',
     '资料库：连续移除几首歌后可以一次全部撤销；导出歌词时文件名里的特殊符号（/ : ? 等）会被替换，不再导出失败'

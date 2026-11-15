@@ -43,11 +43,14 @@ describe('raw native clock', () => {
     expect(nativeClockPosition(clock, 2500)).toBe(10700)
     // The pause notification repeats the raw position seen 600 ms earlier, and
     // no measured paused position follows: the clock stays where it had run to
-    // (10800) and resumes from there. Until 0.4.73 it went back to 10200.
+    // (10800) while paused. A resume seconds later takes the raw position, as
+    // it always did; only a resume within moments continues from the held one.
     clock = observeNativeClock(clock, { ...song, positionMs: 10200, statusName: 'PAUSED' }, 2600)
     expect(nativeClockPosition(clock, 9000)).toBe(10800)
+    const quick = observeNativeClock(clock, { ...song, positionMs: 10200 }, 3000)
+    expect(nativeClockPosition(quick, 3500)).toBe(11300)
     clock = observeNativeClock(clock, { ...song, positionMs: 10200 }, 10000)
-    expect(nativeClockPosition(clock, 10500)).toBe(11300)
+    expect(nativeClockPosition(clock, 10500)).toBe(10700)
     // A measured paused position is taken as it is, and a resume continues from it.
     let measured = observeNativeClock(observeNativeClock(null, { ...song, positionMs: 10200, durationMs: 0 }, 2000), { ...song, positionMs: 10650, statusName: 'PAUSED' }, 2600)
     measured = observeNativeClock(measured, { ...song, positionMs: 10650 }, 10000)

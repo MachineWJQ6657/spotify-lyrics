@@ -24,6 +24,11 @@ describe('where the overlay is put back', () => {
     expect(visibleOverlayPlacement({ x: -900, y: 400, width: 820, height: 220 }, area).x).toBe(0)
   })
 
+  it('brings back an overlay whose stored size does not fit the display', () => {
+    // 2400 wide at x = 300, now on a 1366-wide work area: cut to fit and placed inside, not 300 px off the right.
+    expect(visibleOverlayPlacement({ x: 300, y: 400, width: 2400, height: 220 }, { x: 0, y: 0, width: 1366, height: 728 })).toEqual({ x: 0, y: 400, width: 1366, height: 220 })
+  })
+
   it('keeps the size inside its limits', () => {
     expect(visibleOverlayPlacement({ x: 0, y: 0, width: 3000, height: 2000 }, area)).toEqual({ x: 0, y: 0, width: 1920, height: 1032 })
     expect(visibleOverlayPlacement({ x: 100, y: 100, width: 200, height: 50 }, area)).toMatchObject({ width: 480, height: 140 })

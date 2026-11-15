@@ -39,11 +39,12 @@ export function observeNativeClock(previous: NativeClockAnchor | null, sample: N
       const heldMs = Math.min(durationMs || Infinity, previous.positionMs + Math.max(0, now - previous.observedAtMs))
       return { trackIdentity, positionMs: heldMs, rawPositionMs: positionMs, durationMs, statusName: sample.statusName, observedAtMs: now }
     }
-    // Resuming, again without a new measurement: go on from where the clock
-    // was held. After a status flap (paused and playing again within 100 ms
-    // while the audio ran on) the old raw position restarted the clock late
-    // by the whole time since that sample.
-    if (sample.statusName === 'PLAYING') {
+    // Playing again within moments, still without a new measurement (a status
+    // flap, or a quick pause and play): go on from where the clock was held;
+    // the old raw position restarted it late by the whole time since that
+    // sample. After a longer pause the raw position is taken as before: by
+    // then it may be a real one (a track that ended and starts again at 0).
+    if (sample.statusName === 'PLAYING' && now - previous.observedAtMs <= 1500) {
       return { trackIdentity, positionMs: previous.positionMs, rawPositionMs: positionMs, durationMs, statusName: sample.statusName, observedAtMs: now }
     }
   }

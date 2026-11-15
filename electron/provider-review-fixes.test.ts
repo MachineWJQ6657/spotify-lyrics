@@ -206,6 +206,22 @@ describe('a translation of only some lines, interleaved with them', () => {
   })
 })
 
+describe('different kanji-only sung rows', () => {
+  it('stay in the original (they are not a sparse translation)', () => {
+    // 20 kana rows, four of them followed by 永遠 / 運命 / 約束 / 未来 (regression in 0.4.74).
+    const sungKanji = ['永遠', '運命', '約束', '未来']
+    const lines: Array<[number, string]> = []
+    for (let index = 0; index < 20; index += 1) {
+      lines.push([10_000 + index * 8000, `夜の街を歩いていた${index}番目のことば`])
+      if (index % 5 === 2) lines.push([10_000 + index * 8000 + 4000, sungKanji[Math.floor(index / 5)]])
+    }
+    const result: LyricsResult = { syncedLyrics: lrc(lines), plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 180_000 }
+    const split = splitEmbeddedTranslation(result)
+    expect(parseTimedRows(split.syncedLyrics)).toHaveLength(24)
+    expect(split.additionalTracks ?? []).toEqual([])
+  })
+})
+
 describe('kanji-only sung rows', () => {
   it('stay in the original when they only follow a kana row in each chorus', () => {
     const verse = (n: number) => [`夜の街を歩いていた${n}`, `君の声が聞こえた気がした${n}`, `振り返れば誰もいない${n}`, `明日はきっと晴れるから${n}`,

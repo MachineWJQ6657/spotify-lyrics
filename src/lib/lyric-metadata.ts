@@ -27,9 +27,14 @@ const CREDIT_LABEL = new RegExp(String.raw`^${CREDIT_ROLE}(?:\s*[/・&、,]\s*(?
 // ("和声：啦啦啦啦", "Bass: how low can you go"), which stays.
 const SUNG_VALUE = /^(?:(?:[啦啊哦噢呜嗚哈嘿喔耶呀哎唉]|la|oh|ah|na|da|yeah|woo|ooh|hey|uh)[\s~～!！,，.。…-]*)+$|^[a-z']+(?:\s+[a-z']+){2,}[.!?]?$/
 
+// Only labels that also name a part of the song are in doubt. After 作词, 编曲 or
+// Guitar a lowercase name ("fox capture plan", "nana") is still a name.
+const PART_LABEL = /^(?:和声|和聲|合声|合聲|和音|人声|人聲|vocals?|bass|chorus)\s*[:：]/i
+
 export function isLyricCredit(text: string) {
   const normalized = text.trim().normalize('NFKC')
   if (!CREDIT_LABEL.test(normalized)) return false
+  if (!PART_LABEL.test(normalized)) return true
   const value = normalized.slice(normalized.search(/[:：]/) + 1).trim()
   return !SUNG_VALUE.test(value)
 }

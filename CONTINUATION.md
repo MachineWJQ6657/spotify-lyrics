@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.75 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.74-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.76 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.75-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (125 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (126 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,20 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.76 deployed: rules of 0.4.74-0.4.75 tightened after a second regression review
+
+- `release/current` = **0.4.76** (asar SHA256 `d72cd2bc4e1ae0d9588d72d18f20a0f241d73ea7692d2421a8ab598be1bc9094`, verifier 126/126, 1395 tests). Rollback: `release/current-0.4.75-backup-20261115`; the 0.4.74 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0476`.
+- **Eleventh review**: regressions in `5bd48aa..2815e1d` (findings and what was done in `.qa-scratch/review11-findings.md`). Each was a rule the previous regression fixes had made too wide:
+  - `secondaryTrackShift`: at least twelve rows on both sides; rows within 200 ms of a row start count as in place; a shift of 200 ms or less is never reported.
+  - `splitEmbeddedTranslation`: the sparse band also requires `CHINESE_ONLY_WORD` in half of the candidate translation rows.
+  - `isLyricCredit`: `SUNG_VALUE` is tested only after a `PART_LABEL` (和声, 和音, 人声, vocal, bass, chorus).
+  - `observeNativeClock`: a resume continues from the held position only within 1.5 s of the pause notification; later the raw position is taken, as before 0.4.73. The two clock tests changed in 0.4.74 assert this again.
+  - `visibleOverlayPlacement`: an axis whose stored size had to be cut is brought back whole.
+  - Cut-sentence rule: four characters again.
+- Checked on real data: the library replay (213 songs, offline) equals 0.4.73; the saved library's row assignment (397 secondary tracks) equals 0.4.75.
+- **Pattern of the day**: fixes -> regression review -> fixes for the regressions -> second regression review found the fixes too wide. Each round was smaller (8 findings, then 6 mostly synthetic ones). Stop a chain like this on a release whose diff is only tightenings, and keep a real-data check (library replay, saved-library row assignment) after each step.
+- Not verified with live playback: the clock changes since 0.4.73, the smooth scroll, the overlay placement after a real lock or sleep.
 
 ## 2026-11-15 / 0.4.75 deployed: overlay placement kept through unlock and resume, library undo and export names
 

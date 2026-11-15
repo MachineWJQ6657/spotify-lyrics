@@ -27,6 +27,19 @@ describe('a secondary track that is early or late as a whole', () => {
     expect(placed(rows([1000], 40), shifted(rows([1000], 40), 100))).toBe(40)
   })
 
+  it('leaves short or loosely stamped tracks alone', () => {
+    // Six rows 0.5-0.9 s apart, stamps off by up to 120 ms: 0.4.74 "found" a shift of -680 ms and moved every row.
+    const base = [32_700, 33_500, 34_200, 34_800, 35_400, 36_200].map((startMs, index) => ({ startMs, text: `o${index}` }))
+    const loose = base.map((line, index) => ({ startMs: line.startMs + [80, 0, -40, -80, 120, 80][index], text: `t${index}` }))
+    expect(secondaryTrackShift(base.map(line => line.startMs), loose.map(line => line.startMs))).toBe(0)
+    expect(placed(base, loose)).toBe(6)
+    // A long track with every stamp up to 150 ms off is in place too.
+    const long = rows([900, 700, 1100, 600], 40)
+    const jitter = long.map((line, index) => ({ startMs: line.startMs + [120, -90, 40, -150, 0, 150, -60][index % 7], text: `t${index}` }))
+    expect(secondaryTrackShift(long.map(line => line.startMs), jitter.map(line => line.startMs))).toBe(0)
+    expect(placed(long, jitter)).toBe(40)
+  })
+
   it('does not move a track because a few of its rows are off', () => {
     const base = rows([4000, 5000, 3000], 30)
     const secondary = shifted(base, 0).map((line, index) => index % 7 === 3 ? { ...line, startMs: line.startMs - 700 } : line)
@@ -39,7 +52,7 @@ describe('part labels inside the lyrics', () => {
   it.each(['和声：啦啦啦啦', '和音: oh oh oh', 'Bass: how low can you go', 'Vocal: la la la la'])('keeps the sung row %s', text => {
     expect(isLyricCredit(text)).toBe(false)
   })
-  it.each(['和声：陈某', 'Bass：Takeo', 'Guitar: raku', '和声编写：某人', 'Vocal: suis'])('still drops the credit %s', text => {
+  it.each(['和声：陈某', 'Bass：Takeo', 'Guitar: raku', '和声编写：某人', 'Vocal: suis', '编曲 : school food punishment', '作曲 : fox capture plan', '作词 : nana', '作词：啦啦', 'Guitar: la la land'])('still drops the credit %s', text => {
     expect(isLyricCredit(text)).toBe(true)
   })
 })

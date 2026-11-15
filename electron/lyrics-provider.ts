@@ -89,6 +89,9 @@ export function parseTimedRows(value: string | null | undefined): TimedLyricsRow
 }
 
 /** Split community LRC files that embed Japanese and Chinese at one timestamp. */
+/** Characters of everyday Chinese that Japanese does not use (or not on their own) in a kanji-only lyric row. */
+const CHINESE_ONLY_WORD = /[的了你们們这這哪吗嗎呢吧啊着没沒么麼她很还還说說让讓给給谁誰把被]/
+
 export function splitEmbeddedTranslation(result: LyricsResult): LyricsResult {
   if (!result.syncedLyrics) return result
   // NetEase occasionally publishes two representations of the same
@@ -142,13 +145,16 @@ export function splitEmbeddedTranslation(result: LyricsResult): LyricsResult {
   // count alone, four kanji-only sung rows (a hook like 「東京 東京」 after a
   // kana row in each chorus) were the whole "translation": they left the
   // original and appeared as the Chinese of the row before.
-  // A translation of only some lines covers less of the song, but its rows
-  // differ from one another; a sung hook repeats the same words.
+  // A translation of only some lines covers less of the song. It is told from
+  // sung kanji-only rows (a repeated hook, or different words such as 永遠 /
+  // 運命 / 約束) by being Chinese: most of its rows differ from one another and
+  // carry a word Japanese lyrics do not write in kanji alone.
   const alternatingCoverage = alternatingPairs.length / Math.max(1, japaneseRowCount)
   const distinctTranslations = new Set(alternatingPairs.map(pair => pair.translation.content)).size / Math.max(1, alternatingPairs.length)
+  const chineseTranslations = alternatingPairs.filter(pair => CHINESE_ONLY_WORD.test(pair.translation.content)).length / Math.max(1, alternatingPairs.length)
   const hasAlternatingEmbeddedTranslation = alternatingPairs.length >= 4
     && alternatingPairs.length / Math.max(1, Math.min(japaneseRowCount, hanOnlyRowCount)) >= .55
-    && (alternatingCoverage >= .4 || (alternatingCoverage >= .2 && distinctTranslations >= .6))
+    && (alternatingCoverage >= .4 || (alternatingCoverage >= .2 && distinctTranslations >= .6 && chineseTranslations >= .5))
   const alternatingTranslationRows = new Set(hasAlternatingEmbeddedTranslation ? alternatingPairs.map(pair => pair.translation.physicalIndex) : [])
   const strippedRows = new Set([...knownTranslationRows, ...alternatingTranslationRows])
   const primaryLyrics = (hasKnownEmbeddedTranslation || hasAlternatingEmbeddedTranslation)
@@ -795,8 +801,8 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
   // when that row ends (or starts) with exactly its words.
   const textualOwner = ownerRows.flatMap((row, index) => row.text ? [index] : [])
   for (const [position, ownerIndex] of textualOwner.entries()) {
-    // Three characters: an echo of the row's last word (「だけ」) is not a cut sentence.
-    if (byOwner.has(ownerIndex) || ownerRows[ownerIndex].text.length < 3) continue
+    // Four characters: an echo of the row's last words (「だけ」, 「好きだ」) is not a cut sentence.
+    if (byOwner.has(ownerIndex) || ownerRows[ownerIndex].text.length < 4) continue
     const previous = byOwner.get(textualOwner[position - 1] ?? -1)
     const next = byOwner.get(textualOwner[position + 1] ?? -1)
     const previousTarget = previous ? previous.targetIndices?.at(-1) ?? previous.referenceIndex : -1

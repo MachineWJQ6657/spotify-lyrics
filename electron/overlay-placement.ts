@@ -18,8 +18,10 @@ export const OVERLAY_GRIP_PX = 48
 export function visibleOverlayPlacement(bounds: PlacementRect, area: PlacementRect): PlacementRect {
   const width = Math.min(Math.max(480, bounds.width), area.width)
   const height = Math.min(Math.max(140, bounds.height), area.height)
-  const keepsX = bounds.x >= area.x - width / 2 && bounds.x <= area.x + area.width - width / 2
-  const keepsY = bounds.y >= area.y && bounds.y <= area.y + area.height - OVERLAY_GRIP_PX
+  // A size that had to be cut to fit was not chosen on this display: such an
+  // axis is brought back whole as well.
+  const keepsX = width === bounds.width && bounds.x >= area.x - width / 2 && bounds.x <= area.x + area.width - width / 2
+  const keepsY = height === bounds.height && bounds.y >= area.y && bounds.y <= area.y + area.height - OVERLAY_GRIP_PX
   return {
     width, height,
     x: keepsX ? bounds.x : Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),

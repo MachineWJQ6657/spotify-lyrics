@@ -77,6 +77,42 @@ and the NetEase entries' own rows; add `romaji` as the last argument for the
 romanization. Rebuild `provider-new.mjs` after each edit. Everything written
 here is the user's library or provider responses and stays in `.qa-scratch/`.
 
+Two more checks use the same files and run offline:
+
+```bash
+bash scripts/qa/provider-compare/bundle.sh .qa-scratch/lyrics-old.mjs <git ref> src/lib/lyrics.ts
+bash scripts/qa/provider-compare/bundle.sh .qa-scratch/lyrics-new.mjs "" src/lib/lyrics.ts
+node scripts/qa/provider-compare/saved-row-assignment.mjs .qa-scratch/library-originals.json .qa-scratch/lyrics-old.mjs .qa-scratch/lyrics-new.mjs
+node scripts/qa/provider-compare/untranslated.mjs .qa-scratch/provider-new.mjs .qa-scratch/lyrics-new.mjs .qa-scratch/library-originals.json .qa-scratch/http-cache
+```
+
+- `saved-row-assignment.mjs` lists the saved translation / romaji rows that a
+  change to `src/lib/lyrics.ts` (parsing, `alignSecondaryTrack`,
+  `visibleTracks`) would show on another row. Such a change acts on every
+  saved song at once, without a lookup.
+- `untranslated.mjs` counts displayed rows without a Chinese translation and
+  names the songs with the most. Look at what those rows are before trusting
+  the number: this is how the staff credits shown as lyrics and the lost half
+  of 猫日's translation were found.
+
+## Playback clock simulation
+
+```bash
+bash scripts/qa/clock-sim/run.sh                      # every scenario
+bash scripts/qa/clock-sim/run.sh sim-repeat-seek      # one
+```
+
+Runs the real worker body of `electron/local-spotify.ts` and the real
+`LocalSpotifyService` on a virtual clock (`harness.mjs`; only the native
+client, koffi, timers and `Date.now` are replaced). No Spotify, no audio, no
+window. The scenarios print what the renderer's clock shows against where the
+audio is: a track change followed by a correction, pausing (from Spotify and
+from Syllable's button), a song reached by skipping while paused, a seek and
+main's refresh after it, a status flap, and a second seek to the same line.
+Run it after any change to `local-spotify.ts`, `native-clock.ts` or the gate
+functions; it is the only check of that code that needs no live playback, and
+it does not replace one.
+
 ## Release
 
 1. Add the release's user-facing entry to `CHANGELOG` in `src/lib/changelog.ts`.

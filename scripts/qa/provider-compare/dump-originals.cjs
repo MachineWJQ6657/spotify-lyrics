@@ -37,7 +37,11 @@ const collect = () => {
   return Object.values(saved?.state?.library || {}).map(doc => {
     const original = (doc.tracks || []).find(track => track.kind === 'original')
     return { track: doc.track, language: original?.language, source: original?.source,
-      lines: (original?.lines || []).map(line => [line.startMs, line.text]) }
+      lines: (original?.lines || []).map(line => [line.startMs, line.text]),
+      // Every saved track as the renderer has it, for saved-row-assignment.mjs.
+      untimed: Boolean(doc.untimedOriginal),
+      tracks: (doc.tracks || []).map(track => ({ id: track.id, kind: track.kind, language: track.language,
+        lines: (track.lines || []).map(line => ({ startMs: line.startMs, endMs: line.endMs, text: line.text })) })) }
   })
 }
 

@@ -1,5 +1,6 @@
 import type { PlaybackSnapshot } from './spotify'
 import { isLyricCredit } from '../src/lib/lyric-metadata'
+import { secondaryTrackShift } from '../src/lib/secondary-shift'
 import { compareOriginalText, type TextReferenceCheck } from './lyrics-text-reference'
 
 export interface SupplementalLyrics {
@@ -141,9 +142,13 @@ export function splitEmbeddedTranslation(result: LyricsResult): LyricsResult {
   // count alone, four kanji-only sung rows (a hook like 「東京 東京」 after a
   // kana row in each chorus) were the whole "translation": they left the
   // original and appeared as the Chinese of the row before.
+  // A translation of only some lines covers less of the song, but its rows
+  // differ from one another; a sung hook repeats the same words.
+  const alternatingCoverage = alternatingPairs.length / Math.max(1, japaneseRowCount)
+  const distinctTranslations = new Set(alternatingPairs.map(pair => pair.translation.content)).size / Math.max(1, alternatingPairs.length)
   const hasAlternatingEmbeddedTranslation = alternatingPairs.length >= 4
     && alternatingPairs.length / Math.max(1, Math.min(japaneseRowCount, hanOnlyRowCount)) >= .55
-    && alternatingPairs.length / Math.max(1, japaneseRowCount) >= .4
+    && (alternatingCoverage >= .4 || (alternatingCoverage >= .2 && distinctTranslations >= .6))
   const alternatingTranslationRows = new Set(hasAlternatingEmbeddedTranslation ? alternatingPairs.map(pair => pair.translation.physicalIndex) : [])
   const strippedRows = new Set([...knownTranslationRows, ...alternatingTranslationRows])
   const primaryLyrics = (hasKnownEmbeddedTranslation || hasAlternatingEmbeddedTranslation)
@@ -790,8 +795,8 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
   // when that row ends (or starts) with exactly its words.
   const textualOwner = ownerRows.flatMap((row, index) => row.text ? [index] : [])
   for (const [position, ownerIndex] of textualOwner.entries()) {
-    // Four characters: an echo of the row's last word (「だけ」) is not a cut sentence.
-    if (byOwner.has(ownerIndex) || ownerRows[ownerIndex].text.length < 4) continue
+    // Three characters: an echo of the row's last word (「だけ」) is not a cut sentence.
+    if (byOwner.has(ownerIndex) || ownerRows[ownerIndex].text.length < 3) continue
     const previous = byOwner.get(textualOwner[position - 1] ?? -1)
     const next = byOwner.get(textualOwner[position + 1] ?? -1)
     const previousTarget = previous ? previous.targetIndices?.at(-1) ?? previous.referenceIndex : -1
@@ -997,7 +1002,12 @@ function supplementalBuckets(track: SupplementalLyrics, base: LyricsResult) {
   // every sung row or their translations collapse into an earlier sentence.
   const baseRows = parseTimedRows(base.syncedLyrics)
   const buckets = new Map<number, string>()
-  for (const row of parseTimedRows(track.syncedLyrics)) {
+  const stampedRows = parseTimedRows(track.syncedLyrics)
+  // A track that leads or trails its lines as a whole is put back first, as in
+  // the renderer's alignSecondaryTrack.
+  const shiftMs = secondaryTrackShift(baseRows.map(row => row.timeMs), stampedRows.map(row => row.timeMs))
+  for (const stamped of stampedRows) {
+    const row = shiftMs ? { ...stamped, timeMs: stamped.timeMs - shiftMs } : stamped
     // Assign by the source-line interval, not only by the nearest timestamp.
     // Providers sometimes split one translated sentence into two delayed
     // phrases; both legitimately belong to the same original row and must not
@@ -1036,9 +1046,15 @@ function translationMemoryOf(entries: LyricsResult[]): Array<[string, string]> {
     const translation = entry.additionalTracks?.find(track => track.kind === 'translation' && track.language === 'zh-Hans')
     if (!translation || !entry.syncedLyrics) continue
     const translated = new Map(parseTimedRows(translation.syncedLyrics).map(row => [row.timeMs, row.text.trim()]))
-    for (const row of parseTimedRows(entry.syncedLyrics)) {
+    const rows = parseTimedRows(entry.syncedLyrics)
+    // A timestamp shared by two sung rows (a lead line and its backing "(Yeah
+    // yeah)") has one translation: whose it is cannot be told, and giving it
+    // to both put the lead line's translation on every later "Yeah yeah".
+    const rowsAt = new Map<number, number>()
+    for (const row of rows) rowsAt.set(row.timeMs, (rowsAt.get(row.timeMs) ?? 0) + 1)
+    for (const row of rows) {
       const words = alignmentText(row.text)
-      const text = translated.get(row.timeMs)
+      const text = rowsAt.get(row.timeMs) === 1 ? translated.get(row.timeMs) : undefined
       if (words.length < 2 || !text || alignmentText(text) === words || memory.has(words)) continue
       memory.set(words, text)
     }

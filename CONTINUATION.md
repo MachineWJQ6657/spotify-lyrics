@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.73 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.72-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.74 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.73-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (123 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (124 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,24 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.74 deployed: regressions found by reviewing the day's own changes
+
+- `release/current` = **0.4.74** (asar SHA256 `f06318e9bdf7c04a2c09ee9bd0b893c446c533cc2f849bff1adbb0bc1f821b02`, verifier 124/124, 1381 tests). Rollback: `release/current-0.4.73-backup-20261115`; the 0.4.72 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0474`.
+- **Ninth review**: a regression review of `98074c4..5bd48aa` (findings in `.qa-scratch/review9-findings.md`). Nothing severe in the clock; the confirmed regressions were in translation placement:
+  1. `translationMemoryOf` gave one translation to every lrc row at its timestamp; rows sharing a timestamp are now left out of the memory.
+  2. The nearest-start rule of 0.4.72 put a track that leads its lines by 0.6-1.2 s one row early on short rows (the old look-ahead put late ones a row late). `src/lib/secondary-shift.ts` (`secondaryTrackShift`): the shift that puts most stamps on a row start (40 ms buckets, at least 60 % of the lines and twice the lines already in place) is removed before the per-row rule, in `alignSecondaryTrack` and in the provider's `supplementalBuckets`.
+  3. `splitEmbeddedTranslation`: coverage of 20 % with mostly distinct translation rows also counts (0.4.71 required 40 %).
+  4. `observeNativeClock`: a resume that repeats the seen raw position continues from the held position (a status flap under the announced gate published a clock 460 ms late).
+  5. Not changed: a seek accepted by `seekMs` that does not move the player leaves the clock at the target until the next distinct raw sample (could not be established to happen).
+  6. Cut-sentence rule: three characters instead of four.
+  7. `isLyricCredit`: a value of sung syllables or a lowercase sentence after the label keeps the row (`SUNG_VALUE`).
+  8. `LyricsStage`: only a line change scrolls smoothly (`centredLine`); the first layout, a resize and following again jump.
+- Two clock expectations changed deliberately (`electron/native-clock.test.ts`, `clock-review-fixes.test.ts`): after a status-only pause the clock stays at, and resumes from, the projected position.
+- Library replay (213 songs, offline): no result differs from 0.4.73. Tests: `src/lib/secondary-shift.test.ts`, more cases in `electron/provider-review-fixes.test.ts` and `clock-review-fixes.test.ts`.
+- Verifier: `regressionReviewFixes`; `providerSelectionFixes` now looks for `alternatingCoverage`.
+- **Worth repeating**: after a day of changes without live playback, a review restricted to "what did this diff break" found five confirmed regressions that eight forward-looking reviews and 1366 tests had not.
+- Not verified with live playback: the clock changes (track change, pause, seek) and the smooth scroll.
 
 ## 2026-11-15 / 0.4.73 deployed: translation fill by identical words, staff credits, seventh review (lyric clock), eighth review (editor / library / settings)
 

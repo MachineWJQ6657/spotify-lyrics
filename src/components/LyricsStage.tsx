@@ -236,9 +236,15 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
   // A new line glides into place while the window is on screen. A hidden or
   // minimized window does not animate (Chromium suspends its frames), so
   // there the list jumps, and it jumps once more when the window comes back.
+  const centredLine = useRef(active)
   useEffect(() => {
+    // Only a new line glides. The first layout (the list's padding follows the
+    // measured height), a resize or following again jump: gliding there moved
+    // the list by almost half the viewport when the lyrics first appeared.
+    const lineChanged = centredLine.current !== active
+    centredLine.current = active
     if (!following) return
-    const animated = active > 0 && window.document.visibilityState === 'visible'
+    const animated = lineChanged && active > 0 && window.document.visibilityState === 'visible'
       && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
     centerActive(animated ? 'smooth' : 'auto')
   }, [active, following, centerActive, viewportHeight])

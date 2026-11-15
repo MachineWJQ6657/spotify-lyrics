@@ -22,6 +22,14 @@ const CREDIT_ROLE = `(?:${STAFF_ROLE.join('|')})`
 // Roles are often combined on one row: "作詞/作曲/編曲：MIMI", "Lyrics & Music: ...", "Vocal/Pf：...".
 const CREDIT_LABEL = new RegExp(String.raw`^${CREDIT_ROLE}(?:\s*[/・&、,]\s*(?:${CREDIT_ROLE}|pf|gt|ba|dr|key))*\s*[:：]\s*\S`, 'i')
 
+// What follows a credit label is a name. Sung syllables or a lowercase
+// sentence after it make the row a part label inside the lyrics
+// ("和声：啦啦啦啦", "Bass: how low can you go"), which stays.
+const SUNG_VALUE = /^(?:(?:[啦啊哦噢呜嗚哈嘿喔耶呀哎唉]|la|oh|ah|na|da|yeah|woo|ooh|hey|uh)[\s~～!！,，.。…-]*)+$|^[a-z']+(?:\s+[a-z']+){2,}[.!?]?$/
+
 export function isLyricCredit(text: string) {
-  return CREDIT_LABEL.test(text.trim().normalize('NFKC'))
+  const normalized = text.trim().normalize('NFKC')
+  if (!CREDIT_LABEL.test(normalized)) return false
+  const value = normalized.slice(normalized.search(/[:：]/) + 1).trim()
+  return !SUNG_VALUE.test(value)
 }

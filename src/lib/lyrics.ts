@@ -1,6 +1,7 @@
 import { toRomaji } from 'wanakana'
 import type { LyricLine, LyricsDocument, LyricTrack } from '../types'
 import { isLyricCredit } from './lyric-metadata'
+import { secondaryTrackShift } from './secondary-shift'
 
 const TIME = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g
 const WORD_TIME = /<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>/g
@@ -95,7 +96,11 @@ const SAME_STAMP_MS = 15
 export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: LyricLine[], leadToleranceMs = 1200): Array<LyricLine | undefined> {
   const buckets: LyricLine[][] = Array.from({ length: baseLines.length }, () => [])
   if (!baseLines.length) return []
-  for (const line of secondaryLines) {
+  // A track that is early or late as a whole is put back first (see
+  // secondaryTrackShift); the row rules below then see stamps on their rows.
+  const shiftMs = secondaryTrackShift(baseLines.map(line => line.startMs), secondaryLines.map(line => line.startMs), leadToleranceMs)
+  for (const stamped of secondaryLines) {
+    const line = shiftMs ? { ...stamped, startMs: stamped.startMs - shiftMs } : stamped
     // The same timestamp, give or take rounding: provider tracks re-timed onto
     // the original are written to 10 ms while the original keeps milliseconds
     // (21.457 s against 21.46 s). Demanding equality sent such a row to the

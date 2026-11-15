@@ -192,6 +192,20 @@ describe('rows spelled differently on the two timelines', () => {
   })
 })
 
+describe('a translation of only some lines, interleaved with them', () => {
+  it('is still split out when its rows differ from one another', () => {
+    // 40 kana rows, 15 of them followed by a Chinese row (regression in 0.4.71: under 40 % was never split).
+    const lines: Array<[number, string]> = []
+    for (let index = 0; index < 40; index += 1) {
+      lines.push([10_000 + index * 5000, `夜の街を歩いていた${index}番目のことば`])
+      if (index % 8 < 3) lines.push([10_000 + index * 5000 + 2000, `走在夜晚的街道上第${['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'][Math.floor(index / 8) * 3 + index % 8]}句`])
+    }
+    const split = splitEmbeddedTranslation({ syncedLyrics: lrc(lines), plainLyrics: null, source: 'LRCLIB · 精确匹配', confidence: 100, matchedDurationMs: 220_000 })
+    expect(parseTimedRows(split.syncedLyrics)).toHaveLength(40)
+    expect(parseTimedRows(split.additionalTracks?.[0]?.syncedLyrics)).toHaveLength(15)
+  })
+})
+
 describe('kanji-only sung rows', () => {
   it('stay in the original when they only follow a kana row in each chorus', () => {
     const verse = (n: number) => [`夜の街を歩いていた${n}`, `君の声が聞こえた気がした${n}`, `振り返れば誰もいない${n}`, `明日はきっと晴れるから${n}`,
@@ -317,6 +331,30 @@ describe('NetEase lookups', () => {
     expect(result?.source).toBe('LRCLIB · 精确匹配')
     expect(zh.map(row => [row.timeMs, row.text])).toEqual(chinese.map((text, index) => [start(index), text]))
     expect(result).not.toHaveProperty('translationMemory')
+  })
+
+  it("do not hand a lead line's translation to the backing line stamped with it", async () => {
+    // 「きみがすきだよ」 and 「(Yeah yeah)」 share 00:42.00 and one translation row. A later, untranslated
+    // "Yeah yeah" must stay untranslated (regression in 0.4.73: both rows entered the translation memory).
+    const sung: Array<[number, string, string]> = [[10_000, '夜の街を歩いていた', '走在夜晚的街道上'], [20_000, '君の声が聞こえた気がした', '好像听见了你的声音'], [30_000, '振り返れば誰もいない', '回过头却空无一人'],
+      [42_000, 'きみがすきだよ', '我喜欢你'], [52_000, '明日はきっと晴れるから', '因为明天一定会放晴'], [62_000, '涙はもういらないよ', '已经不需要眼泪了'], [72_000, '遠い空に手を伸ばして', '向遥远的天空伸出手'],
+      [82_000, '届かなくても笑っていよう', '即使够不到也要笑着'], [92_000, 'さよならまた会う日まで', '再见直到重逢之日']]
+    const displayed = lrc([...sung.map(row => [row[0], row[1]] as [number, string]), [112_000, 'Yeah yeah']])
+    const entry = { id: 21, name: '夜明け前', duration: 130_000, artists: [{ name: 'テスト歌手' }], album: { name: '夜明け前' } }
+    const entryLrc = lrc([...sung.slice(0, 4).map(row => [row[0], row[1]] as [number, string]), [42_000, '(Yeah yeah)'], ...sung.slice(4).map(row => [row[0], row[1]] as [number, string])])
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('lrclib.net/api/get')) return json({ id: 1, trackName: '夜明け前', artistName: 'テスト歌手', albumName: '夜明け前', duration: 130, instrumental: false, syncedLyrics: displayed, plainLyrics: 'x' })
+      if (url.includes('lrclib.net')) return json([])
+      if (url.includes('kugou.com')) return json({ candidates: [], data: { lists: [] } })
+      if (url.includes('/search/get')) return json({ result: { songs: [entry] } })
+      if (url.includes('/song/lyric')) return json({ lrc: { lyric: entryLrc }, tlyric: { lyric: lrc(sung.map(row => [row[0], row[2]])) } })
+      return json({}, 404)
+    }))
+    const result = await fetchLyrics({ id: 'qa-review9-memory', name: '夜明け前', artist: 'テスト歌手', album: '夜明け前', coverUrl: '', durationMs: 130_000 }, null, true)
+    const zh = parseTimedRows(result?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics)
+    expect(zh.find(row => row.timeMs === 42_000)?.text).toBe('我喜欢你')
+    expect(zh.filter(row => row.timeMs === 112_000)).toEqual([])
   })
 
   it('are not final when one of the lyric requests failed', async () => {

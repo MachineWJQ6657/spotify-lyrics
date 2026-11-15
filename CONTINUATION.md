@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.65 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.64-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.66 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.65-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (98 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (101 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,16 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.66 deployed: library backup, source chain exercised without audio, source menu and status polish
+
+- `release/current` = **0.4.66** (asar SHA256 `5962fccad75067265c17b925f3082e7193722d702b6eab685d7d57b0fa719c1c`, verifier 101/101, 1181 tests). Rollback: `release/current-0.4.65-backup-20261115`; the 0.4.64 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0466`.
+- **Library backup / restore** (`src/lib/library-backup.ts`, buttons on the library page). Export is one JSON file (`format: 'syllable-library'`, `version: 1`, `documents`) through the existing `lyrics:export` IPC, whose save dialog now offers a JSON filter for a `.json` name. Import reads a file from a hidden `<input type="file">`, validates every document (`isBackupDocument`), and `importLibrary` adds new songs, replaces only with a newer `updatedAt`, and leaves the song on screen alone. Import was run end to end in the test profile through `DOM.setFileInputFiles`; export was not exercised (it opens a native save dialog).
+- **Source chain without audio.** `window.__syllableListenQa` (`verdict(state)`, `state()`) exists only when a debugger sets `window.__syllableQa = true` before the page loads (`Page.addScriptToEvaluateOnNewDocument`); `connectListener` installs it. `scripts/verify-source-chain.mjs` drives it against an isolated instance on CDP port 9333: three simulated "inconsistent" verdicts walked LRCLIB → 网易云音乐 → 酷狗音乐 → automatic with real lookups and no loop, and inconsistent → decided kept the new provider. The listening measurement itself is still unverified with live audio.
+- **同步 tab** lists the providers listening compared (`sourceTrialsSummary` in listen-status.ts).
+- **Source menu**: a provider whose words or length differ from the automatic choice says so (`SourceOption.differs`, from `agrees === false`).
+- **Fixes found by looking at screenshots**: notes inside the source menu did not wrap (`.now-header p` outranked `.source-popover-note`; fixed with `.source-popover p.source-popover-note`), and at the default window size a long source name squeezed the song title into an ellipsis (the track-count chip now hides below a 720 px lyric column).
+- `advanceSource` does nothing while a by-ear session calibration is active, and the "source switch in flight" state is tied to its own song (`sourceSwitchTrackId`).
 
 ## 2026-11-15 / 0.4.65 deployed: lyric row menu, tray tooltip, review fixes for listening's source switching, library storage budget
 

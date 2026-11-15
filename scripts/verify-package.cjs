@@ -95,6 +95,10 @@ const checks = {
   listeningAdvancesEarlierVerdicts: renderer.includes('function advanceSource(') && renderer.includes('function adoptEarlierVerdict(') && renderer.includes('availabilityAsked'),
   // Review fixes for source switching: one session start at a time, no verdict against the user's own lyrics, an unmeasurable trial is given up, no listening during a source lookup, and only providers that agree with the automatic choice are tried.
   listeningSourceGuards: renderer.includes('function automaticSourceOf(') && renderer.includes('function giveUpUnmeasuredTrial(') && renderer.includes('source-switching') && renderer.includes('reconcileAgain') && main.includes('function describeAvailableSources(') && /agrees !== false/.test(renderer),
+  // 0.4.66: source menu notes wrap, the song title outranks the track-count chip, the menu marks a provider whose lyrics differ, the 同步 tab lists the providers listening compared, and a debugger-only hook lets the source chain be exercised without audio.
+  sourceMenuPolish: /\.source-popover p\.source-popover-note\s*\{[^}]*white-space:\s*normal/.test(rendererCss) && /span\.track-count\s*\{\s*display:\s*none/.test(rendererCss) && renderer.includes('内容与自动选择的不同'),
+  triedSourcesStatus: renderer.includes('function sourceTrialsSummary(') && renderer.includes('__syllableListenQa'),
+  libraryBackup: renderer.includes('function parseLibraryBackup(') && renderer.includes('function mergeLibraryBackup(') && renderer.includes('导入备份') && /Syllable 资料库备份/.test(main),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

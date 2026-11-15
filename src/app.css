@@ -654,3 +654,27 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   position: absolute; left: 50%; bottom: 66px; z-index: 9; padding: 8px 14px; border-radius: 999px; background: #f4f6f5; color: #050605;
   box-shadow: 0 10px 28px rgba(0, 0, 0, .45); font-size: 12px; font-weight: 600; pointer-events: none; transform: translateX(-50%);
 }
+
+/* 0.4.66: notes inside the source menu wrap. `.now-header p` (one-line artist
+   row: flex, nowrap, 13 px) outranked `.source-popover-note`, so a note ran
+   out of the menu on a single line. */
+.source-popover p.source-popover-note {
+  display: block; margin: 4px 10px 6px; font-size: 11px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere;
+}
+
+/* The song title outranks the track-count chip. At the default window size
+   with the settings panel open the lyric column is about 640 px, and a longer
+   source name ("网易云音乐") plus the chip squeezed the title into an ellipsis. */
+@container main (max-width: 720px) {
+  .source-badges > span.track-count { display: none; }
+}
+
+/* Library backup and restore. */
+.library-backup { margin-left: auto; flex: none; display: flex; align-items: center; gap: 8px; }
+.library-toolbar > span { flex: none; white-space: nowrap; }
+.library-toolbar .library-search { min-width: 120px; }
+.library-backup button {
+  height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--sy-stroke); border-radius: 999px;
+  background: transparent; color: var(--sy-text-2); font-size: 12px; white-space: nowrap;
+}
+.library-backup button:hover { border-color: var(--sy-stroke-strong); color: var(--sy-text); }

@@ -4,6 +4,7 @@ import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
 import { listenLines, listenTimingKey } from './listened-offset'
 import { automaticSourceOf, nextSourceToTry, sourcesVetted } from './lyrics-source'
+import { currentSessionCalibration } from './session-calibration'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
 
 /**
@@ -80,7 +81,8 @@ function currentInput() {
   return { playback: store.playback, lyrics: store.lyrics, enabled: store.settings?.listenOffset !== false, demoMode: store.demoMode,
     manualActive: acoustic.running || acoustic.automatic || acoustic.busy,
     // The pending document of a source switch has no provider revision until its lookup answers.
-    switching: store.sourceSwitchToken !== null && store.sourceSwitchToken === store.lyricsRetryToken && store.lyrics?.providerRevision === undefined }
+    switching: store.sourceSwitchToken !== null && store.sourceSwitchToken === store.lyricsRetryToken
+      && store.sourceSwitchTrackId === store.lyrics?.trackId && store.lyrics?.providerRevision === undefined }
 }
 
 async function reconcile() {
@@ -265,6 +267,8 @@ export function advanceSource(trackId: string): boolean {
   if (!document || document.trackId !== trackId || document.untimedOriginal) return false
   if (store.playback?.track?.id !== trackId || store.demoMode) return false
   if (document.sourcePreference && document.sourceChosenBy !== 'listening') return false
+  // The user is correcting this timeline by ear ("这句现在开始"): do not swap it under them.
+  if (currentSessionCalibration(store.sessionCalibration, store.playback, document)) return false
   const shown = automaticSourceOf(document)
   const verdict = shown ? document.sourceTrials?.[shown] : undefined
   if (verdict !== 'inconsistent' && verdict !== 'unmeasurable') return false
@@ -333,9 +337,38 @@ export function relistenCurrentSong() {
   return true
 }
 
+declare global {
+  interface Window {
+    /** Set by a debugger before the page loads. Inert otherwise. */
+    __syllableQa?: boolean
+    /** Integration checks without audio: reach a verdict for the song on screen and read the source state. */
+    __syllableListenQa?: { verdict(state: 'decided' | 'inconsistent'): boolean; state(): unknown }
+  }
+}
+
+/** What listening would do with a verdict for the timeline on screen, without listening (QA only). */
+function simulateVerdict(state: 'decided' | 'inconsistent') {
+  const store = useAppStore.getState()
+  const document = store.lyrics
+  const original = document?.untimedOriginal ? undefined : document?.tracks.find(track => track.kind === 'original')
+  const timingKey = original ? listenTimingKey(original) : null
+  if (!document || !timingKey || store.playback?.track?.id !== document.trackId) return false
+  store.setListenedOffset(document.trackId, { timingKey, state, offsetMs: 0, measuredDeltaMs: 0, lines: 0, measuredAt: Date.now() })
+  afterVerdict(document.trackId, state)
+  return true
+}
+
+function sourceState() {
+  const document = useAppStore.getState().lyrics
+  return { trackId: document?.trackId, shown: automaticSourceOf(document), preference: document?.sourcePreference ?? null, chosenBy: document?.sourceChosenBy ?? null,
+    unavailable: Boolean(document?.sourceUnavailable), trials: document?.sourceTrials ?? null, available: document?.availableSources ?? null,
+    listened: document?.listenedOffset?.state ?? null, revision: document?.providerRevision ?? null, decision: currentListenDecision(true) }
+}
+
 /** Keep the listener in step with playback, lyrics and settings. */
 export function connectListener() {
   unsubscribe?.()
+  if (typeof window !== 'undefined' && window.__syllableQa) window.__syllableListenQa = { verdict: simulateVerdict, state: sourceState }
   let scheduled = false
   const schedule = () => {
     if (scheduled) return

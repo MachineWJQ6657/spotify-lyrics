@@ -148,7 +148,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
         <div className="lyric-card">
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>

@@ -29,7 +29,7 @@ const token = () => useAppStore.getState().lyricsRetryToken
 
 beforeEach(() => {
   resetSourceAdvanceForTests()
-  useAppStore.setState({ playback, demoMode: false, lyrics: document('lrclib'), library: {}, sourceSwitchToken: null })
+  useAppStore.setState({ playback: { ...playback, observedAtMs: Date.now() }, demoMode: false, lyrics: document('lrclib'), library: {}, sourceSwitchToken: null, sessionCalibration: null })
 })
 
 describe('next source to try', () => {
@@ -208,6 +208,8 @@ describe('moving on from an inconsistent provider', () => {
     const state = useAppStore.getState()
     const switching = state.sourceSwitchToken !== null && state.sourceSwitchToken === state.lyricsRetryToken && state.lyrics?.providerRevision === undefined
     expect(switching).toBe(true)
+    // The switch belongs to this song, not to whatever plays next.
+    expect(state.sourceSwitchTrackId).toBe(track.id)
     expect(decide({ switching })).toEqual({ reason: 'source-switching' })
     // The lookup answered.
     showChosen()
@@ -260,6 +262,17 @@ describe('moving on from an inconsistent provider', () => {
       expect(advanceSource(track.id)).toBe(true)
       expect(useAppStore.getState().lyrics?.sourcePreference).toBe('kugou')
     }
+  })
+
+  it('waits while the user is correcting the timeline by ear', () => {
+    useAppStore.setState({ lyrics: document('lrclib', { sourceTrials: { lrclib: 'inconsistent' } }) })
+    useAppStore.getState().calibrateHeardLine('o', 3, Date.now())
+    expect(useAppStore.getState().sessionCalibration).not.toBeNull()
+    expect(advanceSource(track.id)).toBe(false)
+    expect(useAppStore.getState().lyrics?.sourcePreference).toBeUndefined()
+    // Once that correction is gone (a pause, a seek, another song) the chain continues.
+    useAppStore.setState({ sessionCalibration: null })
+    expect(advanceSource(track.id)).toBe(true)
   })
 
   it('does nothing for a consistent provider, a hand-picked one, or another song', () => {

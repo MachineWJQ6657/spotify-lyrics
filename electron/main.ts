@@ -1839,7 +1839,10 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   ipcMain.handle('lyrics:romanize', (_event, lines: string[]) => romanizeLines(lines))
   ipcMain.handle('lyrics:export', async (_event, filename: string, content: string) => {
     if (!mainWindow) return null
-    const result = await dialog.showSaveDialog(mainWindow, { defaultPath: filename, filters: [{ name: 'LRC 歌词', extensions: ['lrc'] }] })
+    // One save dialog for a lyric track (.lrc) and for the library backup (.json).
+    const backup = typeof filename === 'string' && /\.json$/i.test(filename)
+    const result = await dialog.showSaveDialog(mainWindow, { defaultPath: filename,
+      filters: [backup ? { name: 'Syllable 资料库备份', extensions: ['json'] } : { name: 'LRC 歌词', extensions: ['lrc'] }] })
     if (result.canceled || !result.filePath) return null
     await writeFile(result.filePath, content, 'utf8')
     return result.filePath

@@ -32,6 +32,14 @@ describe('lyrics source menu', () => {
     expect(options.find(option => option.inUse)?.id).toBe('netease')
   })
 
+  it('marks a provider whose lyrics differ from the automatic choice', () => {
+    const options = sourceOptions(document('LRCLIB · 精确匹配', {
+      availableSources: [{ id: 'lrclib', lines: 41, agrees: true }, { id: 'netease', lines: 60, agrees: false }, { id: 'kugou', lines: 41 }] }))
+    expect(options.map(option => [option.id, option.differs])).toEqual([['lrclib', false], ['netease', true], ['kugou', false]])
+    // It stays selectable: the user may want that version.
+    expect(options.find(option => option.id === 'netease')?.available).toBe(true)
+  })
+
   it('has no provider in use for untimed or missing lyrics', () => {
     expect(sourceOptions(null).some(option => option.inUse)).toBe(false)
     expect(sourceOptions({ trackId: 't', tracks: [], untimedOriginal: { text: 'x', language: 'ja', source: 'Spotify' } }).some(option => option.inUse)).toBe(false)

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
 import { LIBRARY_BUDGET_CHARS, pruneLibrary } from '../lib/library-budget'
+import { mergeLibraryBackup } from '../lib/library-backup'
 import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, LyricsSourceId, PlaybackSnapshot, SessionCalibration } from '../types'
 import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
@@ -18,6 +19,8 @@ interface AppState {
   lyricsRetryToken: number
   /** The retry token of the latest source switch: that lookup re-ranks known provider results. */
   sourceSwitchToken: number | null
+  /** The song that source switch was for: the tokens are app-wide, the switch is not. */
+  sourceSwitchTrackId?: string | null
   sessionCalibration: SessionCalibration | null
   calibrateHeardLine(originalTrackId: string, lineIndex: number, now?: number): void
   clearSessionCalibration(): void
@@ -38,6 +41,8 @@ interface AppState {
   deleteLibraryDocument(trackId: string): void
   /** Puts a just-deleted document back (library undo). */
   restoreLibraryDocument(document: LyricsDocument): void
+  /** Adds a backup's songs: new ones are added, newer copies replace, the rest stay. The song on screen is left alone. */
+  importLibrary(documents: LyricsDocument[]): { added: number; updated: number; kept: number }
   retryCurrentLyrics(): void
   /** Picks the provider for the current song's timed original (null = automatic) and looks it up again. */
   setLyricsSource(source: LyricsSourceId | null, chosenBy?: 'user' | 'listening'): void
@@ -183,7 +188,7 @@ const putLibraryDocument = (library: Record<string, LyricsDocument>, document: L
   LIBRARY_BUDGET_CHARS, document.trackId
 ))
 
-export const useAppStore = create<AppState>()(persist((set) => ({
+export const useAppStore = create<AppState>()(persist((set, get) => ({
   connected: false,
   localConnected: false,
   // Auxiliary windows are born before the native Spotify clock has finished
@@ -295,6 +300,15 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     return { library }
   }),
   restoreLibraryDocument: document => set(state => state.library[document.trackId] ? {} : { library: putLibraryDocument(state.library, document) }),
+  importLibrary: documents => {
+    const state = get()
+    // The song on screen keeps its live copy: its view writes back to the library.
+    const current = state.lyrics?.trackId
+    const usable = documents.filter(document => document.trackId !== current && document.trackId !== demoDocument.trackId)
+    const merged = mergeLibraryBackup(state.library, usable)
+    if (merged.added || merged.updated) set({ library: compactLibrary(merged.library) })
+    return { added: merged.added, updated: merged.updated, kept: merged.kept + (documents.length - usable.length) }
+  },
   retryCurrentLyrics: () => set(state => {
     const trackId = state.playback?.track?.id
     if (!trackId) return { lyricsRetryToken: state.lyricsRetryToken + 1, lyrics: null }
@@ -318,7 +332,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     // offset carries its own timing key and simply stops applying.
     delete pending.offsetMs
     const lyricsRetryToken = state.lyricsRetryToken + 1
-    return { library: { ...state.library, [track.id]: pending }, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sessionCalibration: null }
+    return { library: { ...state.library, [track.id]: pending }, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sourceSwitchTrackId: track.id, sessionCalibration: null }
   }),
   recordSourceTrial: (trackId, source, verdict) => set(state => {
     const apply = (document: LyricsDocument): LyricsDocument => ({ ...document, sourceTrials: { ...document.sourceTrials, [source]: verdict } })

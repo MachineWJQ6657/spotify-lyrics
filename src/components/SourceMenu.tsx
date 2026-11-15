@@ -41,7 +41,7 @@ export const SourceMenu = memo(function SourceMenu({ document, label, disabled =
       </button>
       {options.map(option => <button type="button" role="menuitemradio" aria-checked={option.chosen} key={option.id}
         className={option.chosen ? 'chosen' : ''} disabled={!option.available} onClick={() => choose(option.id)}>
-        <span><strong>{option.label}</strong><small>{!option.available ? '没有这首歌的同步歌词' : option.lines != null ? `${option.lines} 行${option.inUse ? ' · 正在使用' : ''}` : option.inUse ? '正在使用' : '点击查询'}</small></span>
+        <span><strong>{option.label}</strong><small>{!option.available ? '没有这首歌的同步歌词' : option.lines != null ? `${option.lines} 行${option.inUse ? ' · 正在使用' : ''}${option.differs ? ' · 内容与自动选择的不同' : ''}` : option.inUse ? '正在使用' : '点击查询'}</small></span>
         {option.chosen && <Check size={14} />}
       </button>)}
       {document?.sourceUnavailable && <p className="source-popover-note">所选来源没有这首歌的同步歌词，当前显示的是自动选择的结果。</p>}

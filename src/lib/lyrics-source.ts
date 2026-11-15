@@ -24,6 +24,8 @@ export interface SourceOption {
   chosen: boolean
   /** The provider whose timeline is on screen now. */
   inUse: boolean
+  /** Its words or length differ from the automatic choice: possibly another version of the song. */
+  differs: boolean
 }
 
 /**
@@ -39,7 +41,7 @@ export function sourceOptions(document: LyricsDocument | null): SourceOption[] {
     const found = known?.find(entry => entry.id === item.id)
     if (item.id === 'spotify' && !found && document?.sourcePreference !== 'spotify') return []
     return [{ id: item.id, label: item.label, lines: found?.lines, available: known ? Boolean(found) : true,
-      chosen: document?.sourcePreference === item.id, inUse: inUse === item.id }]
+      chosen: document?.sourcePreference === item.id, inUse: inUse === item.id, differs: found?.agrees === false }]
   })
 }
 

@@ -1,6 +1,22 @@
 import type { LyricsDocument } from '../types'
 import { listenTimingKey } from './listened-offset'
 import { shiftAmount, shiftDirection } from './timing-status'
+import { LYRICS_SOURCES } from './lyrics-source'
+
+const VERDICT_TEXT = { consistent: '一致', inconsistent: '不一致', unmeasurable: '量不出' } as const
+
+/**
+ * "已试过的来源：LRCLIB 不一致 · 网易云音乐 一致。" for a song where listening
+ * compared providers. Empty when there is nothing to explain (no verdicts, or
+ * only the ordinary one consistent provider).
+ */
+export function sourceTrialsSummary(document: LyricsDocument | null): string {
+  const trials = document?.sourceTrials
+  if (!trials) return ''
+  const rows = LYRICS_SOURCES.flatMap(item => trials[item.id] ? [`${item.label} ${VERDICT_TEXT[trials[item.id]!]}`] : [])
+  if (!rows.length || (rows.length === 1 && Object.values(trials).every(verdict => verdict === 'consistent'))) return ''
+  return `已试过的来源：${rows.join(' · ')}。`
+}
 
 export interface ListenStatus {
   /** One line for the 同步 tab: what listening calibration did or is doing for this song. */
@@ -37,6 +53,12 @@ export function listenStatus(input: { document: LyricsDocument | null; listening
   }
   if (input.reason && blocked[input.reason]) return { text: blocked[input.reason], action, canRun: false }
   const paused = !input.playing
+  const tried = sourceTrialsSummary(document)
+  if (tried) {
+    // Same status as without the trials, followed by what was compared.
+    const plain = listenStatus({ ...input, document: { ...document!, sourceTrials: undefined } })
+    return { ...plain, text: `${plain.text}${tried}` }
+  }
   if (document?.offsetMs) return { text: `这首歌正在使用手动校准（歌词${shiftDirection(document.offsetMs)} ${shiftAmount(document.offsetMs)}）。重新校准会改用听音结果。`, action, canRun: true }
   if (measured?.state === 'decided' && measured.offsetMs) return { text: `已校准：歌词${shiftDirection(measured.offsetMs)} ${shiftAmount(measured.offsetMs)}。`, action, canRun: true }
   if (measured?.state === 'decided') return { text: '已听过：这份歌词的时间准确，没有调整。', action, canRun: true }

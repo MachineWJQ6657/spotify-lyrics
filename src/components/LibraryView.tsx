@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BookOpen, CheckCircle2, Cloud, Database, Download, FileText, Languages, Search, Sparkles, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, BookOpen, CheckCircle2, Cloud, Database, Download, FileText, Languages, Search, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { LyricsDocument } from '../types'
 import { listenedLyricsOffset } from '../lib/listened-offset'
@@ -7,6 +7,7 @@ import { shiftAmount, shiftDirection } from '../lib/timing-status'
 import { serializeLrc } from '../lib/lyrics'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { LYRICS_SOURCES, lyricsSourceIdOf } from '../lib/lyrics-source'
+import { backupFileName, parseLibraryBackup, serializeLibraryBackup } from '../lib/library-backup'
 
 /** Case-, width- and space-insensitive match on title, artist and album. */
 export function matchesLibraryQuery(document: Pick<LyricsDocument, 'track' | 'trackId'>, query: string) {
@@ -52,6 +53,38 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     setRemoved(null)
   }
   const shown = documents.filter(document => matchesLibraryQuery(document, query))
+  // Backup and restore of the whole library (lyrics, offsets, listening results).
+  const importLibrary = useAppStore(state => state.importLibrary)
+  const backupInput = useRef<HTMLInputElement>(null)
+  const [backupMessage, setBackupMessage] = useState('')
+  const backupTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(backupTimer.current), [])
+  const say = (message: string) => {
+    setBackupMessage(message)
+    window.clearTimeout(backupTimer.current)
+    backupTimer.current = window.setTimeout(() => setBackupMessage(''), 8000)
+  }
+  const exportBackup = async () => {
+    try {
+      const saved = await window.syllable.lyrics.export(backupFileName(), serializeLibraryBackup(library))
+      if (saved) say(`已导出 ${documents.length} 首歌的歌词和校准结果`)
+    } catch { say('导出失败，请换一个位置再试') }
+  }
+  const importBackup = async (file: File | undefined) => {
+    if (!file) return
+    if (file.size > 200 * 1024 * 1024) { say('文件太大，不是资料库备份'); return }
+    try {
+      const parsed = parseLibraryBackup(await file.text())
+      if ('error' in parsed) { say(parsed.error); return }
+      const result = importLibrary(parsed.documents)
+      say(`已导入：新增 ${result.added} 首，更新 ${result.updated} 首，保留原有 ${result.kept} 首${parsed.skipped ? `，跳过 ${parsed.skipped} 条无法识别的记录` : ''}`)
+    } catch { say('读取备份文件失败') }
+  }
+  const backupControls = <div className="library-backup">
+    {documents.length > 0 && <button onClick={() => void exportBackup()} title="把全部歌词、手动校准和听音校准结果存成一个文件"><Archive size={13} />导出备份</button>}
+    <button onClick={() => backupInput.current?.click()} title="从备份文件恢复：新歌加入，较新的覆盖，其余保留"><Upload size={13} />导入备份</button>
+    <input ref={backupInput} type="file" accept=".json,application/json" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void importBackup(file) }} />
+  </div>
 
   if (mode === 'sources') return <div className="content-page">
     <div className="content-page-header"><span>SOURCE PIPELINE</span><h1>歌词源与处理器</h1><p>Syllable 同时查询下面几个来源，自动选出最合适的一份。想换一个来源时，在「正在播放」页点歌名右边的来源标签。</p></div>
@@ -78,7 +111,10 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     {documents.length > 0 && <div className="library-toolbar">
       <label className="library-search"><Search size={14} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="按歌名、艺人或专辑筛选" aria-label="筛选资料库" />{query && <button title="清除筛选" aria-label="清除筛选" onClick={() => setQuery('')}><X size={13} /></button>}</label>
       <span>{query ? `${shown.length} / ${documents.length} 首` : `共 ${documents.length} 首`}</span>
+      {backupControls}
     </div>}
+    {!documents.length && <div className="library-toolbar">{backupControls}</div>}
+    {backupMessage && <div className="library-undo" role="status"><span>{backupMessage}</span></div>}
     {removed && <div className="library-undo" role="status"><span>已移除「{removed.track?.name ?? removed.trackId}」</span><button onClick={undo}><Undo2 size={13} />撤销</button></div>}
     {!documents.length ? <div className="library-empty"><BookOpen size={31} /><h3>资料库还是空的</h3><p>播放一首 Spotify 歌曲并搜索或导入歌词后，它会出现在这里。</p><button onClick={openEditor}><Search size={14} />搜索歌词</button></div>
     : !shown.length ? <div className="library-empty"><Search size={28} /><h3>没有匹配的歌曲</h3><p>换个关键词试试，歌名、艺人和专辑都可以。</p><button onClick={() => setQuery('')}><X size={14} />清除筛选</button></div>

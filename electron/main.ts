@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -11,6 +11,7 @@ import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-
 import { inspectWindowRegion } from './windows-window-region'
 import { TransportGate, type TransportBackend } from './transport-gate'
 import { createErrorLog, recentErrorEntries } from './error-log'
+import { trayTooltipText } from './tray-tooltip'
 import { createMainWindowStateWriter, fitWindowToWorkArea, readMainWindowState } from './main-window-state'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
@@ -1497,7 +1498,8 @@ function createTray() {
   const iconPath = app.isPackaged ? path.join(process.resourcesPath, iconName) : path.join(directory, '../../build', iconName)
   try { tray = new Tray(iconPath) }
   catch (error) { tray = null; console.error('Syllable tray creation failed:', error); return false }
-  tray.setToolTip('Syllable · 单击打开客户端')
+  trayTooltip = trayTooltipText(lastPlayback?.track)
+  tray.setToolTip(trayTooltip)
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
     { label: '显示 / 隐藏桌面歌词', accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
@@ -1510,6 +1512,16 @@ function createTray() {
   tray.on('click', () => revealMainWindow('cursor'))
   qaLog(`tray ready: destroyed=${tray.isDestroyed()}, bounds=${JSON.stringify(tray.getBounds())}`)
   return true
+}
+
+/** The tray tooltip names the song being played; set only when it changes. */
+let trayTooltip = ''
+function updateTrayTooltip(track: { name?: string; artist?: string } | null | undefined) {
+  if (!tray || tray.isDestroyed()) return
+  const text = trayTooltipText(track)
+  if (text === trayTooltip) return
+  trayTooltip = text
+  tray.setToolTip(text)
 }
 
 function withoutEmbeddedCover(value: typeof lastPlayback) {
@@ -1525,6 +1537,7 @@ function broadcast(value: unknown) {
     lyricOffsetSession.observePlayback(value as typeof lastPlayback)
     value = vocalSync.clock.decorate(acousticClock.decorate(value as typeof lastPlayback))
   }
+  if (value === null || (value && typeof value === 'object' && 'track' in value)) updateTrayTooltip((value as typeof lastPlayback)?.track)
   let mainPayload = value
   let overlayPayload = value
   if (value && typeof value === 'object' && 'track' in value) {
@@ -1819,7 +1832,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     const lyricsDurationMs = track?.sourceDurationMs ?? track?.durationMs
     const stats = timedLyricsStats(result?.syncedLyrics, lyricsDurationMs)
     const durationRatio = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1
-    qaLog(`lyrics: ${result?.source ?? 'not found'}; preferred=${preferredSource ?? 'auto'}${result?.preferredSourceUnavailable ? ' (unavailable)' : ''}; available=${result?.availableSources?.map(item => `${item.id}:${item.lines}`).join(',') ?? 'unknown'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
+    qaLog(`lyrics: ${result?.source ?? 'not found'}; preferred=${preferredSource ?? 'auto'}${result?.preferredSourceUnavailable ? ' (unavailable)' : ''}; available=${result?.availableSources?.map(item => `${item.id}:${item.lines}${item.agrees === false ? '(differs)' : ''}`).join(',') ?? 'unknown'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
     return result
   })
   ipcMain.handle('lyrics:search', (_event, query) => searchLyrics(query))
@@ -2047,6 +2060,13 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   ipcMain.handle('app:reveal-error-log', event => {
     if (event.sender !== mainWindow?.webContents) return false
     shell.showItemInFolder(errorLogFile())
+    return true
+  })
+  // Copying lyrics from the main window. The renderer's own clipboard API
+  // refuses while the window is not focused; this does not.
+  ipcMain.handle('app:copy-text', (event, text: unknown) => {
+    if (event.sender !== mainWindow?.webContents || typeof text !== 'string' || !text || text.length > 200_000) return false
+    clipboard.writeText(text)
     return true
   })
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())

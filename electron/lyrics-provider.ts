@@ -26,7 +26,7 @@ export function isLyricsSourceId(value: unknown): value is LyricsSourceId {
 
 export interface LyricsResult {
   /** Providers that returned a timed original for this song, with their line counts. */
-  availableSources?: Array<{ id: LyricsSourceId; lines: number }>
+  availableSources?: Array<{ id: LyricsSourceId; lines: number; agrees?: boolean }>
   /** The requested source had no timed lyrics for this song; the automatic choice was used. */
   preferredSourceUnavailable?: boolean
   textReference?: TextReferenceCheck
@@ -1256,6 +1256,22 @@ export interface FetchLyricsOptions {
   reuseProviderResults?: boolean
 }
 
+/**
+ * The providers that have timed lyrics for a song, with their line counts and
+ * whether each agrees with the automatic choice. A forced source skips the
+ * version, length and text checks of the automatic merge, so `agrees` (same
+ * words, plausible length) is what lets listening calibration move only to a
+ * provider that is the same song. The user's own pick in the menu is not restricted.
+ */
+export function describeAvailableSources(set: Partial<Record<LyricsSourceId, LyricsResult | null>>, automatic: LyricsResult | null, durationMs = 0) {
+  const text = (lrc: string | null | undefined) => parseTimedRows(lrc).map(row => alignmentText(row.text)).join('')
+  const automaticText = text(automatic?.syncedLyrics)
+  const agrees = (result: LyricsResult) => Boolean(automaticText) && durationPlausibleForPlayback(result, durationMs)
+    && normalizedTextSimilarity(text(splitEmbeddedTranslation(result).syncedLyrics), automaticText) >= .75
+  return LYRICS_SOURCE_IDS.flatMap(id => isTimedLyrics(set[id]?.syncedLyrics)
+    ? [{ id, lines: timedLyricsStats(set[id]!.syncedLyrics, durationMs).lineCount, agrees: agrees(set[id]!) }] : [])
+}
+
 /** Merge one song's provider results, optionally around the user's chosen source. */
 async function assembleProviderSet(set: ProviderSet, track: NonNullable<PlaybackSnapshot['track']>, durationMs: number, preferredSource?: LyricsSourceId): Promise<LyricsResult | null> {
   const preferredScript = KANA.test(track.name) ? 'ja' : undefined
@@ -1272,8 +1288,8 @@ async function assembleProviderSet(set: ProviderSet, track: NonNullable<Playback
     && normalizedTextSimilarity(joinedText(supplemental.syncedLyrics), joinedText(mergedSet.syncedLyrics)) >= .75)
   const neteaseMissed = set.neteaseAnswered && !neteaseAgrees
   const merged = neteaseMissed ? await enrichTranslationByLyricText(mergedSet, durationMs) : mergedSet
-  const availableSources = LYRICS_SOURCE_IDS.flatMap(id => isTimedLyrics(set[id]?.syncedLyrics)
-    ? [{ id, lines: timedLyricsStats(set[id]!.syncedLyrics, durationMs).lineCount }] : [])
+  const automatic = forcedAvailable ? mergeProviderSet([set.spotify, set.lrclib, supplemental, set.kugou], durationMs, preferredScript) : mergedSet
+  const availableSources = describeAvailableSources(set, automatic, durationMs)
   const annotate = (value: LyricsResult): LyricsResult => ({
     ...value,
     ...(availableSources.length ? { availableSources } : {}),

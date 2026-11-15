@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronUp, LocateFixed, Music2, Play, RefreshCw, Search, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { AlertCircle, ChevronDown, ChevronUp, Copy, LocateFixed, Music2, Play, RefreshCw, Search, X } from 'lucide-react'
 import type { LyricLine, LyricTrack, LyricsDocument } from '../types'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from '../lib/lyrics'
 import { lyricScrollTarget } from '../lib/lyrics-scroll'
 import { findLineMatches, nearestMatch, stepMatch } from '../lib/find-lyrics'
+import { rowText, songText } from '../lib/copy-lyrics'
 
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
   onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
@@ -23,13 +25,16 @@ interface LineGroupProps {
   seekLabel?: string
   /** Find-in-lyrics: this row contains the query (`current` is the one scrolled to). */
   found?: 'match' | 'current'
+  /** Right-click: open the row's menu at the pointer. */
+  onMenu?: (index: number, x: number, y: number) => void
 }
 
-const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard, onSeek, seekLabel, found }: LineGroupProps) {
+const LineGroup = memo(function LineGroup({ line, language, index, active, past, positionMs = 0, secondary, onHeard, onSeek, seekLabel, found, onMenu }: LineGroupProps) {
   const baseClass = language === 'ja' ? 'japanese-grid' : language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
   const seekable = Boolean(onSeek && !onHeard)
   return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''} ${seekable ? 'seekable' : ''} ${found ? `find-${found}` : ''}`}
     title={seekable && seekLabel ? `从 ${seekLabel} 播放这一句` : undefined}
+    onContextMenu={onMenu ? event => { event.preventDefault(); onMenu(index, event.clientX, event.clientY) } : undefined}
     onClick={seekable ? () => {
       // Selecting text with the mouse also ends in a click; that is not a seek.
       if (window.getSelection()?.toString()) return
@@ -117,6 +122,54 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     return () => window.removeEventListener('keydown', onKey)
   }, [searchable, openFind])
   useEffect(() => setFind(null), [document?.trackId])
+
+  // Right-click a row: copy it or the whole song, play from it, or search.
+  const [menu, setMenu] = useState<{ index: number; x: number; y: number; selection: string } | null>(null)
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<number | undefined>(undefined)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const openMenu = useCallback((index: number, x: number, y: number) => {
+    setMenu({ index, x, y, selection: window.getSelection()?.toString().trim() ?? '' })
+  }, [])
+  const copyText = useCallback((text: string, done: string) => {
+    setMenu(null)
+    if (!text) return
+    const show = (message: string) => {
+      setToast(message)
+      window.clearTimeout(toastTimer.current)
+      toastTimer.current = window.setTimeout(() => setToast(''), 1800)
+    }
+    // Main-process clipboard first (works without window focus); the web API is the fallback.
+    const write = window.syllable.app?.copyText
+      ? window.syllable.app.copyText(text).then(ok => ok ? undefined : navigator.clipboard.writeText(text))
+      : navigator.clipboard.writeText(text)
+    void write.then(() => show(done), () => show('复制失败'))
+  }, [])
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+  useEffect(() => setMenu(null), [document?.trackId])
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    // The click that dismisses the menu must not also seek to the row under it.
+    const swallow = (event: MouseEvent) => { event.stopPropagation(); event.preventDefault() }
+    const outside = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return
+      close()
+      if (event.button !== 0) return
+      window.addEventListener('click', swallow, true)
+      window.addEventListener('mouseup', () => window.setTimeout(() => window.removeEventListener('click', swallow, true), 0), { once: true })
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    window.addEventListener('mousedown', outside)
+    window.addEventListener('wheel', close, { passive: true })
+    window.addEventListener('blur', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('mousedown', outside); window.removeEventListener('wheel', close)
+      window.removeEventListener('blur', close); window.removeEventListener('resize', close); window.removeEventListener('keydown', escape)
+    }
+  }, [menu])
   useEffect(() => {
     if (currentMatch < 0) return
     const viewport = viewportRef.current
@@ -189,6 +242,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
           onHeard={calibrating && onHeardLine ? markHeard : undefined}
           onSeek={onSeekLine ? seekLine : undefined} seekLabel={onSeekLine && seekLabel ? seekLabel(line) : undefined}
           found={index === currentMatch ? 'current' : find?.query && matches.includes(index) ? 'match' : undefined}
+          onMenu={calibrating ? undefined : openMenu}
         />)}
       </div>
     </div>
@@ -210,6 +264,17 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       <button title="下一处（Enter）" aria-label="下一处" disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, 1) })}><ChevronDown size={15} /></button>
       <button title="关闭（Esc）" aria-label="关闭查找" onClick={() => setFind(null)}><X size={15} /></button>
     </div> : searchable && <button className="lyrics-find-open" title="在歌词中查找（Ctrl+F）" aria-label="在歌词中查找" onClick={openFind}><Search size={14} /></button>}
+    {menu && createPortal(<div ref={menuRef} className="lyric-menu no-drag" role="menu" aria-label="歌词操作"
+      style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 268)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 250)) }}>
+      {menu.selection && <button type="button" role="menuitem" onClick={() => copyText(menu.selection, '已复制选中的文字')}><Copy size={14} />复制选中的文字</button>}
+      <button type="button" role="menuitem" disabled={!rowText(rowTexts[menu.index] ?? [])} onClick={() => copyText(rowText(rowTexts[menu.index] ?? []), '已复制这一句')}><Copy size={14} />复制这一句</button>
+      <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, false), '已复制整首歌词')}><Copy size={14} />复制整首歌词</button>
+      {rowTexts.some(texts => texts.slice(1).some(text => text.trim())) && <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, true), '已复制整首歌词')}><Copy size={14} />复制整首歌词（含罗马音和翻译）</button>}
+      <i role="separator" />
+      {onSeekLine && base.lines[menu.index] && <button type="button" role="menuitem" onClick={() => { const index = menu.index; setMenu(null); seekLine(index) }}><Play size={14} />从这一句播放{seekLabel ? `（${seekLabel(base.lines[menu.index])}）` : ''}</button>}
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); openFind() }}><Search size={14} />在歌词中查找<kbd>Ctrl+F</kbd></button>
+    </div>, window.document.body)}
+    {toast && <div className="lyrics-toast" role="status">{toast}</div>}
     {!following && <button className="lyrics-follow-button" title="同步到正在播放的歌词" onClick={() => {
       // Explicit recovery must not depend on requestAnimationFrame: Chromium
       // can suspend rAF in a minimized/background desktop window, leaving an

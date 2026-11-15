@@ -32,7 +32,8 @@ export function listenStatus(input: { document: LyricsDocument | null; listening
     'unsupported-language': '这首歌的歌词语言暂不支持，目前支持日语、中文和英文。',
     'too-few-lines': '歌词行数太少，无法校准。',
     'invalid-lines': '这份歌词的时间轴无法用于校准。',
-    'manual-audio-sync': '「声音同步」实验功能正在运行，停止后可以使用。'
+    'manual-audio-sync': '「声音同步」实验功能正在运行，停止后可以使用。',
+    'source-switching': '正在换用另一个歌词来源，换好后自动校准。'
   }
   if (input.reason && blocked[input.reason]) return { text: blocked[input.reason], action, canRun: false }
   const paused = !input.playing

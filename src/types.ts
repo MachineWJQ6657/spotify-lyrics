@@ -14,13 +14,15 @@ export interface LyricsDocument {
   /** The user's choice in the source menu for this song; absent = automatic. */
   sourcePreference?: LyricsSourceId
   /** Providers that had timed lyrics for this song at the last lookup. */
-  availableSources?: Array<{ id: LyricsSourceId; lines: number }>
+  availableSources?: Array<{ id: LyricsSourceId; lines: number
+    /** Whether this provider's words and length agree with the automatic choice (absent in documents saved before 0.4.65). */
+    agrees?: boolean }>
   /** The chosen source had no timed lyrics at the last lookup; the automatic choice is shown. */
   sourceUnavailable?: boolean
   /** Who set sourcePreference: the user in the menu, or listening calibration after another source proved inconsistent. */
   sourceChosenBy?: 'user' | 'listening'
   /** Listening's verdict per provider timeline for this song; an inconsistent source is not listened to again. */
-  sourceTrials?: Partial<Record<LyricsSourceId, 'consistent' | 'inconsistent'>>
+  sourceTrials?: Partial<Record<LyricsSourceId, 'consistent' | 'inconsistent' | 'unmeasurable'>>
   /** Actual original words without trusted timing; never drive active-line playback. */
   untimedOriginal?: { text: string; language: string; source: string }
   textReference?: { referenceSource: string; status: 'consistent' | 'partial' | 'conflict'; matchedLines: number; referenceLines: number }

@@ -74,7 +74,7 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     return scriptPresentation(value, context, originalLanguage)
   }
   return <div className="content-page">
-    <div className="content-page-header"><span>LOCAL LIBRARY</span><h1>歌词资料库</h1><p>所有导入、搜索和手动校时的歌词都按 Spotify Track ID 保存在本机。</p></div>
+    <div className="content-page-header"><span>LOCAL LIBRARY</span><h1>歌词资料库</h1><p>播放过的歌曲的歌词保存在本机，下次播放直接使用。存得太多时先清掉最久没更新的自动匹配歌词，导入和编辑过的歌词始终保留。</p></div>
     {documents.length > 0 && <div className="library-toolbar">
       <label className="library-search"><Search size={14} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="按歌名、艺人或专辑筛选" aria-label="筛选资料库" />{query && <button title="清除筛选" aria-label="清除筛选" onClick={() => setQuery('')}><X size={13} /></button>}</label>
       <span>{query ? `${shown.length} / ${documents.length} 首` : `共 ${documents.length} 首`}</span>

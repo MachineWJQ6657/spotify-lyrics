@@ -3,7 +3,7 @@ import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
 import { listenLines, listenTimingKey } from './listened-offset'
-import { lyricsSourceIdOf, nextSourceToTry } from './lyrics-source'
+import { automaticSourceOf, nextSourceToTry, sourcesVetted } from './lyrics-source'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
 
 /**
@@ -27,7 +27,9 @@ const MAX_BLOCKS = 12
 const attempts = new Map<string, number>()
 
 /** Why the current song should (not) be listened to. Pure; exported for tests. */
-export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics: LyricsDocument | null; enabled: boolean; demoMode: boolean; manualActive: boolean }):
+export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics: LyricsDocument | null; enabled: boolean; demoMode: boolean; manualActive: boolean
+  /** A lookup for another lyrics source is running: the timeline on screen is about to be replaced. */
+  switching?: boolean }):
   { target: ListenTarget } | { reason: string } {
   const { playback, lyrics } = input
   if (!input.enabled) return { reason: 'disabled' }
@@ -35,6 +37,7 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   if (input.manualActive) return { reason: 'manual-audio-sync' }
   if (!playback?.isPlaying || !playback.track) return { reason: 'not-playing' }
   if (lyrics?.trackId !== playback.track.id) return { reason: 'no-lyrics' }
+  if (input.switching) return { reason: 'source-switching' }
   if (lyrics.offsetMs) return { reason: 'manual-offset' }
   const original = lyrics.untimedOriginal ? undefined : lyrics.tracks.find(track => track.kind === 'original')
   const language = listenLanguageOf(original?.language)
@@ -46,7 +49,7 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   if (lyrics.listenedOffset?.timingKey === timingKey) return { reason: 'already-measured' }
   // This provider's timeline was already found inconsistent for the song (a
   // lookup may have rebuilt it with a different timing key): do not listen again.
-  const shownSource = lyricsSourceIdOf(original.source)
+  const shownSource = automaticSourceOf(lyrics)
   if (shownSource && lyrics.sourceTrials?.[shownSource] === 'inconsistent') return { reason: 'source-inconsistent' }
   if ((attempts.get(`${playback.track.id}\0${timingKey}`) ?? 0) >= MAX_SESSION_ATTEMPTS) return { reason: 'attempts-exhausted' }
   return { target: { trackId: playback.track.id, timingKey, language, lines } }
@@ -75,7 +78,9 @@ function currentInput() {
   const store = useAppStore.getState()
   const acoustic = acousticController.snapshot()
   return { playback: store.playback, lyrics: store.lyrics, enabled: store.settings?.listenOffset !== false, demoMode: store.demoMode,
-    manualActive: acoustic.running || acoustic.automatic || acoustic.busy }
+    manualActive: acoustic.running || acoustic.automatic || acoustic.busy,
+    // The pending document of a source switch has no provider revision until its lookup answers.
+    switching: store.sourceSwitchToken !== null && store.sourceSwitchToken === store.lyricsRetryToken && store.lyrics?.providerRevision === undefined }
 }
 
 async function reconcile() {
@@ -85,13 +90,51 @@ async function reconcile() {
     if (!same) await active.stop()
     else return
   }
-  if (!('target' in decision) || starting) return
-  if (available === null) {
-    try { available = (await window.syllable.audioSync.phonemeStatus()).available } catch { available = false }
-  }
-  if (!available) return
+  if ('reason' in decision) { settleWithoutListening(decision.reason); return }
+  // One start at a time. A second call (a store change and "立即重新校准" in
+  // the same tick) used to pass this point while the first was still asking
+  // for the engine, and both began a session.
+  if (starting) { reconcileAgain = true; return }
   starting = true
-  try { await begin(decision.target) } finally { starting = false }
+  let attempted: ListenTarget | null = null
+  try {
+    if (available === null) {
+      try { available = (await window.syllable.audioSync.phonemeStatus()).available } catch { available = false }
+    }
+    if (!available) return
+    // The song, its lyrics or the setting may have changed while the engine was asked.
+    const fresh = listenTarget(currentInput())
+    if ('target' in fresh && !active) { attempted = fresh.target; await begin(fresh.target) }
+  } finally {
+    starting = false
+    if (reconcileAgain) {
+      reconcileAgain = false
+      // Repeat the skipped call only when it can do something other than
+      // retry, at once, the very session that just failed to start.
+      const now = listenTarget(currentInput())
+      const retry = !active && attempted !== null && 'target' in now
+        && now.target.trackId === attempted.trackId && now.target.timingKey === attempted.timingKey
+      if (!retry) void reconcile()
+    }
+  }
+}
+let reconcileAgain = false
+
+/** Reasons that mean the timeline on screen can never be measured. */
+const UNMEASURABLE = new Set(['unsupported-language', 'too-few-lines', 'invalid-lines', 'attempts-exhausted'])
+
+/**
+ * The song is not going to be listened to now. A song whose verdict is known
+ * still gets to move on from an inconsistent provider, and a provider that
+ * listening switched to but cannot measure is given up.
+ */
+function settleWithoutListening(reason: string) {
+  const trackId = useAppStore.getState().lyrics?.trackId
+  if (!trackId) return
+  if (reason === 'already-measured' || reason === 'source-inconsistent') {
+    adoptEarlierVerdict()
+    advanceSource(trackId)
+  } else if (UNMEASURABLE.has(reason)) giveUpUnmeasuredTrial(trackId)
 }
 
 async function begin(target: ListenTarget) {
@@ -142,7 +185,7 @@ async function begin(target: ListenTarget) {
       if (useAppStore.getState().playback?.track?.id !== target.trackId) return
       processing = true
       // Muted output or a song without measurable lines: stop after ~2.5 min.
-      if (++blocks > MAX_BLOCKS) { failed(); processing = false; await stop(); return }
+      if (++blocks > MAX_BLOCKS) { failed(); processing = false; await stop(); giveUpUnmeasuredTrial(target.trackId, target.timingKey); return }
       try {
         const result = await window.syllable.audioSync.listen({ trackId: target.trackId, capturedAtMs, captureDurationMs: block.pcm.length / 16,
           sampleRate: 16000, pcm: block.pcm, language: target.language, lines: target.lines })
@@ -159,13 +202,15 @@ async function begin(target: ListenTarget) {
         const unusable = result.reason === 'invalid-input' || result.reason === 'no-lines' || result.reason === 'unsupported-language'
         if (unusable) failed()
         if (unusable || result.reason === 'inactive' || result.reason === 'lyrics-changed') await stop()
-      } catch { failed(); await stop() }
+        if (unusable) giveUpUnmeasuredTrial(target.trackId, target.timingKey)
+      } catch { failed(); await stop(); giveUpUnmeasuredTrial(target.trackId, target.timingKey) }
       finally { processing = false }
     }
     captured.getAudioTracks()[0].onended = () => { void stop() }
   } catch {
     failed()
     await stop()
+    giveUpUnmeasuredTrial(target.trackId, target.timingKey)
   }
 }
 
@@ -179,14 +224,86 @@ export function afterVerdict(trackId: string, state: 'decided' | 'inconsistent')
   const store = useAppStore.getState()
   const document = store.lyrics
   if (!document || document.trackId !== trackId || document.untimedOriginal) return
-  const shown = lyricsSourceIdOf(document.tracks.find(track => track.kind === 'original')?.source)
+  // The user's own lyrics (imported, edited, picked by hand) are not a provider's result.
+  const shown = automaticSourceOf(document)
   if (!shown) return
   store.recordSourceTrial(trackId, shown, state === 'decided' ? 'consistent' : 'inconsistent')
-  if (state !== 'inconsistent') return
-  if (document.sourcePreference && document.sourceChosenBy !== 'listening') return
-  const next = nextSourceToTry(useAppStore.getState().lyrics)
-  if (next) store.setLyricsSource(next, 'listening')
-  else if (document.sourcePreference) store.setLyricsSource(null, 'listening')
+  if (state === 'inconsistent') advanceSource(trackId)
+}
+
+/**
+ * A provider that listening switched to, but that cannot be measured (another
+ * language, too few lines, no line could be placed, capture failed), must not
+ * stay on screen unverified: it is marked and the chain moves on, ending at
+ * the automatic choice. With `timingKey`, only when that timeline is still shown.
+ */
+export function giveUpUnmeasuredTrial(trackId: string, timingKey?: string) {
+  const store = useAppStore.getState()
+  const document = store.lyrics
+  if (!document || document.trackId !== trackId || document.sourceChosenBy !== 'listening' || !document.sourcePreference) return
+  const shown = automaticSourceOf(document)
+  if (!shown || shown !== document.sourcePreference || document.sourceTrials?.[shown]) return
+  const original = document.tracks.find(track => track.kind === 'original')
+  if (timingKey && (!original || listenTimingKey(original) !== timingKey)) return
+  store.recordSourceTrial(trackId, shown, 'unmeasurable')
+  advanceSource(trackId)
+}
+
+// Songs saved before the app recorded which providers have them: asked once per run.
+const availabilityAsked = new Set<string>()
+
+/**
+ * When the provider on screen was judged inconsistent and the user did not
+ * pick it by hand, show the next provider that has timed lyrics and no verdict
+ * yet; when none is left, return to the automatic choice. Safe to call again
+ * at any time: it never repeats a request and never retries a judged provider.
+ * Returns true when it asked for a different timeline.
+ */
+export function advanceSource(trackId: string): boolean {
+  const store = useAppStore.getState()
+  const document = store.lyrics
+  if (!document || document.trackId !== trackId || document.untimedOriginal) return false
+  if (store.playback?.track?.id !== trackId || store.demoMode) return false
+  if (document.sourcePreference && document.sourceChosenBy !== 'listening') return false
+  const shown = automaticSourceOf(document)
+  const verdict = shown ? document.sourceTrials?.[shown] : undefined
+  if (verdict !== 'inconsistent' && verdict !== 'unmeasurable') return false
+  if (!sourcesVetted(document)) {
+    // The provider asked for has nothing and the list of who has the song is missing: back to automatic.
+    if (document.sourcePreference && document.sourceUnavailable) { store.setLyricsSource(null, 'listening'); return true }
+    // Saved before the app recorded which providers have the song and agree
+    // with the automatic choice, or the last lookup failed: one lookup finds out.
+    if (availabilityAsked.has(trackId)) return false
+    availabilityAsked.add(trackId)
+    if (availabilityAsked.size > 200) availabilityAsked.delete(availabilityAsked.values().next().value!)
+    store.setLyricsSource(document.sourcePreference ?? null, 'listening')
+    return true
+  }
+  const next = nextSourceToTry(document)
+  // Already asked for: its lookup is still running.
+  if (next && next === document.sourcePreference) return false
+  if (next) { store.setLyricsSource(next, 'listening'); return true }
+  if (document.sourcePreference) { store.setLyricsSource(null, 'listening'); return true }
+  return false
+}
+
+/** Test hook: forget which songs were asked for their providers. */
+export function resetSourceAdvanceForTests() { availabilityAsked.clear() }
+
+/**
+ * A song that was judged inconsistent before per-source verdicts existed
+ * (0.4.63) has a verdict but no record of which provider it was about, so
+ * nothing would ever try another one. While it plays, treat that stored
+ * verdict as if it had just been reached for the provider on screen.
+ */
+export function adoptEarlierVerdict() {
+  const document = useAppStore.getState().lyrics
+  if (document?.listenedOffset?.state !== 'inconsistent' || document.untimedOriginal) return
+  const original = document.tracks.find(track => track.kind === 'original')
+  const shown = automaticSourceOf(document)
+  // Only the verdict for the timeline on screen, and only once per provider.
+  if (!original || !shown || document.sourceTrials?.[shown] || document.listenedOffset.timingKey !== listenTimingKey(original)) return
+  afterVerdict(document.trackId, 'inconsistent')
 }
 
 /**

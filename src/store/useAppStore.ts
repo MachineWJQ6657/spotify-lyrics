@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
+import { LIBRARY_BUDGET_CHARS, pruneLibrary } from '../lib/library-budget'
 import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, LyricsSourceId, PlaybackSnapshot, SessionCalibration } from '../types'
 import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
@@ -41,7 +42,7 @@ interface AppState {
   /** Picks the provider for the current song's timed original (null = automatic) and looks it up again. */
   setLyricsSource(source: LyricsSourceId | null, chosenBy?: 'user' | 'listening'): void
   /** Records what listening found for one provider's timeline of a song. */
-  recordSourceTrial(trackId: string, source: LyricsSourceId, verdict: 'consistent' | 'inconsistent'): void
+  recordSourceTrial(trackId: string, source: LyricsSourceId, verdict: 'consistent' | 'inconsistent' | 'unmeasurable'): void
   /** Forgets listening's per-source verdicts for a song ("立即重新校准"). */
   clearSourceTrials(trackId: string): void
   /** Re-runs provider lookup without deleting the last usable document. */
@@ -144,22 +145,43 @@ export function createReferenceDeduplicatingStorage(storage: Storage): PersistSt
   }
 }
 
-const persistentStorage = typeof window !== 'undefined' ? createReferenceDeduplicatingStorage(window.localStorage) : undefined
+/**
+ * A failed write (storage quota, disk) must not throw into whichever action
+ * changed the state: the app keeps running on what it has in memory and the
+ * next change tries again. Reported once per run of failures.
+ */
+export function tolerateWriteFailures(storage: PersistStorage<PersistedAppState>, report: (error: unknown) => void = error => console.error('Syllable could not save its settings and lyrics library:', error)): PersistStorage<PersistedAppState> {
+  let failing = false
+  return {
+    getItem: name => storage.getItem(name),
+    removeItem: name => storage.removeItem(name),
+    setItem(name, value) {
+      try { storage.setItem(name, value); failing = false }
+      catch (error) { if (!failing) report(error); failing = true }
+    }
+  }
+}
+
+const persistentStorage = typeof window !== 'undefined' ? tolerateWriteFailures(createReferenceDeduplicatingStorage(window.localStorage)) : undefined
 
 const compactDocument = (document: LyricsDocument): LyricsDocument => document.track?.coverUrl.startsWith('data:image')
   ? { ...document, track: { ...document.track, coverUrl: '' } }
   : document
 
-const compactLibrary = (library: Record<string, LyricsDocument>) => Object.fromEntries(
+// Newest first, and inside the storage budget (see library-budget.ts): the
+// oldest automatically fetched songs are dropped and looked up again on their
+// next play; imported, edited and hand-timed lyrics stay.
+const compactLibrary = (library: Record<string, LyricsDocument>) => Object.fromEntries(pruneLibrary(
   Object.entries(library)
     .sort(([, left], [, right]) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
-    .map(([id, document]) => [id, compactDocument(document)])
-)
+    .map(([id, document]): [string, LyricsDocument] => [id, compactDocument(document)])
+))
 
-const putLibraryDocument = (library: Record<string, LyricsDocument>, document: LyricsDocument) => Object.fromEntries(
+const putLibraryDocument = (library: Record<string, LyricsDocument>, document: LyricsDocument) => Object.fromEntries(pruneLibrary(
   Object.entries({ ...library, [document.trackId]: compactDocument(document) })
-    .sort(([, left], [, right]) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
-)
+    .sort(([, left], [, right]) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)),
+  LIBRARY_BUDGET_CHARS, document.trackId
+))
 
 export const useAppStore = create<AppState>()(persist((set) => ({
   connected: false,

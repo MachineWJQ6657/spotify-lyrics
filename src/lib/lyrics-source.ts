@@ -55,6 +55,29 @@ export function nextSourceToTry(document: LyricsDocument | null): LyricsSourceId
   if (!document?.availableSources?.length) return undefined
   const original = document.untimedOriginal ? undefined : document.tracks.find(track => track.kind === 'original')
   const current = lyricsSourceIdOf(original?.source)
-  const available = new Set(document.availableSources.map(item => item.id))
+  // Never a provider whose words or length disagree with the automatic choice.
+  const available = new Set(document.availableSources.filter(item => item.agrees !== false).map(item => item.id))
   return TRIAL_ORDER.find(id => available.has(id) && id !== current && !document.sourceTrials?.[id])
+}
+
+/**
+ * The provider behind the timed original on screen, when it is that
+ * provider's own result. Lyrics the user imported, edited or picked by hand in
+ * the search panel carry a provider's name too ("LRCLIB · 手动选择") but are
+ * the user's: listening never records a verdict against a provider for them
+ * and never replaces them.
+ */
+export function automaticSourceOf(document: LyricsDocument | null | undefined): LyricsSourceId | undefined {
+  if (!document || document.untimedOriginal) return undefined
+  const original = document.tracks.find(track => track.kind === 'original')
+  if (!original) return undefined
+  const userOwned = document.userEditedTrackIds?.includes(original.id)
+    || (original.id.startsWith('local-') && !original.id.startsWith(`${document.trackId}-`))
+    || original.source.includes('手动选择')
+  return userOwned ? undefined : lyricsSourceIdOf(original.source)
+}
+
+/** Whether the document says, for every provider that has the song, if it agrees with the automatic choice. */
+export function sourcesVetted(document: LyricsDocument | null | undefined): boolean {
+  return Boolean(document?.availableSources?.length) && document!.availableSources!.every(item => typeof item.agrees === 'boolean')
 }

@@ -88,6 +88,13 @@ const checks = {
   overlayNextLine: renderer.includes('function upcomingLine(') && renderer.includes('overlayNextLine') && /\.overlay-secondary\.next-line\s*\{[^}]*text-overflow:\s*ellipsis/.test(rendererCss),
   findInLyrics: renderer.includes('function findLineMatches(') && renderer.includes('lyrics-find-open') && /\.lyric-group\.find-current::after/.test(rendererCss),
   librarySourceTag: renderer.includes('function librarySourceTag(') && /\.library-copy i\.source-tag/.test(rendererCss),
+  // 0.4.65: right-click menu on lyric rows (copy, play from here, find) writing through the main-process clipboard; the tray tooltip names the song; the saved library keeps to a storage budget and a failed save no longer throws into the action.
+  lyricRowMenu: renderer.includes('lyric-menu') && renderer.includes('function songText(') && /app:copy-text/.test(main) && /app:copy-text/.test(preload) && /\.lyric-menu\s*\{[^}]*position:\s*fixed/.test(rendererCss),
+  trayNamesSong: main.includes('function trayTooltipText(') && main.includes('function updateTrayTooltip('),
+  libraryStorageBudget: renderer.includes('function pruneLibrary(') && renderer.includes('function tolerateWriteFailures(') && /LIBRARY_BUDGET_CHARS = (12e6|12_000_000|12000000)\b/.test(renderer),
+  listeningAdvancesEarlierVerdicts: renderer.includes('function advanceSource(') && renderer.includes('function adoptEarlierVerdict(') && renderer.includes('availabilityAsked'),
+  // Review fixes for source switching: one session start at a time, no verdict against the user's own lyrics, an unmeasurable trial is given up, no listening during a source lookup, and only providers that agree with the automatic choice are tried.
+  listeningSourceGuards: renderer.includes('function automaticSourceOf(') && renderer.includes('function giveUpUnmeasuredTrial(') && renderer.includes('source-switching') && renderer.includes('reconcileAgain') && main.includes('function describeAvailableSources(') && /agrees !== false/.test(renderer),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

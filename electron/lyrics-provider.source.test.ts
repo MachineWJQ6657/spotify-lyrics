@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isLyricsSourceId, lyricsSourceId, mergeProviderSet, type LyricsResult } from './lyrics-provider'
+import { describeAvailableSources, isLyricsSourceId, lyricsSourceId, mergeProviderSet, type LyricsResult } from './lyrics-provider'
 
 const words = ['夜の底で歌う声が', '遠く響いていた', '君の名前を呼んで', '朝を待っていた', '変わらない景色の中', '僕らは歩いていた', '言葉にならないまま', '春が過ぎていった',
   '窓の外に降る雨が', '静かに止んでいた', '忘れかけた約束を', 'まだ覚えていた']
@@ -50,5 +50,23 @@ describe('choosing a lyrics source', () => {
     const forced = mergeProviderSet([null, lrclib, netease, untimed], 130_000, 'ja', 'kugou')
     expect(forced?.source).toBe(automatic?.source)
     expect(mergeProviderSet([null, lrclib, null, null], 130_000, 'ja', 'netease')?.source).toBe(lrclib.source)
+  })
+
+  it('says which providers agree with the automatic choice', () => {
+    const automatic = mergeProviderSet([null, lrclib, netease, kugou], 130_000, 'ja')
+    // Same words, shifted timestamps: every provider is the same song.
+    expect(describeAvailableSources({ lrclib, netease, kugou }, automatic, 130_000)).toEqual([
+      { id: 'lrclib', lines: 12, agrees: true }, { id: 'netease', lines: 12, agrees: true }, { id: 'kugou', lines: 12, agrees: true }])
+  })
+
+  it('marks a provider with other words or another length, and lists nothing untimed', () => {
+    const automatic = mergeProviderSet([null, lrclib, null, null], 130_000, 'ja')
+    const english = result('酷狗音乐 · 搜索候选', 0, { syncedLyrics: lrc(0, words.map((_, index) => `Another song entirely, line number ${index + 1}`)) })
+    const liveVersion = result('网易云音乐 · 搜索候选', 0, { matchedDurationMs: 260_000 })
+    const untimed: LyricsResult = { syncedLyrics: null, plainLyrics: words.join('\n'), source: 'Spotify · Musixmatch', confidence: 90 }
+    expect(describeAvailableSources({ spotify: untimed, lrclib, netease: liveVersion, kugou: english }, automatic, 130_000)).toEqual([
+      { id: 'lrclib', lines: 12, agrees: true }, { id: 'netease', lines: 12, agrees: false }, { id: 'kugou', lines: 12, agrees: false }])
+    // Nothing to compare with: nothing agrees.
+    expect(describeAvailableSources({ lrclib }, null, 130_000)).toEqual([{ id: 'lrclib', lines: 12, agrees: false }])
   })
 })

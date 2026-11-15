@@ -99,7 +99,8 @@ contextBridge.exposeInMainWorld('syllable', {
     loginItem: () => ipcRenderer.invoke('app:login-item'),
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:set-login-item', enabled),
     recentErrors: () => ipcRenderer.invoke('app:recent-errors'),
-    revealErrorLog: () => ipcRenderer.invoke('app:reveal-error-log')
+    revealErrorLog: () => ipcRenderer.invoke('app:reveal-error-log'),
+    copyText: (text: string) => ipcRenderer.invoke('app:copy-text', text)
   },
   meta: { redirectUri: 'http://127.0.0.1:43821/callback' }
 })

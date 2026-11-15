@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.64 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.63-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.65 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.64-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (93 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (98 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,24 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.65 deployed: lyric row menu, tray tooltip, review fixes for listening's source switching, library storage budget
+
+- `release/current` = **0.4.65** (asar SHA256 `2ec3f5ea168fc8a2f8c55d49f86b7579b2013c5d884f216ebb97ee2eb49de6e4`, verifier 98/98, 1170 tests). Rollback: `release/current-0.4.64-backup-20261115`; the 0.4.63 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0465`.
+- **Lyric row menu** (`LyricsStage.tsx`, portalled `.lyric-menu`): copy the row / the song / the song with romaji and translation (`src/lib/copy-lyrics.ts`), play from the row, open find. Copies go through `app:copy-text` (main-process `clipboard`), because `navigator.clipboard` refuses without window focus. The click that dismisses the menu is swallowed so it cannot seek. **Do not exercise the copy items in tests: they overwrite the user's real clipboard.**
+- **Tray tooltip** names the song (`electron/tray-tooltip.ts`, 127-character Windows limit).
+- **Independent review of 0.4.63's source switching** (a subagent read `bcdd99b..HEAD`); all seven findings fixed in `src/lib/listen-controller.ts` and friends:
+  1. `reconcile()` starts one session at a time (`starting` is set before the engine is asked; a skipped call is repeated afterwards unless it would only retry the session that just failed). Regression test `listen-controller-start.test.ts` fails on the old code with two `prepare` calls.
+  2. `giveUpUnmeasuredTrial`: a provider listening switched to that yields no verdict (`unsupported-language`, `too-few-lines`, `invalid-lines`, `attempts-exhausted`, or a failed session) is recorded as `'unmeasurable'` in `sourceTrials` and the chain moves on, ending at the automatic choice.
+  3. `advanceSource(trackId)` is the one place that moves on; it runs after a verdict and from `reconcile` for `already-measured` / `source-inconsistent`. Documents saved before the provider list existed (or before `agrees`) get one lookup first (`availabilityAsked`, once per run). `adoptEarlierVerdict` applies a pre-0.4.63 "inconsistent" verdict to the provider on screen.
+  4. `automaticSourceOf(document)` (lyrics-source.ts) returns the provider only for its own result; imported, edited and hand-picked lyrics ("LRCLIB · 手动选择") get no provider verdict and are never replaced.
+  5. `listenTarget` answers `source-switching` while a source lookup is in flight (`sourceSwitchToken === lyricsRetryToken` and no `providerRevision`), so no verdict can land on the pending document.
+  6. `advanceSource` checks the playing track, so a verdict that lands during a song change is dropped.
+  7. An unavailable forced provider is skipped (or the preference is cleared when the provider list is missing).
+- **`agrees`**: `describeAvailableSources` (lyrics-provider.ts) marks, per provider with timed lyrics, whether its words (bigram similarity ≥ .75) and length agree with the automatic choice. `nextSourceToTry` never offers `agrees === false`. A forced source skips the automatic merge's filters, so this is what keeps listening from putting another song or version on screen. The menu still lets the user pick anything. The qa-log `lyrics:` line prints `(differs)` after such a provider.
+- **Library budget** (`src/lib/library-budget.ts`): `pruneLibrary` keeps the saved library under 12 million characters (the user's is 1.76 million for 213 songs), dropping the oldest automatically fetched songs first, then those with only a manual offset, never imported or edited lyrics. `tolerateWriteFailures` stops a failed localStorage write from throwing into the action. Measured quota in Electron 44: a 40-million-character value is accepted, 80 million refused (my first estimate of 5 million was wrong). Every change still rewrites the whole library; per-song storage keys would be the real fix if the library grows much larger.
+- **Still not verified with live audio**: the whole switching chain. The user's library has 10 songs judged inconsistent and no `sourceTrials` yet; playing any of them with listening on exercises adoption → lookup → switch → measure. Watch the 同步 tab, the source menu note and the `lyrics:` qa-log lines.
+- Library facts from the profile backup (2026-11-15): 213 songs (200 Japanese), verdicts 113 decided / 10 inconsistent / 90 none; only 3% of Japanese lines start with a Latin word, so "English words inside Japanese lines" is low priority.
 
 ## 2026-11-15 / 0.4.64 deployed: optional next-line preview in the overlay, find in lyrics, provider tag in the library
 

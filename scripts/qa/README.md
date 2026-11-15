@@ -26,6 +26,11 @@ Checks that need no audio:
 - `node scripts/verify-source-chain.mjs` simulates listening verdicts and walks
   the real source-switching chain. Run it after any change to
   `listen-controller.ts`, `lyrics-source.ts`, `setLyricsSource` or the lookup.
+- `node scripts/qa/verify-lyric-list.mjs` moves the lyric clock through a
+  debugger-only hook (the player is not touched) and checks that a new line
+  scrolls smoothly and ends centred, that a right-click keeps the list
+  following, that Esc closes the find bar from anywhere, and that lyric text
+  can be selected. Run it after changes to `LyricsStage.tsx`.
 - `powershell -File scripts\qa\post-wm-close.ps1` posts WM_CLOSE (what Alt+F4
   sends) to the test instance's windows; all three must survive.
 - `./node_modules/electron/dist/electron.exe scripts/verify-overlay-contrast.cjs`

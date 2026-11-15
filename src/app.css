@@ -211,6 +211,9 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .lyric-group.active .lyric-secondary.translation { color: rgba(255, 255, 255, .88); }
 .lyric-group.active .lyric-secondary.romanization { color: var(--sy-accent-text); }
 
+/* Lyric text can be selected (the row menu copies the selection); the rest of the window cannot. */
+.lyrics-viewport .lyric-primary, .lyrics-viewport .lyric-secondary { user-select: text; }
+.lyrics-viewport ::selection { background: rgba(30, 215, 96, .32); color: #fff; }
 .lyric-group.seekable { cursor: pointer; }
 .lyric-group.seekable:hover { opacity: .64; }
 .lyric-group.seekable.past:hover { opacity: .52; }

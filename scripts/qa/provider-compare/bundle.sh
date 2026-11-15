@@ -5,7 +5,8 @@
 #   bash scripts/qa/provider-compare/bundle.sh <out.mjs> [git ref]
 #
 # A ref is extracted into .qa-scratch/ref-<ref>/ (git-ignored, inside the repo
-# so imports still resolve against node_modules) and bundled from there.
+# so imports still resolve against node_modules), bundled from there, and the
+# extracted copy is removed again: vitest would collect its test files.
 cd "$(dirname "$0")/../../.." || exit 1
 OUT="$1"; REF="$2"
 [ -n "$OUT" ] || { echo "usage: bundle.sh <out.mjs> [git ref]"; exit 1; }
@@ -16,5 +17,8 @@ if [ -n "$REF" ]; then
   git archive "$REF" electron src | tar -x -C "$DIR" || exit 1
   ENTRY="$DIR/electron/lyrics-provider.ts"
 fi
-npx esbuild "$ENTRY" --bundle --format=esm --platform=node --external:electron --outfile="$OUT" --log-level=warning || exit 1
+npx esbuild "$ENTRY" --bundle --format=esm --platform=node --external:electron --outfile="$OUT" --log-level=warning
+STATUS=$?
+[ -n "$REF" ] && rm -rf "$DIR"
+[ $STATUS -eq 0 ] || exit 1
 echo "bundled ${REF:-working tree} -> $OUT"

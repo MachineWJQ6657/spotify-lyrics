@@ -30,7 +30,10 @@ export function Overlay() {
   const position = displayedLyricPosition(usePosition(playback, 500, nextDue), playback, activeLyrics, offsetMs, sessionCalibration)
   const baseClass = base?.language === 'ja' ? 'japanese-grid' : base?.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
   const index = base ? activeLineIndex(base.lines, position) : -1
-  const line = base?.lines[index]
+  // Nothing playing (Spotify closed, no media session): the last song's
+  // document is still in the store and the clock reads 0, so a first line
+  // stamped 0 ms was shown instead of the idle mark.
+  const line = playback?.track ? base?.lines[index] : undefined
   const alignedSecondaries = useMemo(() => base ? tracks.filter(track => track.id !== base.id).map(track => ({ track, lines: alignSecondaryTrack(base.lines, track.lines) })) : [], [base, tracks])
   const secondaries = line ? alignedSecondaries.map(({ track, lines }) => ({ track, line: lines[index] })).filter(item => item.line) : []
   const content = overlayContent(playback, activeLyrics, line)

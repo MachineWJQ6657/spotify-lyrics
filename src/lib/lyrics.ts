@@ -19,13 +19,18 @@ export function parseLrc(source: string): LyricLine[] {
     const content = raw.replace(TIME, '').trim()
     const wordMatches = [...content.matchAll(WORD_TIME)]
     const plain = content.replace(WORD_TIME, '').trim()
+    // Words before the first <mm:ss> tag start with the line. Without an entry
+    // of their own they were in no word, and a word-timed row renders only its
+    // words: "[00:10.00]alpha <00:10.50>beta" showed as "beta".
+    const leading = wordMatches.length ? content.slice(0, wordMatches[0].index ?? 0) : ''
     for (const stamp of timestamps) {
       const startMs = Math.max(0, milliseconds(stamp[1], stamp[2], stamp[3]) + offset)
-      const words = wordMatches.map((match, index) => {
+      const tagged = wordMatches.map((match, index) => {
         const textStart = (match.index ?? 0) + match[0].length
         const textEnd = wordMatches[index + 1]?.index ?? content.length
         return { text: content.slice(textStart, textEnd), startMs: milliseconds(match[1], match[2], match[3]) + offset }
       }).filter(word => word.text)
+      const words = leading.trim() && tagged.length ? [{ text: leading, startMs }, ...tagged] : tagged
       lines.push({ startMs, text: plain, words: words.length ? words : undefined })
     }
   }
@@ -34,8 +39,22 @@ export function parseLrc(source: string): LyricLine[] {
   // files. Keeping them makes the active line become a zero-size element, so a
   // transparent overlay appears to vanish and can no longer be dragged.
   const cleaned = lines.filter(line => line.text.trim() && !isLyricCredit(line.text))
-  return cleaned.map((line, index) => ({ ...line, endMs: cleaned[index + 1]?.startMs }))
+  // Rows sharing one timestamp are sung together (a lead and a backing line).
+  // Kept apart, only the last of them was ever the active line: the overlay
+  // never showed the first, and clicking it in the list lit up the other.
+  // They become one row; the same words twice count once.
+  const merged: LyricLine[] = []
+  for (const line of cleaned) {
+    const previous = merged.at(-1)
+    if (previous && previous.startMs === line.startMs && !previous.words && !line.words) {
+      if (!previous.text.split(JOINED_ROWS).includes(line.text)) previous.text = `${previous.text}${JOINED_ROWS}${line.text}`
+    } else merged.push({ ...line })
+  }
+  return merged.map((line, index) => ({ ...line, endMs: merged[index + 1]?.startMs }))
 }
+
+/** Separates rows shown as one (an ideographic space, as between split translation phrases). */
+const JOINED_ROWS = '　'
 
 export function makeTrack(id: string, language: string, label: string, kind: LyricTrack['kind'], source: string, origin = '本地'): LyricTrack {
   return { id, language, label, kind, lines: parseLrc(source), source: origin }
@@ -82,9 +101,20 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
     // (21.457 s against 21.46 s). Demanding equality sent such a row to the
     // lead rule below, which picks the *next* line when lines are under 1.2 s
     // apart: the translation showed one row late.
-    const sameIndex = activeLineIndex(baseLines, line.startMs + SAME_STAMP_MS)
-    let index = sameIndex >= 0 && Math.abs(baseLines[sameIndex].startMs - line.startMs) <= SAME_STAMP_MS
-      ? sameIndex : activeLineIndex(baseLines, line.startMs + leadToleranceMs)
+    const current = activeLineIndex(baseLines, line.startMs + SAME_STAMP_MS)
+    const sameStamp = current >= 0 && Math.abs(baseLines[current].startMs - line.startMs) <= SAME_STAMP_MS
+    const next = baseLines[current + 1]
+    let index = current
+    if (!sameStamp && next) {
+      // A translation may be stamped a little before its line. It goes to the
+      // next row when that row starts within the tolerance and nearer than the
+      // row in progress started. Looking a fixed 1.2 s ahead instead gave each
+      // line of a fast passage (rows under 1.2 s apart) to the row after its
+      // own as soon as its stamp was off by more than rounding: after a
+      // 100 ms nudge of one track, or with an imported translation.
+      const leadMs = next.startMs - line.startMs
+      if (leadMs <= leadToleranceMs && (current < 0 || leadMs < line.startMs - baseLines[current].startMs)) index = current + 1
+    }
     if (index < 0 && Math.abs(line.startMs - baseLines[0].startMs) <= 2200) index = 0
     if (index < 0) continue
     const base = baseLines[index]

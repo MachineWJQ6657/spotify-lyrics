@@ -357,6 +357,8 @@ declare global {
     __syllableQa?: boolean
     /** Integration checks without audio: reach a verdict for the song on screen and read the source state. */
     __syllableListenQa?: { verdict(state: 'decided' | 'inconsistent'): boolean; state(): unknown }
+    /** UI checks without touching the player: put the lyric clock at a position, and read the line starts on screen. */
+    __syllablePlaybackQa?: { position(positionMs: number, isPlaying?: boolean): boolean; lineStarts(): number[] }
   }
 }
 
@@ -382,7 +384,19 @@ function sourceState() {
 /** Keep the listener in step with playback, lyrics and settings. */
 export function connectListener() {
   unsubscribe?.()
-  if (typeof window !== 'undefined' && window.__syllableQa) window.__syllableListenQa = { verdict: simulateVerdict, state: sourceState }
+  if (typeof window !== 'undefined' && window.__syllableQa) {
+    window.__syllableListenQa = { verdict: simulateVerdict, state: sourceState }
+    window.__syllablePlaybackQa = {
+      // Replaces the snapshot in this window only; the next real one from the player overwrites it.
+      position: (positionMs, isPlaying = true) => {
+        const playback = useAppStore.getState().playback
+        if (!playback?.track) return false
+        useAppStore.setState({ playback: { ...playback, positionMs, isPlaying, observedAtMs: Date.now(), acousticAnchor: undefined } })
+        return true
+      },
+      lineStarts: () => useAppStore.getState().lyrics?.tracks.find(track => track.kind === 'original')?.lines.map(line => line.startMs) ?? []
+    }
+  }
   let scheduled = false
   const schedule = () => {
     if (scheduled) return

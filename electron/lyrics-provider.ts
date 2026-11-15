@@ -796,27 +796,42 @@ export function alignSupplementalTimeline(track: SupplementalLyrics, owner: Lyri
     if (referenceIndex < 0) continue
     byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex, sourceMs: ownerRows[ownerIndex].timeMs, targetMs: baseRows[referenceIndex].timeMs, grouped: true })
   }
-  // One unmatched short row on each side between the same two matched rows is
-  // one sung moment written two ways (「U&I」 / 「You and I」, 「嗚呼」 / 「ああ」):
-  // too short and too different to match as text. Longer rows stay unpaired; a
-  // different verse between two shared lines keeps no translation.
-  const targeted = new Set([...byOwner.values()].flatMap(anchor => anchor.targetIndices ?? [anchor.referenceIndex]))
-  const textualBetween = (rows: Array<{ text: string }>, low: number, high: number) =>
-    Array.from({ length: Math.max(0, high - low - 1) }, (_, offset) => low + 1 + offset).filter(position => rows[position].text)
-  for (let index = 0; index < anchors.length - 1; index += 1) {
-    const before = anchors[index]
-    const after = anchors[index + 1]
-    const ownerBetween = textualBetween(ownerRows, before.subjectIndex, after.subjectIndex)
-    const baseBetween = textualBetween(baseRows, before.referenceIndex, after.referenceIndex)
-    if (ownerBetween.length !== 1 || baseBetween.length !== 1) continue
-    const [ownerIndex] = ownerBetween
-    const [referenceIndex] = baseBetween
-    if (byOwner.has(ownerIndex) || targeted.has(referenceIndex)) continue
-    if (Math.max(ownerRows[ownerIndex].text.length, baseRows[referenceIndex].text.length) > 8) continue
-    const ownerLag = ownerRows[ownerIndex].timeMs - before.sourceMs
-    const baseLag = baseRows[referenceIndex].timeMs - before.targetMs
-    if (Math.abs(ownerLag - baseLag) > 1200) continue
+  // Rows still unmatched once the groupings are settled, judged by the place
+  // they occupy between their matched neighbours:
+  // - a displayed row there with exactly the same words (the monotonic match
+  //   gave 「本当に本当に綺麗だろうから」 the row 「本当に綺麗だろうから」 that the
+  //   provider's own 「本当に綺麗だろうから」 should have had, then moved on);
+  // - or, when it is the only row there on both sides and both are short, the
+  //   same sung moment written two ways (「U&I」 / 「You and I」, 「嗚呼」 /
+  //   「ああ」). Longer rows stay unpaired: a different verse between two shared
+  //   lines keeps no translation.
+  const targetsOf = (anchor: SupplementalAnchor) => anchor.targetIndices ?? [anchor.referenceIndex]
+  const targeted = new Set([...byOwner.values()].flatMap(targetsOf))
+  for (const [position, ownerIndex] of textualOwner.entries()) {
+    if (byOwner.has(ownerIndex)) continue
+    let before = position - 1
+    while (before >= 0 && !byOwner.has(textualOwner[before])) before -= 1
+    let after = position + 1
+    while (after < textualOwner.length && !byOwner.has(textualOwner[after])) after += 1
+    if (before < 0 || after >= textualOwner.length) continue
+    const previous = byOwner.get(textualOwner[before])!
+    const next = byOwner.get(textualOwner[after])!
+    const low = Math.max(...targetsOf(previous))
+    const high = Math.min(...targetsOf(next))
+    const free = Array.from({ length: Math.max(0, high - low - 1) }, (_, offset) => low + 1 + offset)
+      .filter(candidate => baseRows[candidate].text && !targeted.has(candidate))
+    const text = ownerRows[ownerIndex].text
+    const sameWords = free.filter(candidate => baseRows[candidate].text === text)
+    let referenceIndex = sameWords.length === 1 ? sameWords[0] : -1
+    if (referenceIndex < 0 && !sameWords.length && after - before === 2 && free.length === 1
+      && Math.max(text.length, baseRows[free[0]].text.length) <= 8) {
+      const ownerLag = ownerRows[ownerIndex].timeMs - previous.sourceMs
+      const baseLag = baseRows[free[0]].timeMs - previous.targetMs
+      if (Math.abs(ownerLag - baseLag) <= 1200) referenceIndex = free[0]
+    }
+    if (referenceIndex < 0) continue
     byOwner.set(ownerIndex, { subjectIndex: ownerIndex, referenceIndex, sourceMs: ownerRows[ownerIndex].timeMs, targetMs: baseRows[referenceIndex].timeMs })
+    targeted.add(referenceIndex)
   }
   const ownerAt = (sourceMs: number) => {
     let ownerIndex = -1
@@ -974,14 +989,18 @@ function supplementalBuckets(track: SupplementalLyrics, base: LyricsResult) {
     // Providers sometimes split one translated sentence into two delayed
     // phrases; both legitimately belong to the same original row and must not
     // overwrite one another in a Map<number, string>.
-    let index = -1
-    const lookupMs = row.timeMs + 1200
-    for (let candidate = 0; candidate < baseRows.length; candidate += 1) {
-      // Exact provider/renderer anchors outrank the early-translation tolerance.
-      // Otherwise a rapid refrain is shifted into a later row on every merge.
-      if (baseRows[candidate].timeMs === row.timeMs) { index = candidate; break }
-      if (baseRows[candidate].timeMs <= lookupMs) index = candidate
-      else break
+    // Exact provider/renderer anchors outrank the early-translation tolerance.
+    // Otherwise a rapid refrain is shifted into a later row on every merge.
+    let index = baseRows.findIndex(candidate => candidate.timeMs === row.timeMs)
+    if (index < 0) {
+      // The row in progress, or the next one when it starts within 1.2 s and
+      // nearer than the row in progress started (a translation stamped a
+      // little early). The same rule as the renderer's alignSecondaryTrack: a
+      // fixed 1.2 s look-ahead skipped whole rows in a fast passage.
+      for (let candidate = 0; candidate < baseRows.length && baseRows[candidate].timeMs <= row.timeMs; candidate += 1) index = candidate
+      const next = baseRows[index + 1]
+      const leadMs = next ? next.timeMs - row.timeMs : Infinity
+      if (leadMs <= 1200 && (index < 0 || leadMs < row.timeMs - baseRows[index].timeMs)) index += 1
     }
     if (index < 0) continue
     const startMs = baseRows[index].timeMs

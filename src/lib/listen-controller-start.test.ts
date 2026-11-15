@@ -28,7 +28,7 @@ describe('listening session start', () => {
     const track = { id: 'start-song', name: 'n', artist: 'a', album: 'b', coverUrl: '', durationMs: 200_000 }
     const original = { id: 'o', language: 'ja', label: '日本語', kind: 'original' as const, source: 'LRCLIB · 精确匹配',
       lines: Array.from({ length: 12 }, (_, index) => ({ startMs: 10_000 + index * 5000, text: `歌詞の行その${index}` })) }
-    const document: LyricsDocument = { trackId: track.id, track, providerRevision: 44, tracks: [original],
+    const document: LyricsDocument = { trackId: track.id, track, providerRevision: 45, tracks: [original],
       listenedOffset: { timingKey: listenTimingKey(original)!, state: 'decided', offsetMs: 300, measuredDeltaMs: 300, lines: 8, measuredAt: 1 } }
     const before = useAppStore.getState()
     const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))

@@ -112,6 +112,25 @@ describe('translations where the two timelines cut a sentence at different place
   })
 })
 
+describe('a provider row whose displayed twin went to a longer row first', () => {
+  it('still gets the displayed row with exactly its words', () => {
+    // 「本当に、本当に綺麗だろうから」 contains 「本当に綺麗だろうから」 and may take that
+    // row in the monotonic match before the two rows after it claim it exactly.
+    const base: Array<[number, string]> = [[10_000, '何もかも無くした後に'], [12_000, '見える夜は'], [13_000, '本当に綺麗だろうから'], [17_000, '本当に本当に'], [23_000, '綺麗だろうから'],
+      [26_000, '僕は歩いた'], ...tail.map(row => [row[0] + 5000, row[1]] as [number, string])]
+    const owner: OwnerRow[] = [[10_000, '何もかも無くした後に見える夜は', '失去一切之后看见的夜晚', 'nanimokamo nakushita ato ni mieru yoru wa'],
+      [13_000, '本当に綺麗だろうから', '一定会很美吧', 'hontou ni kirei darou kara'],
+      [17_000, '本当に、本当に綺麗だろうから', '真的 真的会很美吧', 'hontou ni hontou ni kirei darou kara'],
+      [26_000, '僕は歩いた', '所以我走了', 'boku wa aruita'], ...tail.map(row => [row[0] + 5000, row[1], row[2], row[3]] as OwnerRow)]
+    const { at } = merge(base, owner)
+    expect(at('zh-Hans', 10_000)).toBe('失去一切之后看见的夜晚')
+    expect(at('zh-Hans', 12_000)).toBe('失去一切之后看见的夜晚')
+    expect(at('zh-Hans', 13_000)).toBe('一定会很美吧')
+    expect(at('zh-Hans', 17_000)).toBe('真的 真的会很美吧')
+    expect(at('zh-Hans', 23_000)).toBe('真的 真的会很美吧')
+  })
+})
+
 describe('a short row both timelines have, written differently', () => {
   const long = '君の声が聞こえた気がした夜のこと'
   const after = '振り返れば誰もいない街の中でひとり'
@@ -129,6 +148,22 @@ describe('a short row both timelines have, written differently', () => {
       [[10_000, long], [12_000, 'You and I'], [20_000, after], ...rest],
       [[10_000, long, '那个仿佛听见你声音的夜晚', 'kimi no koe'], [17_000, 'ねえ', '喂', 'nee'], [20_000, after, '回过头在空无一人的街上独自一人', 'furikaereba'], ...tail])
     expect(at('zh-Hans', 12_000)).toBe('')
+  })
+})
+
+describe('a translation stamped a little off its rows in a fast passage', () => {
+  it('stays on its own rows when the provider result is merged', () => {
+    // Rows one second apart, the translation 100 ms late: a fixed 1.2 s
+    // look-ahead gave every line to the row after its own (sixth review).
+    const rows: Array<[number, string, string]> = [[10_000, '夜の街を歩いていた', '走在夜晚的街道上'], [11_000, '君の声が聞こえた', '听见了你的声音'], [12_000, '振り返れば誰もいない', '回过头却空无一人'],
+      [13_000, '明日はきっと晴れる', '明天一定会放晴'], [17_000, '涙はもういらないよ', '已经不需要眼泪了'], [21_000, '遠い空に手を伸ばして', '向遥远的天空伸出手'],
+      [25_000, '届かなくても笑っていよう', '即使够不到也要笑着'], [29_000, 'さよならまた会う日まで', '再见直到重逢之日']]
+    const netease: LyricsResult = { syncedLyrics: lrc(rows.map(row => [row[0], row[1]])), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: 100, matchedDurationMs: 40_000,
+      additionalTracks: [{ language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: lrc(rows.map(row => [row[0] + 100, row[2]])), source: '网易云音乐 · 翻译' }] }
+    const merged = mergeProviderSet([null, null, netease, null], 40_000, 'ja')
+    const zh = parseTimedRows(merged?.additionalTracks?.find(track => track.language === 'zh-Hans')?.syncedLyrics)
+    expect(zh.map(row => row.text)).toEqual(rows.map(row => row[2]))
+    expect(zh.map(row => row.timeMs)).toEqual(rows.map(row => row[0]))
   })
 })
 

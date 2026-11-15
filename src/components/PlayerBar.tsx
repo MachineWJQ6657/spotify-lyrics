@@ -101,7 +101,9 @@ export function PlayerBar({ playback, position, demoMode }: { playback: Playback
     else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       if (pendingSkipTrackId) return
-      void seekTo(Math.max(0, Math.min(duration - 1000, position + (event.key === 'ArrowLeft' ? -5000 : 5000))))
+      // An unknown length (0) must not clamp the target to the start of the song.
+      const latest = duration > 1000 ? duration - 1000 : Number.POSITIVE_INFINITY
+      void seekTo(Math.max(0, Math.min(latest, position + (event.key === 'ArrowLeft' ? -5000 : 5000))))
     }
   }
   useEffect(() => {

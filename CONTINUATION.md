@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.71 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.70-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.72 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.71-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (115 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (120 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,26 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.72 deployed: sixth review (overlay and lyric list), smooth scrolling, selectable lyrics, nearest-row rule for secondary rows
+
+- `release/current` = **0.4.72** (asar SHA256 `9c478ca68bccff7ee457d38a8af7ca5a268a5f079ca5a647d246949cd6ce1814`, verifier 120/120, 1273 tests). Rollback: `release/current-0.4.71-backup-20261115`; the 0.4.70 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0472`.
+- **Sixth independent review** (renderer at 6fd05b3; findings in `.qa-scratch/review6-findings.md`): ten findings and one outside the scope, all fixed. Tests: `src/lib/renderer-review-fixes.test.ts`, one more case in `electron/provider-review-fixes.test.ts`.
+  1. *Secondary rows one row late in fast passages* (`alignSecondaryTrack`): a fixed 1.2 s look-ahead gave a line to the row after its own once its stamp was off by more than 15 ms. Now: the row in progress, or the next row when it starts within the tolerance **and** nearer than the row in progress started. The provider's `supplementalBuckets` uses the same rule (it could skip several rows).
+  2. *The list snapped on every line* (`LyricsStage`): the layout effect depended on `active` and a ResizeObserver reports once when it starts observing, so each new line was centred instantly before the smooth scroll ran. The jump now happens only on content / visibility / follow changes and on real size changes (`primed`); a new line scrolls smoothly while the document is visible and motion is not reduced, and the list re-centres on `visibilitychange` / `focus`.
+  3. *Find* (`foldForFind`): typographic apostrophes and quotes fold to the typed ones; Latin combining accents (U+0300..U+036F) are dropped after NFKD, kana voicing marks are not.
+  4. *Right-click stopped following*: `onPointerDown` ignores button 2.
+  5. *Overlay not idle without a track*: `line` is undefined when `playback.track` is null (a first line stamped 0 ms was shown).
+  6. *Words before the first word tag* (`parseLrc`): they get a word entry starting with the line.
+  7. *Lyric text could not be selected*: `.lyrics-viewport .lyric-primary, .lyric-secondary { user-select: text }` (the row menu's 复制选中的文字 had never appeared).
+  8. *Esc with the find bar open and focus elsewhere*: a window-level handler closes the bar (an open menu, the editor or the source popover take the key first).
+  9. *Two rows with one timestamp* (`parseLrc`): merged into one row joined by `JOINED_ROWS` (ideographic space), identical words once; rows with word timing stay apart.
+  10. *Stale row menu*: the menu stores the row's start and text and closes when the row under its index changes.
+  - Outside the scope: `PlayerBar` ← / → with an unknown length clamped the target to 0.
+- **Provider, after 0.4.71**: the slot pairing now works on the final mappings (`byOwner`), not the LCS anchors: an unmatched provider row takes the one free displayed row with identical words between its matched neighbours; the short-row pairing (at most eight characters, same lag) is its second branch. `LYRICS_PROVIDER_REVISION` 44 -> 45.
+- **Comparison coverage**: all 213 library songs have now been run old (98074c4) against new in three samples (`--every 3 --offset 0|1|2`); 177 identical, 36 differ, each inspected. The cache `.qa-scratch/http-cache2/` holds offsets 0 and the 23 songs that differed earlier, so those replay offline. `bundle.sh` now deletes the extracted ref directory (vitest collected its test files).
+- **New QA**: `window.__syllablePlaybackQa` (debugger-only, next to `__syllableListenQa`): `position(ms, playing)` replaces the playback snapshot in the window, `lineStarts()` lists the original line starts. `scripts/qa/verify-lyric-list.mjs` uses it to check smooth scrolling, the right-click, Esc and selection on the test instance without touching the player.
+- Not verified with live playback: the smooth scroll was only seen with the simulated clock; the overlay idle state and the merged same-timestamp rows have unit tests only.
 
 ## 2026-11-15 / 0.4.71 deployed: fifth review (lyrics provider), translation alignment and candidate selection, old-versus-new comparison on library songs
 

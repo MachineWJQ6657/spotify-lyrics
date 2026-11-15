@@ -5,7 +5,7 @@ import { useAppStore } from './useAppStore'
 const song = { id: 'playing', name: '夜行', artist: 'ヨルシカ', album: '盗作', coverUrl: '', durationMs: 200_000 }
 const playback = { track: song, positionMs: 30_000, observedAtMs: Date.now(), isPlaying: true, playbackSource: 'local' } as unknown as PlaybackSnapshot
 const document = (id: string, updatedAt: number, extra: Partial<LyricsDocument> = {}): LyricsDocument => ({
-  trackId: id, updatedAt, providerRevision: 44,
+  trackId: id, updatedAt, providerRevision: 45,
   tracks: [{ id: `${id}-original`, language: 'ja', label: '日本語', kind: 'original', source: 'LRCLIB · 精确匹配', lines: [{ startMs: 1000, text: '歌詞' }] }],
   ...extra
 })
@@ -54,7 +54,7 @@ describe('the view and the saved library stay in step', () => {
   }))
 
   it('does not save an empty entry when a song without lyrics is re-matched or given a source', () => withStore(() => {
-    const notFound: LyricsDocument = { trackId: 'playing', track: { ...song, coverUrl: 'data:image/png;base64,AAAA' }, tracks: [], providerRevision: 44 }
+    const notFound: LyricsDocument = { trackId: 'playing', track: { ...song, coverUrl: 'data:image/png;base64,AAAA' }, tracks: [], providerRevision: 45 }
     useAppStore.setState({ playback, demoMode: false, lyrics: notFound, library: {} })
     useAppStore.getState().retryCurrentLyrics()
     expect(useAppStore.getState().library.playing).toBeUndefined()
@@ -121,7 +121,7 @@ describe('the view and the saved library stay in step', () => {
 
 describe('restoring a backup while a song is on screen', () => {
   it('takes the backup copy for a song that was not found, and shows it', () => withStore(() => {
-    const notFound: LyricsDocument = { trackId: 'playing', tracks: [], providerRevision: 44 }
+    const notFound: LyricsDocument = { trackId: 'playing', tracks: [], providerRevision: 45 }
     useAppStore.setState({ playback, demoMode: false, lyrics: notFound, library: {} })
     const fromBackup = document('playing', 5, { offsetMs: 250 })
     expect(useAppStore.getState().importLibrary([fromBackup])).toEqual({ added: 1, updated: 0, kept: 0 })

@@ -122,15 +122,36 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     return () => window.removeEventListener('keydown', onKey)
   }, [searchable, openFind])
   useEffect(() => setFind(null), [document?.trackId])
+  // Esc closes the find bar wherever the focus is (after clicking a line it is
+  // no longer in the input, and the bar's tooltip still says Esc). An open
+  // menu or the editor takes the key first.
+  const findOpen = find != null
+  useEffect(() => {
+    if (!findOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (window.document.querySelector('.editor-backdrop, .lyric-menu, .source-popover')) return
+      setFind(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [findOpen])
 
   // Right-click a row: copy it or the whole song, play from it, or search.
-  const [menu, setMenu] = useState<{ index: number; x: number; y: number; selection: string } | null>(null)
+  const [menu, setMenu] = useState<{ index: number; x: number; y: number; selection: string; startMs: number; text: string } | null>(null)
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | undefined>(undefined)
   const menuRef = useRef<HTMLDivElement>(null)
   const openMenu = useCallback((index: number, x: number, y: number) => {
-    setMenu({ index, x, y, selection: window.getSelection()?.toString().trim() ?? '' })
-  }, [])
+    const line = base?.lines[index]
+    if (line) setMenu({ index, x, y, selection: window.getSelection()?.toString().trim() ?? '', startMs: line.startMs, text: line.text })
+  }, [base])
+  // The same song's lyrics were replaced under an open menu (another source,
+  // an edit): its row number now names another line, so the menu closes
+  // instead of copying or playing that one.
+  const menuRow = menu ? base?.lines[menu.index] : undefined
+  const menuStale = Boolean(menu && (menuRow?.startMs !== menu.startMs || menuRow?.text !== menu.text))
+  useEffect(() => { if (menuStale) setMenu(null) }, [menuStale])
   const copyText = useCallback((text: string, done: string) => {
     setMenu(null)
     if (!text) return
@@ -180,26 +201,54 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     viewport.scrollTo({ top, behavior: 'smooth' })
   }, [currentMatch, find?.query])
 
+  const centerRef = useRef(centerActive)
+  centerRef.current = centerActive
+  // The lyrics, the visible tracks or the follow state changed: measure and
+  // jump to the sung line before paint.
   useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
-    const update = () => {
+    setViewportHeight(viewport.clientHeight)
+    if (following) centerRef.current('auto')
+  }, [base, enabled, romanization, following])
+  // The viewport or the sung row changed size (window resize, fonts, a
+  // translation arriving): jump again. Starting to observe reports once at
+  // once; that is not a size change. Reacting to it (and running the jump
+  // above on every new line) centred each line instantly, so the smooth
+  // scroll below never had anything left to do and the list snapped.
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    let primed = false
+    const observer = new ResizeObserver(() => {
+      if (!primed) { primed = true; return }
       setViewportHeight(viewport.clientHeight)
-      if (following) centerActive('auto')
-    }
-    update()
-    const observer = new ResizeObserver(update)
+      if (following) centerRef.current('auto')
+    })
     observer.observe(viewport)
     const current = active >= 0
       ? listRef.current?.querySelector<HTMLElement>(`[data-line-index="${active}"]`)
       : null
     if (current) observer.observe(current)
     return () => observer.disconnect()
-  }, [active, base, enabled, romanization, following, centerActive])
+  }, [active, base, enabled, romanization, following])
 
+  // A new line glides into place while the window is on screen. A hidden or
+  // minimized window does not animate (Chromium suspends its frames), so
+  // there the list jumps, and it jumps once more when the window comes back.
   useEffect(() => {
-    if (following) centerActive(active > 0 ? 'smooth' : 'auto')
+    if (!following) return
+    const animated = active > 0 && window.document.visibilityState === 'visible'
+      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    centerActive(animated ? 'smooth' : 'auto')
   }, [active, following, centerActive, viewportHeight])
+  useEffect(() => {
+    if (!following) return
+    const onVisible = () => { if (window.document.visibilityState === 'visible') centerRef.current('auto') }
+    window.document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => { window.document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
+  }, [following])
 
   if (!document) return <div className="empty-lyrics"><span className="spinner" /><p>正在寻找最合适的歌词…</p></div>
   if (document.untimedOriginal) return <div className="lyrics-stage-shell">
@@ -230,7 +279,11 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       tabIndex={0}
       aria-label="同步歌词，可上下滚动查看"
       onWheelCapture={() => setFollowing(false)}
-      onPointerDown={() => setFollowing(false)}
+      onPointerDown={event => {
+        // A right-click opens the row menu; it is not scrolling away. It used
+        // to stop the list following the song until 回到当前歌词 was clicked.
+        if (event.button !== 2) setFollowing(false)
+      }}
       onKeyDownCapture={event => {
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) setFollowing(false)
       }}

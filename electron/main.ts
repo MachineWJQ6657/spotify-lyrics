@@ -3,7 +3,7 @@ import path from 'node:path'
 import { appendFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SpotifyRateLimitError, SpotifyService } from './spotify'
-import { fetchLyrics, searchLyrics, timedLyricsStats } from './lyrics-provider'
+import { fetchLyrics, isLyricsSourceId, searchLyrics, timedLyricsStats } from './lyrics-provider'
 import { romanizeLines, analyzeJapaneseLines } from './romanizer'
 import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
@@ -1780,17 +1780,21 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     if (!result.accepted) throw new Error('Spotify 控制请求尚未完成，请稍后再调整进度')
     setTimeout(() => void refreshPlayback().catch(() => undefined), 180)
   })
-  ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean }) => {
+  ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean; preferredSource?: unknown; reuseProviderResults?: boolean }) => {
+    const preferredSource = isLyricsSourceId(options?.preferredSource) ? options.preferredSource : undefined
     const lyricsFetchStartedAt = Date.now()
     qaLog(`lyrics request: ${track?.artist ?? 'unknown'} - ${track?.name ?? 'unknown'}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${track?.sourceDurationMs ?? track?.durationMs ?? 0}`)
     // An explicit retry always asks the providers again.
-    const prefetched = options?.bypassCache ? null : await nextTrackPrefetcher.take(track).catch(() => null)
+    // The prefetch holds the automatic choice; a chosen source re-ranks the
+    // provider results it left behind instead.
+    const prefetched = options?.bypassCache || preferredSource ? null : await nextTrackPrefetcher.take(track).catch(() => null)
     if (prefetched) qaLog(`lyrics: prefetched before the song change (${prefetched.source})`)
-    const result = prefetched ?? await fetchLyrics(track, await spotify.getAccessToken().catch(() => null), Boolean(options?.bypassCache))
+    const result = prefetched ?? await fetchLyrics(track, await spotify.getAccessToken().catch(() => null), Boolean(options?.bypassCache),
+      { preferredSource, reuseProviderResults: options?.reuseProviderResults === true })
     const lyricsDurationMs = track?.sourceDurationMs ?? track?.durationMs
     const stats = timedLyricsStats(result?.syncedLyrics, lyricsDurationMs)
     const durationRatio = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1
-    qaLog(`lyrics: ${result?.source ?? 'not found'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
+    qaLog(`lyrics: ${result?.source ?? 'not found'}; preferred=${preferredSource ?? 'auto'}${result?.preferredSourceUnavailable ? ' (unavailable)' : ''}; available=${result?.availableSources?.map(item => `${item.id}:${item.lines}`).join(',') ?? 'unknown'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
     return result
   })
   ipcMain.handle('lyrics:search', (_event, query) => searchLyrics(query))

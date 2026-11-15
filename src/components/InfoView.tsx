@@ -35,8 +35,8 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
   const audioActive = playback?.isPlaying && playback.acousticAnchor?.trackId === playback.track?.id
     && playback.acousticAnchor && Date.now() < playback.acousticAnchor.expiresAtMs
   const listenedApplies = !manual && !activeLyrics?.offsetMs && settings.listenOffset !== false && listenedLyricsOffset(activeLyrics) !== 0
-  const clockMode = manual ? '本次听感校准（不保存到歌曲）' : audioActive ? '声音校准（实验）'
-    : listenedApplies ? listenedClockLabel(activeLyrics?.listenedOffset?.measuredDeltaMs ?? 0) : '媒体时间回退（未验证听感）'
+  const clockMode = manual ? '本次听感校准' : audioActive ? '声音校准（实验）'
+    : listenedApplies ? listenedClockLabel(activeLyrics?.listenedOffset?.measuredDeltaMs ?? 0) : 'Spotify 播放进度'
   const trackContext = [playback?.track?.name ?? '', playback?.track?.artist ?? '', playback?.track?.album ?? ''].find(hasKana) ?? ''
   const originalLanguage = activeLyrics?.tracks.find(track => track.kind === 'original')?.language
   const trackNamePresentation = scriptPresentation(playback?.track?.name ?? '', trackContext, originalLanguage)
@@ -63,24 +63,22 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     <div className="content-page-header"><span>HELP & DIAGNOSTICS</span><h1>帮助与诊断</h1><p>按钮没有反应时，先在这里确认播放源和快捷键状态。</p></div>
     <div className="diagnostic-card">
       <div className={`diagnostic-icon ${localConnected || connected ? 'online' : ''}`}><Wifi /></div>
-      <div><strong>{status}</strong><span>{playback?.track ? <>已识别：<span {...trackNamePresentation}>{playback.track.name}</span> · <span {...trackArtistPresentation}>{playback.track.artist}</span>{playback.clockDriftMs != null ? ` · 内部采样差 ${playback.clockDriftMs > 0 ? '+' : ''}${playback.clockDriftMs} ms（非人声同步误差）` : ''}</> : '请打开 Spotify 桌面端并播放任意歌曲'}</span></div>
+      <div><strong>{status}</strong><span>{playback?.track ? <>已识别：<span {...trackNamePresentation}>{playback.track.name}</span> · <span {...trackArtistPresentation}>{playback.track.artist}</span>{playback.clockDriftMs != null ? ` · 内部采样差 ${playback.clockDriftMs > 0 ? '+' : ''}${playback.clockDriftMs} ms` : ''}</> : '请打开 Spotify 桌面端并播放任意歌曲'}</span></div>
       {(localConnected || connected) && <CheckCircle2 className="diagnostic-check" />}
     </div>
     <div className="info-note">
-      <p>{referenceLabel(activeLyrics?.textReference)}</p>
-      <p>本机媒体会话只提供歌曲与进度，不等于已读取 Spotify / Musixmatch 的歌词。取得 Spotify 原文时会用于核对内容与顺序；未取得时不会标成已核验。内容一致不代表歌词时间戳或人声同步正确。</p>
-      <p>遇到歌词提前、延迟或切歌回跳时，可导出最近 180 次播放采样，以及导出时的歌词源、偏移和估算行号。记录只暂存在内存，区分媒体进度、当前歌词时钟与未启用的转场曲线推算；不含录音、歌词正文、账号凭据或封面，不会自动上传。估算行号不是屏幕截图，内部采样差小不代表歌词与人声同步准确。</p>
+      {activeLyrics?.textReference && <p>{referenceLabel(activeLyrics.textReference)}</p>}
+      <p>遇到歌词提前、延迟或切歌回跳时，可以导出最近的播放采样和当前歌词信息，方便排查。</p>
       <button className="diagnostics-export" onClick={() => void exportDiagnostics()} disabled={exporting}><Download size={14} />{exporting ? '正在保存…' : '导出同步诊断'}</button>
       {exportStatus && <p role="status">{exportStatus}</p>}
     </div>
-    <div className="info-note">Spotify 自带歌词也可能提前或延后。与它保持一致只代表跟随了媒体时间，不代表已对齐实际人声；独立声音证据不足时不会宣称同步成功。</div>
-    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms，重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}。曲线仅供诊断，不自动换算歌词进度，以免重复加速和元数据晚到造成跳句。</div>}
+    {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms，重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}。</div>}
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + L</strong><span>显示或隐藏桌面悬浮歌词</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + M</strong><span>锁定 / 解锁桌面歌词。锁定后歌词不挡鼠标，点击穿透到下面的窗口；未锁定时可拖动、缩放，Ctrl+滚轮调字号</span></article>
-      <article><CircleHelp /><strong>歌词不匹配</strong><span>点击歌曲标题右侧的铅笔，搜索候选并逐行校时。</span></article>
+      <article><CircleHelp /><strong>歌词不匹配</strong><span>在「正在播放」页点来源标签换一个歌词来源，或点「编辑」搜索其他版本、逐行校时。</span></article>
     </div>
     <AudioSyncPanel />
     <a className="docs-link" href="https://github.com/tranxuanthang/lrcget" target="_blank">了解 LRC 歌词格式 <ExternalLink size={13} /></a>

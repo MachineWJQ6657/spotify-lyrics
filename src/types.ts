@@ -7,7 +7,16 @@ export interface LyricTrack {
   /** Generated readings only. Provider or explicitly edited romaji retain ownership. */
   generatedRomanizationRevision?: number
 }
+/** A lyric provider the user can pick as the timed original. */
+export type LyricsSourceId = 'spotify' | 'lrclib' | 'netease' | 'kugou'
+
 export interface LyricsDocument {
+  /** The user's choice in the source menu for this song; absent = automatic. */
+  sourcePreference?: LyricsSourceId
+  /** Providers that had timed lyrics for this song at the last lookup. */
+  availableSources?: Array<{ id: LyricsSourceId; lines: number }>
+  /** The chosen source had no timed lyrics at the last lookup; the automatic choice is shown. */
+  sourceUnavailable?: boolean
   /** Actual original words without trusted timing; never drive active-line playback. */
   untimedOriginal?: { text: string; language: string; source: string }
   textReference?: { referenceSource: string; status: 'consistent' | 'partial' | 'conflict'; matchedLines: number; referenceLines: number }

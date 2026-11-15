@@ -33,6 +33,6 @@ export function timingStatus(input: {
   if (manual) return { label: `手动校准 · 歌词${shiftDirection(manual)} ${shiftAmount(manual)}`, tone: 'calibrated', title: '可在右侧「逐曲同步校准」调整或归零' }
   const listened = input.listenEnabled ? listenedLyricsOffset(document) : 0
   if (listened) return { label: `听音校准 · 歌词${shiftDirection(listened)} ${shiftAmount(listened)}`, tone: 'calibrated', title: '已在本机听过这首歌，并整体校正了歌词时间；可在右侧「逐曲同步校准」归零' }
-  if (input.listening) return { label: '正在听音校准…', tone: 'listening', title: '正在本机听几段声音，核对歌词是否提前或延后；音频不保存、不上传' }
+  if (input.listening) return { label: '正在听音校准…', tone: 'listening', title: '正在听这首歌，核对歌词是否提前或延后' }
   return { label: 'SPOTIFY TIMELINE', tone: 'neutral', title: '歌词按 Spotify 播放进度显示' }
 }

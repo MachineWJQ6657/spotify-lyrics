@@ -1,8 +1,10 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import { Check, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, Move, PanelRightClose, RotateCcw } from 'lucide-react'
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Check, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, Move, PanelRightClose, RefreshCw, RotateCcw } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { languageFromFilename, makeTrack } from '../lib/lyrics'
+import { currentListenDecision, listeningTrackId, relistenCurrentSong, subscribeListening } from '../lib/listen-controller'
+import { listenStatus } from '../lib/listen-status'
 
 const languageOptions = [
   { code: 'ja', label: '日本語' }, { code: 'romaji', label: 'Romaji' },
@@ -59,6 +61,12 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
   const offsetMs = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
   const listened = !activeLyrics?.offsetMs && settings.listenOffset !== false && listenedLyricsOffset(activeLyrics) !== 0
   const changeOffset = (value: number) => activeLyrics ? setLyricsOffset(value) : demoMode ? patchSettings({ offsetMs: value }) : undefined
+  // Listening calibration for this song: what it found, and "run it (again) now".
+  const isPlaying = useAppStore(state => Boolean(state.playback?.isPlaying))
+  const listeningNow = useSyncExternalStore(subscribeListening, listeningTrackId, listeningTrackId) === (playbackTrackId ?? null) && Boolean(playbackTrackId)
+  const listenDecision = currentListenDecision(true)
+  const listening = listenStatus({ document: activeLyrics, listening: listeningNow, enabled: settings.listenOffset !== false, playing: isPlaying,
+    reason: 'reason' in listenDecision ? listenDecision.reason : undefined })
 
   useEffect(() => {
     const syncBounds = (bounds: { width: number; height: number }) => {
@@ -142,7 +150,11 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
           <p className="setting-hint">只改这首歌的歌词时间，不影响 Spotify 播放进度；歌词出现得太早就往「延后」调。</p>
         </section>
         <section>
-          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>听音自动校准</strong><span>日语、中文、英文歌曲播放时在本机听几段声音，整体校正歌词提前或延后；音频不保存、不上传</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
+          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>听音自动校准</strong><span>播放日语、中文、英文歌曲时听几段声音，自动把歌词整体提前或延后</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
+          <div className="listen-status">
+            <p role="status">{listening.text}</p>
+            <button className="wide-button" disabled={!listening.canRun} onClick={() => { relistenCurrentSong() }}><RefreshCw size={15} />{listening.action}</button>
+          </div>
         </section>
       </>}
       {tab === 'overlay' && <>

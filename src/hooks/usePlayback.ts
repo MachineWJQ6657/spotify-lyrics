@@ -395,7 +395,16 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         scheduleTransientRetry()
         return transientGeneration
       }
-      window.syllable.lyrics.fetch(latestTrack, { bypassCache: bypassProviderCache }).then(async result => {
+      // The song's saved source choice, and whether this lookup is that choice
+      // being changed (then the providers' known results are re-ranked).
+      const preferredSource = requestBaseline?.trackId === latestTrack.id ? requestBaseline.sourcePreference : cached?.sourcePreference
+      const reuseProviderResults = latest.sourceSwitchToken === lyricsRetryToken
+      const sourceFields = (result: { availableSources?: LyricsDocument['availableSources']; preferredSourceUnavailable?: boolean } | null) => ({
+        ...(preferredSource ? { sourcePreference: preferredSource } : {}),
+        ...(result?.availableSources?.length ? { availableSources: result.availableSources } : {}),
+        ...(result?.preferredSourceUnavailable ? { sourceUnavailable: true } : {})
+      })
+      window.syllable.lyrics.fetch(latestTrack, { bypassCache: bypassProviderCache && !reuseProviderResults, preferredSource, reuseProviderResults }).then(async result => {
         if (!requestIsCurrent()) return
         if (!result?.syncedLyrics) {
           if (result?.source.startsWith('Spotify') && result.plainLyrics?.trim()) {
@@ -406,14 +415,14 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
               textReference: keepsUserOriginal ? undefined : result.textReference,
               userEditedTrackIds: preservedUserEditedTrackIds(tracks, requestBaseline),
               // Untimed text must not suppress a later timing lookup.
-              updatedAt: Date.now(), providerContext, providerRevision: undefined
+              updatedAt: Date.now(), providerContext, providerRevision: undefined, ...sourceFields(result)
             }, Boolean(result.transient))
             return
           }
           const emptyDocument: LyricsDocument = {
             trackId: latestTrack.id, track: latestTrack, tracks: [], updatedAt: Date.now(),
             providerRevision: result?.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext,
-            ...(result?.instrumental && !result.transient ? { instrumental: true } : {})
+            ...(result?.instrumental && !result.transient ? { instrumental: true } : {}), ...sourceFields(result)
           }
           if (result?.transient) commit(emptyDocument, true)
           else {
@@ -438,7 +447,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           textReference: tracks.find(track => track.kind === 'original') === original ? result.textReference : undefined,
           sourceDurationMs: (result.confidence ?? 0) >= 78 ? result.matchedDurationMs : undefined,
           updatedAt: Date.now(), providerRevision: result.transient ? undefined : LYRICS_PROVIDER_REVISION, providerContext,
-          userEditedTrackIds: preservedUserEditedTrackIds(tracks, requestBaseline)
+          userEditedTrackIds: preservedUserEditedTrackIds(tracks, requestBaseline), ...sourceFields(result)
         }
         // Show/persist the original and provider translations before the
         // Japanese analyzer finishes. A slow worker no longer creates a

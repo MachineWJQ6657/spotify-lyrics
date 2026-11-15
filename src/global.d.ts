@@ -26,8 +26,9 @@ interface SyllableApi {
     onUpdate(callback: (value: PlaybackSnapshot | null | { error: string }) => void): () => void
   }
   lyrics: {
-    fetch(track: TrackInfo, options?: { bypassCache?: boolean }): Promise<{
+    fetch(track: TrackInfo, options?: { bypassCache?: boolean; preferredSource?: import('./types').LyricsSourceId; reuseProviderResults?: boolean }): Promise<{
       syncedLyrics: string | null; plainLyrics: string | null; source: string; confidence?: number; matchedDurationMs?: number; transient?: boolean; instrumental?: boolean
+      availableSources?: import('./types').LyricsDocument['availableSources']; preferredSourceUnavailable?: boolean
       textReference?: import('./types').LyricsDocument['textReference']
       additionalTracks?: Array<{ language: string; label: string; kind: 'translation' | 'romanization'; syncedLyrics: string; source: string }>
     } | null>

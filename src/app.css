@@ -126,8 +126,36 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   color: var(--sy-text-2); font-size: 12px; white-space: nowrap;
 }
 .source-badges > span > svg { flex: none; }
-.source-badges > span.source-badge { flex: 0 1 auto; min-width: 0; max-width: 220px; }
+/* The source badge is a menu button: which provider supplies the timed lyrics. */
+.source-menu { position: relative; min-width: 0; flex: 0 1 auto; }
+.source-menu .source-badge {
+  max-width: 230px; height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 12px;
+  border: 1px solid var(--sy-stroke); border-radius: 999px; background: rgba(0, 0, 0, .18);
+  color: var(--sy-text-2); font-size: 12px; white-space: nowrap; transition: border-color 90ms linear, color 90ms linear;
+}
+.source-menu .source-badge:hover:not(:disabled), .source-menu .source-badge[aria-expanded='true'] { border-color: var(--sy-stroke-strong); color: var(--sy-text); }
+.source-menu .source-badge:disabled { cursor: default; }
+.source-menu .source-badge > svg { flex: none; }
 .source-badge em { min-width: 0; overflow: hidden; font-style: normal; text-overflow: ellipsis; }
+.source-popover {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 264px; padding: 6px;
+  border: 1px solid var(--sy-stroke-strong); border-radius: 14px; background: #171b19; box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+}
+.source-popover-title { padding: 8px 10px 6px; color: var(--sy-text-3); font-size: 11px; font-weight: 600; letter-spacing: .1em; }
+.source-popover > button {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--sy-text); text-align: left;
+}
+.source-popover > button:hover:not(:disabled) { background: var(--sy-surface-2); }
+.source-popover > button:disabled { opacity: .45; cursor: default; }
+.source-popover > button > span { min-width: 0; display: grid; gap: 2px; }
+.source-popover > button strong { font-size: 13px; font-weight: 600; }
+.source-popover > button small { color: var(--sy-text-3); font-size: 11px; }
+.source-popover > button > svg { flex: none; color: var(--sy-accent); }
+.source-popover > button.chosen strong { color: var(--sy-accent-text); }
+.source-popover-note { margin: 4px 10px 6px; color: var(--sy-warn); font-size: 11px; line-height: 1.5; }
+.source-popover > .source-popover-search { justify-content: flex-start; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--sy-stroke); border-radius: 0 0 10px 10px; color: var(--sy-text-2); font-size: 12px; }
+.source-popover > .source-popover-search > svg { color: var(--sy-text-3); }
 .source-badges > span.not-connected { border-color: rgba(255, 197, 107, .3); color: var(--sy-warn); }
 .source-badges .header-edit {
   flex: none; height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px;
@@ -142,7 +170,7 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   .now-track-heading { gap: 14px; }
   .now-header h1 { font-size: 22px; }
   .source-badges > span:not(.source-badge):not(.not-connected) { display: none; }
-  .source-badges > span.source-badge { max-width: 150px; }
+  .source-menu .source-badge { max-width: 160px; }
 }
 
 /* ---------- Lyrics ---------- */
@@ -253,6 +281,8 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .setting-label small { color: var(--sy-text-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .setting-hint { margin: 8px 0 0; color: var(--sy-text-3); font-size: 12px; line-height: 1.55; }
 .top-gap { margin-top: 18px; }
+.listen-status { display: grid; gap: 10px; margin-top: 14px; }
+.listen-status p { margin: 0; color: var(--sy-text-2); font-size: 12px; line-height: 1.55; }
 .disabled-label { opacity: .45; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .section-heading div { display: grid; gap: 3px; }

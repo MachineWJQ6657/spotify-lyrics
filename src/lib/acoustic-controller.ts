@@ -138,7 +138,7 @@ async function loadReference(file: File) {
     await work('reference', mono, audio.sampleRate)
     if (token !== generation) return
     if (useAppStore.getState().playback?.track?.id !== owner.id) { destroyWorker(); return }
-    update({ referenceName: file.name, busy: false, message: `已绑定「${owner.name}」。参照仅在内存中保留，换歌即清除。` })
+    update({ referenceName: file.name, busy: false, message: `已绑定「${owner.name}」，换歌后清除。` })
   } catch (error) {
     if (token === generation) { destroyWorker(); update({ busy: false, referenceName: '', message: error instanceof Error ? error.message : String(error) }) }
   } finally { await decoder.close() }
@@ -240,12 +240,11 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
           if (token !== generation || epoch !== captureEpoch) return
           if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input', 'overlapping-capture'].includes(result.reason)) {
             if (result.reason === 'invalid-input') retryNotBefore = Date.now() + 30_000
-            await recoverCapture('音素校验状态已变化，正在重新收集声音；未接管歌词时钟。'); return
+            await recoverCapture('音素校验状态已变化，正在重新收集声音。'); return
           }
           const message = `音素校验：${result.candidates} 个候选、${result.groups} 组声音线索，计算 ${(result.elapsedMs / 1000).toFixed(1)} 秒。`
             + (result.reason === 'work-budget' ? '整首搜索超过预算，本段弃权。' : result.hypothesisReason === 'internal-competitor'
               ? '存在句中词等竞争解释。' : result.hypothesisDecision === 'resolved' ? '多段位置假设一致，但尚未通过声学起点校验。' : '继续累计并排除重复段落。')
-            + '未接管歌词时钟。'
           update({ busy: false, score: undefined, rate: undefined, message,
             lastResult: { message, elapsedMs: result.elapsedMs, decision: result.reason === 'hypotheses' ? 'confirming' : 'rejected' } })
           return
@@ -293,7 +292,7 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
       finally { processing = false }
     }
     update({ running: true, busy: false, message: mode === 'phoneme'
-      ? '正在连续校验日语歌声；重复句保留多个候选，未接管歌词时钟。'
+      ? '正在连续校验日语歌声。'
       : mode === 'vocal'
       ? '正在自动识别人声，累计至少三段独立声音确认歌词位置和速度。'
       : '正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。' })

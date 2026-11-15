@@ -218,7 +218,7 @@ describe('audio capture lifecycle', () => {
     await port.onmessage(block)
     expect(window.syllable.audioSync.vocal).not.toHaveBeenCalled()
     expect(controller.snapshot().lastResult?.decision).toBe('confirming')
-    expect(controller.snapshot().message).toContain('未接管歌词时钟')
+    expect(controller.snapshot().message).toContain('音素校验：8 个候选')
     expect(controller.snapshot().rate).toBeUndefined()
     // Restart with a new stream/context to model a fresh capture epoch.
     await controller.stop(); await controller.startPhoneme()

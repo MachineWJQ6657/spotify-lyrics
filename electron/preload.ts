@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('syllable', {
     }
   },
   lyrics: {
-    fetch: (track: unknown, options?: { bypassCache?: boolean }) => ipcRenderer.invoke('lyrics:fetch', track, options),
+    fetch: (track: unknown, options?: { bypassCache?: boolean; preferredSource?: string; reuseProviderResults?: boolean }) => ipcRenderer.invoke('lyrics:fetch', track, options),
     search: (query: unknown) => ipcRenderer.invoke('lyrics:search', query),
     romanize: (lines: string[]) => ipcRenderer.invoke('lyrics:romanize', lines),
     export: (filename: string, content: string) => ipcRenderer.invoke('lyrics:export', filename, content)

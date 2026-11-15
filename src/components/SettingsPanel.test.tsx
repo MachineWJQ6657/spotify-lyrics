@@ -13,6 +13,11 @@ describe('settings panel', () => {
     expect(html).toContain('收起设置面板')
   })
 
+  it('offers to run listening calibration from the timing tab copy without disclaimers', () => {
+    const html = renderToStaticMarkup(<SettingsPanel />)
+    expect(html).not.toMatch(/不保存|不上传|不代表|未验证/)
+  })
+
   it('fills range tracks up to the thumb', () => {
     expect(rangeFill(52, 34, 88)).toBe('33.33333333333333%')
     expect(rangeFill(0, -30000, 30000)).toBe('50%')

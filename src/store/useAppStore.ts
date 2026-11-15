@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
-import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, PlaybackSnapshot, SessionCalibration } from '../types'
+import type { AppSettings, ListenedOffset, LyricLine, LyricTrack, LyricsDocument, LyricsSourceId, PlaybackSnapshot, SessionCalibration } from '../types'
 import { continuesCalibration, createSessionCalibration, currentSessionCalibration } from '../lib/session-calibration'
 import { createDemoPlayback, demoDocument } from '../data/demo'
 import { retimeLines } from '../lib/lyrics'
@@ -15,6 +15,8 @@ interface AppState {
   settings: AppSettings
   editorOpen: boolean
   lyricsRetryToken: number
+  /** The retry token of the latest source switch: that lookup re-ranks known provider results. */
+  sourceSwitchToken: number | null
   sessionCalibration: SessionCalibration | null
   calibrateHeardLine(originalTrackId: string, lineIndex: number, now?: number): void
   clearSessionCalibration(): void
@@ -36,6 +38,8 @@ interface AppState {
   /** Puts a just-deleted document back (library undo). */
   restoreLibraryDocument(document: LyricsDocument): void
   retryCurrentLyrics(): void
+  /** Picks the provider for the current song's timed original (null = automatic) and looks it up again. */
+  setLyricsSource(source: LyricsSourceId | null): void
   /** Re-runs provider lookup without deleting the last usable document. */
   retryTransientLyrics(): void
   setEditorOpen(value: boolean): void
@@ -162,7 +166,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   demoMode: !isAuxiliaryWindow,
   playback: isAuxiliaryWindow ? null : createDemoPlayback(),
   lyrics: isAuxiliaryWindow ? null : demoDocument,
-  library: {}, settings: defaults, editorOpen: false, lyricsRetryToken: 0, sessionCalibration: null,
+  library: {}, settings: defaults, editorOpen: false, lyricsRetryToken: 0, sourceSwitchToken: null, sessionCalibration: null,
   calibrateHeardLine: (originalTrackId, lineIndex, now = Date.now()) => set(state => ({
     sessionCalibration: createSessionCalibration(state.playback, state.lyrics, originalTrackId, lineIndex, now)
   })),
@@ -273,6 +277,20 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     const pending = baseline ? { ...baseline, providerRevision: undefined } : null
     const library = pending ? { ...state.library, [trackId]: pending } : state.library
     return { library, lyrics: pending, lyricsRetryToken: state.lyricsRetryToken + 1 }
+  }),
+  setLyricsSource: source => set(state => {
+    const track = state.playback?.track
+    if (!track || state.demoMode) return state
+    const baseline = state.lyrics?.trackId === track.id ? state.lyrics : state.library[track.id]
+    const pending: LyricsDocument = { ...(baseline ?? { trackId: track.id, track, tracks: [] }), providerRevision: undefined, updatedAt: Date.now() }
+    if (source) pending.sourcePreference = source
+    else delete pending.sourcePreference
+    delete pending.sourceUnavailable
+    // A manual offset was tuned against the previous file's timing. A listened
+    // offset carries its own timing key and simply stops applying.
+    delete pending.offsetMs
+    const lyricsRetryToken = state.lyricsRetryToken + 1
+    return { library: { ...state.library, [track.id]: pending }, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sessionCalibration: null }
   }),
   retryTransientLyrics: () => set(state => ({ lyricsRetryToken: state.lyricsRetryToken + 1 })),
   setEditorOpen: editorOpen => set(state => state.editorOpen === editorOpen ? state : { editorOpen }),

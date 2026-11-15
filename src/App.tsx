@@ -1,11 +1,13 @@
 import { memo, useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
 import './app.css'
 import { sourceLabel } from './lib/source-label'
-import { Cloud, Languages, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
+import { Languages, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
 import { PANEL_TAB_EVENT, SettingsPanel, TAB_KEY } from './components/SettingsPanel'
+import { SourceMenu } from './components/SourceMenu'
+import { LYRICS_SOURCES, lyricsSourceIdOf } from './lib/lyrics-source'
 import { LibraryView } from './components/LibraryView'
 import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
@@ -49,7 +51,7 @@ export function App() {
   useWindowSync()
   useEffect(() => acousticController.connect(), [])
   useEffect(() => connectListener(), [])
-  const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, sessionCalibration } = useAppStore()
+  const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, setLyricsSource, sessionCalibration } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
   const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
@@ -84,11 +86,14 @@ export function App() {
   const titlePresentation = scriptPresentation(headingTitle, japaneseContext, originalLanguage)
   const artistPresentation = scriptPresentation(headingArtist, japaneseContext, originalLanguage)
   const albumPresentation = scriptPresentation(headingAlbum, japaneseContext, originalLanguage)
-  const mixLabel = playback?.transition ? 'MIX · 未套用推算' : ''
+  const mixLabel = playback?.transition ? 'MIX' : ''
   // Singles often repeat the title as the album name; say it once.
   const showAlbum = Boolean(headingAlbum) && headingAlbum.trim().toLowerCase() !== headingTitle.trim().toLowerCase()
   const trackCount = activeLyrics?.tracks.length ?? 0
-  const sourceText = sourceLabel(activeLyrics?.tracks[0]?.source ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : '正在搜索歌词…'))
+  // The badge names the provider on screen ("网易云音乐"); imported or edited lyrics keep their own label.
+  const shownSource = (activeLyrics?.tracks.find(track => track.kind === 'original') ?? activeLyrics?.tracks[0])?.source
+  const shownProvider = LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(shownSource))?.label
+  const sourceText = shownProvider ?? sourceLabel(shownSource ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : '正在搜索歌词…'))
 
   const importDroppedLyrics = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -143,8 +148,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="检测到转场元数据，但其时间坐标未经声音验证；不据此加速或平移歌词。Spotify 自带歌词也可能与人声不同步。"><Sparkles size={13} />{mixLabel}</span>}<span className="source-badge" title={`${sourceText}
-来源匹配依据歌曲元数据，不代表歌词内容或时间轴已经核验`}><Cloud size={13} /><em>{sourceText}</em></span>{trackCount > 0 && <span title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
         <div className="lyric-card">
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>

@@ -29,8 +29,8 @@ const checks = {
   timelineLabel: renderer.includes('SPOTIFY TIMELINE'),
   noUnsupportedAccuracyClaim: !renderer.includes('FRAME-ACCURATE CLOCK'),
   honestSourceEvidence: renderer.includes('尚未取得 Spotify 原文对照') && renderer.includes('元数据匹配') && main.includes('referencePool'),
-  unprovenRecipeNotApplied: renderer.includes('MIX · 未套用推算') && renderer.includes('媒体时间回退（未验证听感）') && main.includes('hypotheticalRecipePositionMs'),
-  retainedVocalResult: renderer.includes('此为历史结果，不表示当前校准仍有效') && renderer.includes('lastResult'),
+  unprovenRecipeNotApplied: renderer.includes('Spotify 播放进度') && main.includes('hypotheticalRecipePositionMs'),
+  retainedVocalResult: renderer.includes('上次分析') && renderer.includes('lastResult'),
   manualSessionCalibration: renderer.includes('这句现在开始') && renderer.includes('session-calibration') && renderer.includes('function displayedLyricPosition('),
   captureContinuityGate: main.includes('function captureQuality(') && renderer.includes('captureEpoch') && renderer.includes('startContextTime'),
   automaticAudioRecovery: renderer.includes('automaticAudioSync') && renderer.includes('function reconcileAutomatic(') && renderer.includes('开启自动声音同步'),
@@ -72,6 +72,10 @@ const checks = {
   orderedNativeShutdown: native.includes('stopNativeThread.async(') && native.includes("type: 'shutdown-done'") && native.includes('function stopWorker(') && main.includes('QUIT_FLUSH_BUDGET_MS'),
   crashHardening: main.includes('function isShown(') && /process\.on\(["']uncaughtException["']/.test(main) && /["']error\.log["']/.test(main)
     && /["']--syllable-quit["']/.test(main) && /["']session-end["']/.test(main),
+  // 0.4.60: pick the lyrics source per song, re-run listening calibration on demand, plain UI copy.
+  lyricsSourceSwitch: main.includes('function assembleProviderSet(') && main.includes('reuseProviderResults') && renderer.includes('function sourceOptions(') && renderer.includes('setLyricsSource'),
+  relistenOnDemand: renderer.includes('function relistenCurrentSong(') && renderer.includes('立即重新校准'),
+  plainCopy: !/不保存、不上传|不代表时间同步|未验证听感|未接管歌词时钟|待核验/.test(renderer),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),
@@ -95,7 +99,7 @@ const checks = {
     && renderer.includes('nativeVisible.current') && renderer.includes('visibilitychange'),
   cachedLibrarySerialization: renderer.includes('serializedLibrary') && renderer.includes('hasSerializedLibrary') && renderer.includes('libraryJson'),
   phonemeDiagnosticIsolation: main.includes('audio-sync:phoneme') && main.includes('clockApplied: false')
-    && renderer.includes('开启音素校验（不接管）') && renderer.includes('未接管歌词时钟'),
+    && renderer.includes('开启音素校验') && renderer.includes('正在连续校验日语歌声'),
   boundedPhonemeRuntime: main.includes('class LocalCtc') && main.includes('this.stoppingChild') && main.includes('Local phoneme shutdown failed:'),
   phonemeWorker: entries.some(entry => /[\\/]main[\\/]ctc-matcher-worker\.js$/.test(entry)),
   phonemePythonHelper: fs.existsSync(path.join(directory, 'resources', 'audio-sync', 'romaji-ctc-runner.py')),

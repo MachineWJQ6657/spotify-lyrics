@@ -10,7 +10,25 @@ export interface SupplementalLyrics {
   source: string
 }
 
+/** A provider the user can pick as the timed original in the source menu. */
+export type LyricsSourceId = 'spotify' | 'lrclib' | 'netease' | 'kugou'
+export const LYRICS_SOURCE_IDS: readonly LyricsSourceId[] = ['spotify', 'lrclib', 'netease', 'kugou']
+const LYRICS_SOURCE_PREFIX: Record<LyricsSourceId, string> = { spotify: 'Spotify', lrclib: 'LRCLIB', netease: '网易云音乐', kugou: '酷狗音乐' }
+
+/** Which provider a result's `source` label belongs to (labels may carry suffixes). */
+export function lyricsSourceId(source: string | null | undefined): LyricsSourceId | undefined {
+  return source ? LYRICS_SOURCE_IDS.find(id => source.startsWith(LYRICS_SOURCE_PREFIX[id])) : undefined
+}
+
+export function isLyricsSourceId(value: unknown): value is LyricsSourceId {
+  return typeof value === 'string' && (LYRICS_SOURCE_IDS as readonly string[]).includes(value)
+}
+
 export interface LyricsResult {
+  /** Providers that returned a timed original for this song, with their line counts. */
+  availableSources?: Array<{ id: LyricsSourceId; lines: number }>
+  /** The requested source had no timed lyrics for this song; the automatic choice was used. */
+  preferredSourceUnavailable?: boolean
   textReference?: TextReferenceCheck
   syncedLyrics: string | null
   plainLyrics: string | null
@@ -1087,8 +1105,14 @@ function onsetDistance(left: LyricsResult, right: LyricsResult) {
   return median(all)
 }
 
-export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs = 0, preferredScript?: 'ja' | 'han' | 'latin'): LyricsResult | null {
+export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs = 0, preferredScript?: 'ja' | 'han' | 'latin', forcedSource?: LyricsSourceId): LyricsResult | null {
   const normalized = results.flatMap(result => result ? [splitEmbeddedTranslation(result)] : [])
+  // The user's explicit choice in the source menu: that provider's timed
+  // original becomes the base. Translations and romaji are still merged from
+  // every compatible provider, and bounded gaps are still repaired.
+  const forcedBase = forcedSource
+    ? normalized.find(item => lyricsSourceId(item.source) === forcedSource && isTimedLyrics(item.syncedLyrics))
+    : undefined
   const spotifyText = normalized.find(item => item.source.startsWith('Spotify')
     && compareOriginalText(item.plainLyrics ?? '', item.plainLyrics ?? '', item.source))
   const textCheck = (item: LyricsResult) => spotifyText ? compareOriginalText(
@@ -1142,7 +1166,7 @@ export function mergeProviderSet(results: Array<LyricsResult | null>, durationMs
   // lyric clock. Returning it as a successful fetch used to poison the
   // in-memory cache after a temporary outage and suppress later provider
   // retries for the rest of the process lifetime.
-  const selectedBase = trustedSpotifyBase ?? preferredNeteaseTimeline(qualityBase, selectionPool, timed, durationMs) ?? qualityBase ?? selectionPool[0]
+  const selectedBase = forcedBase ?? trustedSpotifyBase ?? preferredNeteaseTimeline(qualityBase, selectionPool, timed, durationMs) ?? qualityBase ?? selectionPool[0]
   if (!selectedBase) {
     // Keep actual original words, but never attach a conflicting community
     // clock or fabricate timestamps. The renderer has a separate untimed view.
@@ -1212,6 +1236,59 @@ const cache = new Map<string, LyricsResult>()
 const inflight = new Map<string, Promise<LyricsResult | null>>()
 const providerGenerations = new Map<string, number>()
 const MAX_CACHE_ENTRIES = 80
+
+/** What each provider returned for one song, kept so switching source re-ranks without new requests. */
+interface ProviderSet {
+  at: number
+  spotify: LyricsResult | null; lrclib: LyricsResult | null; netease: LyricsResult | null; kugou: LyricsResult | null
+  transient: boolean
+  instrumentalEvidence: boolean
+  neteaseAnswered: boolean
+}
+const providerSets = new Map<string, ProviderSet>()
+const PROVIDER_SET_TTL_MS = 30 * 60_000
+const MAX_PROVIDER_SETS = 30
+
+export interface FetchLyricsOptions {
+  /** Use this provider's timed original when it has one. */
+  preferredSource?: LyricsSourceId
+  /** A source switch: reuse the provider results already fetched for this song. */
+  reuseProviderResults?: boolean
+}
+
+/** Merge one song's provider results, optionally around the user's chosen source. */
+async function assembleProviderSet(set: ProviderSet, track: NonNullable<PlaybackSnapshot['track']>, durationMs: number, preferredSource?: LyricsSourceId): Promise<LyricsResult | null> {
+  const preferredScript = KANA.test(track.name) ? 'ja' : undefined
+  const supplemental = set.netease
+  const forcedAvailable = Boolean(preferredSource && isTimedLyrics(set[preferredSource]?.syncedLyrics))
+  const mergedSet = mergeProviderSet([set.spotify, set.lrclib, supplemental, set.kugou], durationMs, preferredScript, forcedAvailable ? preferredSource : undefined)
+  // Only a NetEase identity miss (romanized title/artist) warrants a lyric-text
+  // lookup; a found NetEase entry already had its sibling entries checked.
+  // A NetEase hit whose words disagree with the chosen original is a miss
+  // too: a romanized title ("Haru wo Tsugeru") can match another song by the
+  // same artist on duration alone, and the merge rightly discards it.
+  const joinedText = (lrc: string | null | undefined) => parseTimedRows(lrc).map(row => alignmentText(row.text)).join('')
+  const neteaseAgrees = Boolean(supplemental?.syncedLyrics && mergedSet?.syncedLyrics
+    && normalizedTextSimilarity(joinedText(supplemental.syncedLyrics), joinedText(mergedSet.syncedLyrics)) >= .75)
+  const neteaseMissed = set.neteaseAnswered && !neteaseAgrees
+  const merged = neteaseMissed ? await enrichTranslationByLyricText(mergedSet, durationMs) : mergedSet
+  const availableSources = LYRICS_SOURCE_IDS.flatMap(id => isTimedLyrics(set[id]?.syncedLyrics)
+    ? [{ id, lines: timedLyricsStats(set[id]!.syncedLyrics, durationMs).lineCount }] : [])
+  const annotate = (value: LyricsResult): LyricsResult => ({
+    ...value,
+    ...(availableSources.length ? { availableSources } : {}),
+    ...(preferredSource && !forcedAvailable ? { preferredSourceUnavailable: true } : {})
+  })
+  return merged
+    ? annotate({ ...merged, ...(set.transient ? { transient: true } : {}) })
+    : set.transient
+      ? annotate({ syncedLyrics: null, plainLyrics: null, source: '歌词源暂时不可用', confidence: 0, transient: true })
+      // Only when no provider offered any lyric at all: a provider's
+      // instrumental tag never hides real words from another provider.
+      : set.instrumentalEvidence
+        ? { syncedLyrics: null, plainLyrics: null, source: '纯音乐', confidence: 100, instrumental: true }
+        : null
+}
 
 function referenceDurationMs(track: NonNullable<PlaybackSnapshot['track']>) {
   return track.sourceDurationMs && track.sourceDurationMs > 0 ? track.sourceDurationMs : track.durationMs
@@ -2106,21 +2183,36 @@ async function fetchSpotifyLyrics(track: NonNullable<PlaybackSnapshot['track']>,
   }
 }
 
-export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>, spotifyAccessToken?: string | null, bypassCache = false): Promise<LyricsResult | null> {
+export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>, spotifyAccessToken?: string | null, bypassCache = false, options: FetchLyricsOptions = {}): Promise<LyricsResult | null> {
   const durationMs = referenceDurationMs(track)
-  const key = lyricsCacheKey(track, Boolean(spotifyAccessToken))
+  const setKey = lyricsCacheKey(track, Boolean(spotifyAccessToken))
+  const preferredSource = options.preferredSource
+  // The merged result depends on the chosen source; the provider results do not.
+  const key = preferredSource ? `${setKey}\0source:${preferredSource}` : setKey
+  // A source switch, or a song whose saved source differs from the automatic
+  // choice (e.g. after the next-song prefetch), re-ranks what is already known.
+  if (options.reuseProviderResults || (preferredSource && !bypassCache && !cache.has(key))) {
+    const known = providerSets.get(setKey)
+    if (known && Date.now() - known.at < PROVIDER_SET_TTL_MS) {
+      const reassembled = await assembleProviderSet(known, track, durationMs, preferredSource)
+      if (reassembled?.syncedLyrics && isTimedLyrics(reassembled.syncedLyrics) && !reassembled.transient) remember(key, reassembled)
+      return reassembled
+    }
+  }
   // A locally discovered Spotify id only affects the official-lyrics request,
   // which requires OAuth. Community lookups are identical with or without it;
   // omitting it here coalesces the two startup snapshots into one fetch.
   if (bypassCache) {
-    cache.delete(key)
-    providerGenerations.set(key, (providerGenerations.get(key) ?? 0) + 1)
+    // An explicit retry asks every provider again, whichever source is chosen.
+    for (const cached of [...cache.keys()]) if (cached === setKey || cached.startsWith(`${setKey}\0source:`)) cache.delete(cached)
+    providerSets.delete(setKey)
+    providerGenerations.set(setKey, (providerGenerations.get(setKey) ?? 0) + 1)
     if (providerGenerations.size > MAX_CACHE_ENTRIES) {
       const oldest = providerGenerations.keys().next().value
-      if (oldest && oldest !== key) providerGenerations.delete(oldest)
+      if (oldest && oldest !== setKey) providerGenerations.delete(oldest)
     }
   }
-  const generation = providerGenerations.get(key) ?? 0
+  const generation = providerGenerations.get(setKey) ?? 0
   if (!bypassCache && cache.has(key)) {
     const cached = cache.get(key)!
     remember(key, cached)
@@ -2198,33 +2290,22 @@ export async function fetchLyrics(track: NonNullable<PlaybackSnapshot['track']>,
         extraSamples: item.additionalTracks?.map(track => ({ language: track.language, rows: parseTimedRows(track.syncedLyrics).filter(row => row.timeMs >= 55_000 && row.timeMs <= 85_000) }))
       })), null, 2))
     }
-    const preferredScript = KANA.test(track.name) ? 'ja' : undefined
-    const mergedSet = mergeProviderSet([spotifyLyrics, primary, supplemental, fallback], durationMs, preferredScript)
-    // Only a NetEase identity miss (romanized title/artist) warrants a lyric-text
-    // lookup; a found NetEase entry already had its sibling entries checked.
-    // A NetEase hit whose words disagree with the chosen original is a miss
-    // too: a romanized title ("Haru wo Tsugeru") can match another song by the
-    // same artist on duration alone, and the merge rightly discards it.
-    const joinedText = (lrc: string | null | undefined) => parseTimedRows(lrc).map(row => alignmentText(row.text)).join('')
-    const neteaseAgrees = Boolean(supplemental?.syncedLyrics && mergedSet?.syncedLyrics
-      && normalizedTextSimilarity(joinedText(supplemental.syncedLyrics), joinedText(mergedSet.syncedLyrics)) >= .75)
-    const neteaseMissed = neteaseResult.status === 'fulfilled' && !neteaseAgrees
-    const merged = neteaseMissed ? await enrichTranslationByLyricText(mergedSet, durationMs) : mergedSet
-    const result = merged
-      ? { ...merged, ...(transient ? { transient: true } : {}) }
-      : transient
-        ? { syncedLyrics: null, plainLyrics: null, source: '歌词源暂时不可用', confidence: 0, transient: true }
-        // Only when no provider offered any lyric at all: a provider's
-        // instrumental tag never hides real words from another provider.
-        : instrumentalEvidence
-          ? { syncedLyrics: null, plainLyrics: null, source: '纯音乐', confidence: 100, instrumental: true }
-          : null
+    const set: ProviderSet = { at: Date.now(), spotify: spotifyLyrics, lrclib: primary, netease: supplemental, kugou: fallback,
+      transient, instrumentalEvidence, neteaseAnswered: neteaseResult.status === 'fulfilled' }
+    // A partial (transient) set is never kept: a later source switch must not
+    // rank around a provider that merely timed out.
+    if (!transient && (providerGenerations.get(setKey) ?? 0) === generation) {
+      providerSets.delete(setKey)
+      providerSets.set(setKey, set)
+      if (providerSets.size > MAX_PROVIDER_SETS) providerSets.delete(providerSets.keys().next().value!)
+    }
+    const result = await assembleProviderSet(set, track, durationMs, preferredSource)
     // Never let a temporary provider outage permanently cache away a language
     // track or a more reliable timing quorum. The renderer may display this
     // partial generation immediately and schedules one bounded retry.
     // A force-refresh may overtake an older ordinary request. Only the newest
     // generation may repopulate the shared stable cache.
-    if (result?.syncedLyrics && isTimedLyrics(result.syncedLyrics) && !transient && (providerGenerations.get(key) ?? 0) === generation) remember(key, result)
+    if (result?.syncedLyrics && isTimedLyrics(result.syncedLyrics) && !transient && (providerGenerations.get(setKey) ?? 0) === generation) remember(key, result)
     return result
   })()
   inflight.set(requestKey, request)

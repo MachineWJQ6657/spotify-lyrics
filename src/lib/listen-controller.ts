@@ -163,6 +163,32 @@ async function begin(target: ListenTarget) {
   }
 }
 
+/**
+ * Why the current song is (not) being listened to. With `assumePlaying` a
+ * paused song is judged as if it played, so the reason names what would
+ * actually block it (language, too few lines) rather than "not playing".
+ */
+export function currentListenDecision(assumePlaying = false) {
+  const input = currentInput()
+  return listenTarget(assumePlaying && input.playback ? { ...input, playback: { ...input.playback, isPlaying: true } } : input)
+}
+
+/**
+ * "立即重新校准": forget what was measured for the current song (and a manual
+ * per-song offset, which would otherwise win) and listen again at once, or as
+ * soon as the song plays. Returns false when there is no current song with lyrics.
+ */
+export function relistenCurrentSong() {
+  const store = useAppStore.getState()
+  const track = store.playback?.track
+  if (!track || store.demoMode || store.lyrics?.trackId !== track.id) return false
+  for (const key of [...attempts.keys()]) if (key.startsWith(`${track.id}\0`)) attempts.delete(key)
+  if (store.lyrics.offsetMs) store.setLyricsOffset(0)
+  store.setListenedOffset(track.id, null)
+  void reconcile()
+  return true
+}
+
 /** Keep the listener in step with playback, lyrics and settings. */
 export function connectListener() {
   unsubscribe?.()

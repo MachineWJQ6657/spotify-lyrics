@@ -37,6 +37,8 @@ export interface LyricsDocument {
   listenedOffset?: ListenedOffset
   updatedAt?: number
   providerRevision?: number
+  /** The translation-matching revision at which this song was last looked up (see usePlayback's TRANSLATION_RECHECK_REVISION). */
+  translationRecheck?: number
   /** Provider release duration retained for matching and diagnostics only. */
   sourceDurationMs?: number
   /** Invalidates cached lyrics when Spotify later reveals its source recording. */
@@ -45,6 +47,8 @@ export interface LyricsDocument {
   userEditedTrackIds?: string[]
   /** Providers confirm the recording is instrumental; nothing to retry. */
   instrumental?: boolean
+  /** View only, never saved: the lookup and its one automatic retry both failed and nothing is pending. */
+  lookupFailed?: boolean
 }
 
 export interface ListenedOffset {
@@ -144,4 +148,6 @@ export interface AppSettings {
   positionLocked: boolean
   /** Show the next line under the one being sung, when the overlay has room for it. */
   overlayNextLine?: boolean
+  /** Fade the locked overlay out after playback has been paused for a while; it returns when playback resumes. */
+  overlayHideWhenPaused?: boolean
 }

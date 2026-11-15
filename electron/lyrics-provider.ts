@@ -861,6 +861,16 @@ type OwnedSupplemental = { owner: LyricsResult; track: SupplementalLyrics }
 function supplementalOwnerCompatible(owner: LyricsResult, base: LyricsResult) {
   if (owner === base || timelineRelation(owner, base)) return true
   if (durationCompatible(owner, base) && timelineTextSimilarity(owner, base) >= .68) return true
+  // Another edit of the same song: a music-video cut or a Mix-stretched length
+  // is 15-30 s away from the album recording, beyond the same-recording
+  // tolerance, so its translation used to be discarded (YOASOBI 群青: a 263 s
+  // LRCLIB timeline for the video, a 248 s NetEase entry with the translation).
+  // When the lengths can belong to one song and the words are the same, the
+  // owner's rows are still the right words; they are re-timed onto the base by text.
+  if (owner.matchedDurationMs && base.matchedDurationMs && lengthsCompatible(owner.matchedDurationMs, base.matchedDurationMs)) {
+    const words = (result: LyricsResult) => parseTimedRows(result.syncedLyrics).map(row => alignmentText(row.text)).join('')
+    if (normalizedTextSimilarity(words(owner), words(base)) >= SAME_WORDS_SIMILARITY) return true
+  }
   const ownerRows = timelineRows(owner.syncedLyrics)
   const baseRows = timelineRows(base.syncedLyrics)
   // Endpoints can differ because of trailing silence or release metadata.
@@ -1343,6 +1353,9 @@ export function stripTimedTrackMetadata(value: string | null | undefined, track:
   const titleVariants = [...new Set([track.name, cleanTrackTitle(track.name)].map(normalize).filter(item => item.length >= 2))]
   const artistVariants = [...new Set([track.artist, primaryArtist(track.artist)].map(normalize).filter(item => item.length >= 2))]
   const labelledMetadata = /^(?:title|track|song|artist|歌名|歌曲|曲名|歌手|艺人|藝人|演唱)\s*[:：]/i
+  // A header row that is only the song's title in brackets: `[00:00.00]「空中散歩」`.
+  // A sung title refrain is not written in brackets.
+  const bracketedTitle = /^[「『《〈【［\[(（]\s*(.+?)\s*[」』》〉】］\])）]$/u
   return value.replace(/\r/g, '').split('\n').filter(raw => {
     const timestamps = raw.match(LRC_TIMESTAMP) ?? []
     if (!timestamps.length) return true
@@ -1351,6 +1364,8 @@ export function stripTimedTrackMetadata(value: string | null | undefined, track:
     const timeMs = timestampMs(timestamps[0]!)
     if (!Number.isFinite(timeMs) || timeMs > 15_000) return true
     if (labelledMetadata.test(text)) return false
+    const bracketed = bracketedTitle.exec(text.normalize('NFKC'))
+    if (bracketed && titleVariants.includes(normalize(bracketed[1]))) return false
     const normalizedText = normalize(text)
     const containsTitle = titleVariants.some(title => normalizedText.includes(title))
     const containsArtist = artistVariants.some(artist => normalizedText.includes(artist))
@@ -1802,12 +1817,27 @@ function neteaseAttribution(song: NeteaseSong) {
     .filter(Boolean).join(' / ')
 }
 
+/** Words this close are the same lyrics even when the two entries differ in length. */
+const SAME_WORDS_SIMILARITY = .9
+
+/** Lengths that can belong to one song: within 12 s, or within the 0.82–1.18 ratio used for versions. */
+function lengthsCompatible(leftMs: number, rightMs: number) {
+  if (!leftMs || !rightMs) return true
+  const ratio = leftMs / rightMs
+  return Math.abs(leftMs - rightMs) <= 12_000 || (ratio >= .82 && ratio <= 1.18)
+}
+
 /**
  * NetEase often lists one recording several times (the official album plus
  * compilations such as "Rising Hits Mix"). Selection can prefer a denser
  * compilation upload that lacks the Chinese translation the official entry
- * carries. Borrow it only from a proven sibling — duration within 3 s and
- * near-identical original text — re-timed onto the selected timeline.
+ * carries. Borrow it from a sibling: an entry of the same length (within 3 s)
+ * with near-identical words, or one of another plausible length whose words
+ * are the same. The second case matters when the length Spotify reports is
+ * not the recording's (a Mix-stretched track reports 263 s for a 248 s song):
+ * selection then lands on an upload of that length, and the official entry,
+ * the one with the translation, is 15 s away. The translation is re-timed
+ * onto the selected timeline row by row, by text, so lengths do not matter to it.
  */
 export function withSiblingTranslation(chosen: LyricsResult | null, candidates: LyricsResult[]): LyricsResult | null {
   if (!chosen?.syncedLyrics || chosen.additionalTracks?.some(extra => extra.kind === 'translation')) return chosen
@@ -1816,9 +1846,10 @@ export function withSiblingTranslation(chosen: LyricsResult | null, candidates: 
   const siblings = candidates.flatMap(candidate => {
     const translation = candidate.additionalTracks?.find(extra => extra.kind === 'translation' && extra.language.startsWith('zh'))
     if (!translation || !candidate.syncedLyrics || candidate.syncedLyrics === chosen.syncedLyrics) return []
-    if (candidate.matchedDurationMs && chosen.matchedDurationMs && Math.abs(candidate.matchedDurationMs - chosen.matchedDurationMs) > 3000) return []
+    const sameLength = !candidate.matchedDurationMs || !chosen.matchedDurationMs || Math.abs(candidate.matchedDurationMs - chosen.matchedDurationMs) <= 3000
+    if (!sameLength && !lengthsCompatible(candidate.matchedDurationMs!, chosen.matchedDurationMs!)) return []
     const similarity = normalizedTextSimilarity(chosenText, joined(candidate.syncedLyrics))
-    return similarity >= .75 ? [{ candidate, translation, similarity }] : []
+    return similarity >= (sameLength ? .75 : SAME_WORDS_SIMILARITY) ? [{ candidate, translation, similarity }] : []
   }).sort((left, right) => right.similarity - left.similarity)
   for (const { candidate, translation } of siblings) {
     const aligned = alignSupplementalTimeline(translation, candidate, chosen)
@@ -1866,8 +1897,13 @@ export async function enrichTranslationByLyricText(result: LyricsResult | null, 
       for (const song of payload.result?.songs ?? []) songs.set(song.id, song)
     }))
     const reference = durationMs || result.matchedDurationMs || 0
+    // A candidate more than 15 s from the playback length is still considered
+    // when the lengths can belong to one song: the length Spotify reports for a
+    // Mix-stretched track is not the recording's (218 s for a 198 s song). Such
+    // a candidate must then carry the same words, not merely similar ones.
+    const near = (song: NeteaseSong) => !reference || !neteaseDuration(song) || Math.abs(neteaseDuration(song) - reference) <= 15_000
     const ranked = [...songs.values()]
-      .filter(song => !reference || !neteaseDuration(song) || Math.abs(neteaseDuration(song) - reference) <= 15_000)
+      .filter(song => near(song) || lengthsCompatible(neteaseDuration(song), reference))
       .sort((left, right) => Math.abs(neteaseDuration(left) - reference) - Math.abs(neteaseDuration(right) - reference))
       .slice(0, 4)
     const candidates = (await Promise.allSettled(ranked.map(async song => {
@@ -1877,7 +1913,7 @@ export async function enrichTranslationByLyricText(result: LyricsResult | null, 
       const original = lyrics.lrc?.lyric?.trim() || null
       if (!isTimedLyrics(original) || !isTimedLyrics(lyrics.tlyric?.lyric) || isInstrumentalPlaceholder(original)) return null
       const similarity = normalizedTextSimilarity(baseText, parseTimedRows(original).map(row => alignmentText(row.text)).join(''))
-      return similarity >= .75 ? { song, lyrics, original: original!, similarity } : null
+      return similarity >= (near(song) ? .75 : SAME_WORDS_SIMILARITY) ? { song, lyrics, original: original!, similarity } : null
     }))).flatMap(settled => settled.status === 'fulfilled' && settled.value ? [settled.value] : [])
       .sort((left, right) => right.similarity - left.similarity)
     const best = candidates[0]

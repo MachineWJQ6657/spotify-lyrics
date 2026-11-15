@@ -104,6 +104,14 @@ const checks = {
   quitWaitsForWorkerStop: native.includes('this.stopping') && /await Promise\.all\(\[\.\.\.this\.stopping\]\)/.test(native),
   controlsResumeAndWindowState: main.includes('function resumeControlsAfterSuppression(') && main.includes('function mainWindowReachable(') && main.includes('mainWindowMaximizePending'),
   recentUpdates: renderer.includes('function releasedEntries(') && renderer.includes('最近更新') && /\.nav-item \.nav-news/.test(rendererCss) && renderer.includes('function coverTile('),
+  // 0.4.68: optional "hide while paused" for a locked overlay (one fade, no hit regions while hidden). The class is not `.paused...`:
+  // overlayLockInteraction above forbids any `.overlay-shell.paused` rule (0.4.57's dimming capped the text opacity setting).
+  overlayHidesWhilePaused: renderer.includes('function hidesWhilePaused(') && renderer.includes('overlayHideWhenPaused') && /\.overlay-shell\.idle-hidden \.overlay-surface\s*\{[^}]*visibility:\s*hidden/.test(rendererCss),
+  // A translation from an entry of another length (music-video cut, Mix-stretched length) is used when the words are the same.
+  translationAcrossLengths: main.includes('function lengthsCompatible(') && main.includes('SAME_WORDS_SIMILARITY') && (main.match(/SAME_WORDS_SIMILARITY/g) ?? []).length >= 4,
+  translationRecheck: renderer.includes('function needsTranslationRecheck(') && renderer.includes('translationRechecked'),
+  // Third review (lookup lifecycle and library): a dropped answer is asked for again, a failed lookup says so, deleting the song on screen resets it, re-match and source choice never save an empty entry, search candidates stay with their song, credit headers are filtered.
+  lookupLifecycleFixes: renderer.includes('function mayRerunDiscardedLookup(') && renderer.includes('rerunLyricsLookup') && renderer.includes('lookupFailed') && renderer.includes('歌词源暂时不可用') && renderer.includes('savedDocument') && renderer.includes('CREDIT_ROLE') && main.includes('bracketedTitle'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

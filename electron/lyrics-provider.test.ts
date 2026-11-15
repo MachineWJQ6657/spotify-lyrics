@@ -1118,10 +1118,33 @@ describe('lyrics provider merging', () => {
     const borrowed = withSiblingTranslation(chosen, [chosen, sibling])
     expect(borrowed?.additionalTracks?.[0].source).toBe('网易云音乐 · 翻译（同曲其他条目）')
     expect(borrowed?.additionalTracks?.[0].syncedLyrics?.split('\n')[0]).toBe('[00:02.00]译文0')
-    // A different song (unrelated text) or a different-length edit lends nothing.
+    // A different song (unrelated text) lends nothing.
     const otherSong = { ...sibling, syncedLyrics: sibling.syncedLyrics!.replace(/テストの原文を歌っている/g, 'まったく別の曲の歌詞') }
     expect(withSiblingTranslation(chosen, [otherSong])?.additionalTracks).toBeUndefined()
-    expect(withSiblingTranslation(chosen, [{ ...sibling, matchedDurationMs: 140_000 }])?.additionalTracks).toBeUndefined()
+  })
+
+  it('borrows from an entry of another length only when the words are the same', () => {
+    const lines = Array.from({ length: 12 }, (_, index) => `テストの原文を歌っている番号${index}`)
+    const lrc = (texts: string[], offsetMs: number) => texts.map((text, index) => {
+      const ms = 2000 + index * 10_000 + offsetMs
+      return `[${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms % 60000 / 1000)).padStart(2, '0')}.${String(Math.floor(ms % 1000 / 10)).padStart(2, '0')}]${text}`
+    }).join('\n')
+    const translation = lines.map((_, index) => `[00:${String(2 + index * 10 + 1).padStart(2, '0')}.00]译文${index}`).filter((_, index) => index < 6).join('\n')
+    const extra = [{ language: 'zh-Hans', label: '中文', kind: 'translation' as const, source: '网易云音乐 · 翻译', syncedLyrics: translation }]
+    // The length Spotify reports for a Mix-stretched track (263 s) selected an upload of that length;
+    // the official entry with the translation is the recording's real length (248 s).
+    const chosen: LyricsResult = { syncedLyrics: lrc(lines, 0), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: 90, matchedDurationMs: 263_000 }
+    const official: LyricsResult = { syncedLyrics: lrc(lines, 1000), plainLyrics: null, source: '网易云音乐 · 搜索候选', confidence: 85, matchedDurationMs: 248_000, additionalTracks: extra }
+    const borrowed = withSiblingTranslation(chosen, [chosen, official])
+    expect(borrowed?.additionalTracks?.[0].source).toBe('网易云音乐 · 翻译（同曲其他条目）')
+    expect(borrowed?.additionalTracks?.[0].syncedLyrics?.split('\n')[0]).toBe('[00:02.00]译文0')
+    // Similar but not the same words (another arrangement): nothing at that distance, though it would do at the same length.
+    const rearranged = [...lines.slice(0, 10), '別の編曲で加わった新しい一行です', '最後だけ違う終わり方をする']
+    const arrangement: LyricsResult = { ...official, syncedLyrics: lrc(rearranged, 1000) }
+    expect(withSiblingTranslation(chosen, [arrangement])?.additionalTracks).toBeUndefined()
+    expect(withSiblingTranslation(chosen, [{ ...arrangement, matchedDurationMs: 262_000 }])?.additionalTracks?.[0].source).toBe('网易云音乐 · 翻译（同曲其他条目）')
+    // A length that cannot be the same song (a 45 s short version) lends nothing even with the same words.
+    expect(withSiblingTranslation(chosen, [{ ...official, matchedDurationMs: 45_000 }])?.additionalTracks).toBeUndefined()
   })
 
   it('repeats a merged translation when its phrases cannot be proven one-to-one', () => {

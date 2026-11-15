@@ -5,6 +5,12 @@
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.68', date: '2026-11-15', items: [
+    '更多歌曲能配上中文翻译：Spotify 播放的是 MV 版等长度不同的版本时，也会用同一首歌的翻译并按歌词逐句对齐',
+    '悬浮窗新增「暂停时隐藏」：锁定的悬浮窗在暂停 10 秒后淡出，继续播放时自动出现（设置 → 悬浮窗）',
+    '歌词开头的制作信息（歌唱：、作詞/作曲/編曲： 等）不再当作歌词显示',
+    '修复：歌词搜索结果在切歌后会被应用到下一首歌；从资料库移除正在播放的歌曲后又自己回来；重新匹配失败时留下空白条目'
+  ] },
   { version: '0.4.67', date: '2026-11-15', items: [
     '修复：在桌面歌词上按 Alt+F4 或 Ctrl+W 会把歌词窗口关掉，要重启才能恢复',
     '拖动歌词后鼠标仍停在歌词上时，控制条会自己回来',

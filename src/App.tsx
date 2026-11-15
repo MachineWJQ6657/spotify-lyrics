@@ -102,7 +102,7 @@ export function App() {
   // The badge names the provider on screen ("网易云音乐"); imported or edited lyrics keep their own label.
   const shownSource = (activeLyrics?.tracks.find(track => track.kind === 'original') ?? activeLyrics?.tracks[0])?.source
   const shownProvider = LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(shownSource))?.label
-  const sourceText = shownProvider ?? sourceLabel(shownSource ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : '正在搜索歌词…'))
+  const sourceText = shownProvider ?? sourceLabel(shownSource ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.lookupFailed ? '歌词源暂时不可用' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : '正在搜索歌词…'))
 
   const importDroppedLyrics = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()

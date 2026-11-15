@@ -148,3 +148,60 @@ it('preserves translations and calibration from partial fetch through delayed ro
   expect(useAppStore.getState().lyrics?.tracks).toContain(baseline.tracks[0])
   expect(useAppStore.getState().library[track.id]).toBe(baseline)
 })
+
+it('asks again when the document changed while its lookup was running', async () => {
+  vi.useFakeTimers()
+  const track = { id: 'flow-concurrent', name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }
+  // A source was just chosen: the pending document has no provider revision.
+  const pending: LyricsDocument = { trackId: track.id, sourcePreference: 'netease', sourceChosenBy: 'user', tracks: [
+    { id: `${track.id}-original`, kind: 'original', language: 'en', label: 'English', source: 'LRCLIB · 精确匹配', lines: [{ startMs: 1000, text: 'old source line' }] }
+  ] }
+  let answer!: (value: unknown) => void
+  const fetch = vi.fn().mockImplementation(() => new Promise(resolve => { answer = resolve }))
+  vi.stubGlobal('window', { setTimeout, clearTimeout, syllable: { lyrics: { fetch } } })
+  useAppStore.setState({ demoMode: false, connected: false, lyrics: pending, library: { [track.id]: pending },
+    playback: { track, positionMs: 0, observedAtMs: 0, isPlaying: false } })
+  usePlaybackConnection()
+  cleanup = effects[2]()
+  await vi.advanceTimersByTimeAsync(320)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  // The user nudges the offset before the answer arrives: the document is a new object.
+  useAppStore.getState().setLyricsOffset(500)
+  const nudged = useAppStore.getState().lyrics
+  const token = useAppStore.getState().lyricsRetryToken
+  answer({ syncedLyrics: '[00:01.00]new source line', source: '网易云音乐 · 搜索候选' })
+  await vi.advanceTimersByTimeAsync(0)
+  // The stale answer is not applied over the nudge, and the lookup is asked for again
+  // instead of leaving the chosen source unapplied for the rest of the song.
+  expect(useAppStore.getState().lyrics).toBe(nudged)
+  expect(useAppStore.getState().lyricsRetryToken).toBe(token + 1)
+})
+
+it('says the providers are unavailable once the automatic retry has failed too', async () => {
+  vi.useFakeTimers()
+  const track = { id: 'flow-exhausted', name: 'test', artist: '', album: '', coverUrl: '', durationMs: 10000 }
+  const fetch = vi.fn().mockRejectedValue(new Error('IPC unavailable'))
+  vi.stubGlobal('window', { setTimeout, clearTimeout, syllable: { lyrics: { fetch } } })
+  useAppStore.setState({ demoMode: false, connected: false, lyrics: null, library: {},
+    playback: { track, positionMs: 0, observedAtMs: 0, isPlaying: false } })
+  usePlaybackConnection()
+  cleanup = effects[2]()
+  await vi.advanceTimersByTimeAsync(320)
+  // First failure: an empty view, with the one retry pending.
+  expect(useAppStore.getState().lyrics?.tracks).toEqual([])
+  expect(useAppStore.getState().lyrics?.lookupFailed).toBeUndefined()
+  const token = useAppStore.getState().lyricsRetryToken
+  await vi.advanceTimersByTimeAsync(12_000)
+  expect(useAppStore.getState().lyricsRetryToken).toBe(token + 1)
+  // React re-runs the effect for the new token.
+  cleanup?.()
+  const before = effects.length
+  usePlaybackConnection()
+  cleanup = effects[before + 2]()
+  await vi.advanceTimersByTimeAsync(320)
+  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().lyrics?.lookupFailed).toBe(true)
+  // Nothing more is pending, and nothing was saved.
+  expect(vi.getTimerCount()).toBe(0)
+  expect(useAppStore.getState().library[track.id]).toBeUndefined()
+})

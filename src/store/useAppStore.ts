@@ -52,6 +52,8 @@ interface AppState {
   clearSourceTrials(trackId: string): void
   /** Re-runs provider lookup without deleting the last usable document. */
   retryTransientLyrics(): void
+  /** Runs the lookup again for the same song after its answer was dropped because the document changed meanwhile. */
+  rerunLyricsLookup(): void
   setEditorOpen(value: boolean): void
   patchSettings(value: Partial<AppSettings>): void
   startDemo(): void
@@ -173,17 +175,27 @@ const compactDocument = (document: LyricsDocument): LyricsDocument => document.t
   ? { ...document, track: { ...document.track, coverUrl: '' } }
   : document
 
+/** The copy that goes into the saved library: compact, and without view-only state. */
+const savedDocument = (document: LyricsDocument): LyricsDocument => {
+  const compact = compactDocument(document)
+  if (!compact.lookupFailed) return compact
+  const saved = { ...compact }
+  delete saved.lookupFailed
+  return saved
+}
+
 // Newest first, and inside the storage budget (see library-budget.ts): the
 // oldest automatically fetched songs are dropped and looked up again on their
 // next play; imported, edited and hand-timed lyrics stay.
-const compactLibrary = (library: Record<string, LyricsDocument>) => Object.fromEntries(pruneLibrary(
+const compactLibrary = (library: Record<string, LyricsDocument>, protect?: string) => Object.fromEntries(pruneLibrary(
   Object.entries(library)
     .sort(([, left], [, right]) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
-    .map(([id, document]): [string, LyricsDocument] => [id, compactDocument(document)])
+    .map(([id, document]): [string, LyricsDocument] => [id, savedDocument(document)]),
+  LIBRARY_BUDGET_CHARS, protect
 ))
 
 const putLibraryDocument = (library: Record<string, LyricsDocument>, document: LyricsDocument) => Object.fromEntries(pruneLibrary(
-  Object.entries({ ...library, [document.trackId]: compactDocument(document) })
+  Object.entries({ ...library, [document.trackId]: savedDocument(document) })
     .sort(([, left], [, right]) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)),
   LIBRARY_BUDGET_CHARS, document.trackId
 ))
@@ -249,8 +261,11 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   }),
   removeLyricTrack: trackId => set(state => {
     if (!state.lyrics) return state
+    // The id leaves the edit list too: a provider track that later reuses it
+    // (ids are derived from the song and language) must not be taken for the user's.
     const document = { ...state.lyrics, textReference: state.lyrics.tracks.some(track => track.id === trackId && track.kind === 'original') ? undefined : state.lyrics.textReference,
-      tracks: state.lyrics.tracks.filter(track => track.id !== trackId), updatedAt: Date.now() }
+      tracks: state.lyrics.tracks.filter(track => track.id !== trackId),
+      userEditedTrackIds: state.lyrics.userEditedTrackIds?.filter(id => id !== trackId), updatedAt: Date.now() }
     return { lyrics: document, sessionCalibration: currentSessionCalibration(state.sessionCalibration, state.playback, document), library: document.trackId === demoDocument.trackId ? state.library : putLibraryDocument(state.library, document) }
   }),
   updateLyricLine: (trackId, lineIndex, patch) => set(state => {
@@ -297,42 +312,75 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   deleteLibraryDocument: trackId => set(state => {
     const library = { ...state.library }
     delete library[trackId]
+    // The song on screen is forgotten as well and looked up afresh. Leaving its
+    // view in place let the next offset or listening result write the removed
+    // copy back into the library, while the overlay had already dropped it.
+    if (state.lyrics?.trackId === trackId && state.playback?.track?.id === trackId && !state.demoMode) {
+      return { library, lyrics: null, lyricsRetryToken: state.lyricsRetryToken + 1, sessionCalibration: null }
+    }
     return { library }
   }),
-  restoreLibraryDocument: document => set(state => state.library[document.trackId] ? {} : { library: putLibraryDocument(state.library, document) }),
+  restoreLibraryDocument: document => set(state => {
+    // Undo puts back exactly what was removed. For the song on screen that
+    // also replaces the copy looked up since the removal.
+    const onScreen = state.playback?.track?.id === document.trackId && !state.demoMode
+    if (!onScreen) return state.library[document.trackId] ? {} : { library: putLibraryDocument(state.library, document) }
+    return { library: putLibraryDocument(state.library, document), lyrics: document, sessionCalibration: null }
+  }),
   importLibrary: documents => {
     const state = get()
-    // The song on screen keeps its live copy: its view writes back to the library.
-    const current = state.lyrics?.trackId
-    const usable = documents.filter(document => document.trackId !== current && document.trackId !== demoDocument.trackId)
+    const playing = state.demoMode ? undefined : state.playback?.track?.id
+    // The song on screen keeps its live copy when it has lyrics: its view
+    // writes back to the library. A song that is still being looked up, or was
+    // not found, takes the backup's copy and shows it.
+    const live = playing && state.lyrics?.trackId === playing && (state.lyrics.tracks.length > 0 || state.lyrics.untimedOriginal) ? playing : undefined
+    const usable = documents.filter(document => document.trackId !== live && document.trackId !== demoDocument.trackId)
     const merged = mergeLibraryBackup(state.library, usable)
-    if (merged.added || merged.updated) set({ library: compactLibrary(merged.library) })
+    if (merged.added || merged.updated) {
+      const library = compactLibrary(merged.library, playing)
+      const shown = playing && !live ? library[playing] : undefined
+      set(shown && shown !== state.library[playing!] ? { library, lyrics: shown, sessionCalibration: null } : { library })
+    }
     return { added: merged.added, updated: merged.updated, kept: merged.kept + (documents.length - usable.length) }
   },
   retryCurrentLyrics: () => set(state => {
     const trackId = state.playback?.track?.id
     if (!trackId) return { lyricsRetryToken: state.lyricsRetryToken + 1, lyrics: null }
-    const baseline = state.lyrics?.trackId === trackId ? state.lyrics : state.library[trackId]
+    const stored = state.library[trackId]
+    const baseline = state.lyrics?.trackId === trackId ? state.lyrics : stored
     // Refresh provider data without destroying edits, imports or calibration.
     const pending = baseline ? { ...baseline, providerRevision: undefined } : null
-    const library = pending ? { ...state.library, [trackId]: pending } : state.library
+    // Only the saved copy is marked for refresh. The view can be a "not found"
+    // placeholder or a partial result of a failed lookup: writing it over the
+    // saved copy stored an empty entry, or replaced the last good lyrics.
+    const library = stored ? { ...state.library, [trackId]: stored === baseline ? pending! : { ...stored, providerRevision: undefined } } : state.library
     return { library, lyrics: pending, lyricsRetryToken: state.lyricsRetryToken + 1 }
   }),
   setLyricsSource: (source, chosenBy = 'user') => set(state => {
     const track = state.playback?.track
     if (!track || state.demoMode) return state
-    const baseline = state.lyrics?.trackId === track.id ? state.lyrics : state.library[track.id]
-    const pending: LyricsDocument = { ...(baseline ?? { trackId: track.id, track, tracks: [] }), providerRevision: undefined, updatedAt: Date.now() }
-    if (source) { pending.sourcePreference = source; pending.sourceChosenBy = chosenBy }
-    else { delete pending.sourcePreference; delete pending.sourceChosenBy }
-    // A choice in the menu starts over; listening keeps its verdicts so it never retries a source.
-    if (chosenBy === 'user') delete pending.sourceTrials
-    delete pending.sourceUnavailable
-    // A manual offset was tuned against the previous file's timing. A listened
-    // offset carries its own timing key and simply stops applying.
-    delete pending.offsetMs
+    const stored = state.library[track.id]
+    const baseline = state.lyrics?.trackId === track.id ? state.lyrics : stored
+    const now = Date.now()
+    const choose = (document: LyricsDocument): LyricsDocument => {
+      const next: LyricsDocument = { ...document, providerRevision: undefined, updatedAt: now }
+      if (source) { next.sourcePreference = source; next.sourceChosenBy = chosenBy }
+      else { delete next.sourcePreference; delete next.sourceChosenBy }
+      // A choice in the menu starts over; listening keeps its verdicts so it never retries a source.
+      if (chosenBy === 'user') delete next.sourceTrials
+      delete next.sourceUnavailable
+      // A manual offset was tuned against the previous file's timing. A listened
+      // offset carries its own timing key and simply stops applying.
+      delete next.offsetMs
+      return next
+    }
+    const pending = choose(baseline ?? { trackId: track.id, track, tracks: [] })
+    // The choice is saved on the song's saved copy only. The view can be a
+    // "not found" placeholder or a partial result: the lookup reads the choice
+    // from the view, and saving the view stored an empty library entry.
+    const library = stored ? { ...state.library, [track.id]: stored === baseline ? savedDocument(pending) : choose(stored) } : state.library
     const lyricsRetryToken = state.lyricsRetryToken + 1
-    return { library: { ...state.library, [track.id]: pending }, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sourceSwitchTrackId: track.id, sessionCalibration: null }
+    return { library, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sourceSwitchTrackId: track.id, sessionCalibration: null }
   }),
   recordSourceTrial: (trackId, source, verdict) => set(state => {
     const apply = (document: LyricsDocument): LyricsDocument => ({ ...document, sourceTrials: { ...document.sourceTrials, [source]: verdict } })
@@ -347,6 +395,11 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     return { lyrics, library: stored?.sourceTrials ? { ...state.library, [trackId]: apply(stored) } : state.library }
   }),
   retryTransientLyrics: () => set(state => ({ lyricsRetryToken: state.lyricsRetryToken + 1 })),
+  rerunLyricsLookup: () => set(state => {
+    const lyricsRetryToken = state.lyricsRetryToken + 1
+    // A lookup that was a source switch stays one: provider results are reused and listening keeps waiting for it.
+    return state.sourceSwitchToken === state.lyricsRetryToken ? { lyricsRetryToken, sourceSwitchToken: lyricsRetryToken } : { lyricsRetryToken }
+  }),
   setEditorOpen: editorOpen => set(state => state.editorOpen === editorOpen ? state : { editorOpen }),
   patchSettings: value => set(state => Object.entries(value).every(([key, next]) => state.settings[key as keyof AppSettings] === next)
     ? state

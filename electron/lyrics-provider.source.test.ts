@@ -69,4 +69,32 @@ describe('choosing a lyrics source', () => {
     // Nothing to compare with: nothing agrees.
     expect(describeAvailableSources({ lrclib }, null, 130_000)).toEqual([{ id: 'lrclib', lines: 12, agrees: false }])
   })
+
+  it('takes the translation from an entry of another length when the words are the same', () => {
+    // A music-video cut: 15 s longer, every line 15 s later, same words. The
+    // translated entry is the album recording.
+    const video = result('LRCLIB · 精确匹配', 15_000, { matchedDurationMs: 145_000 })
+    const album = result('网易云音乐 · 搜索候选', 0, { matchedDurationMs: 130_000, additionalTracks: [
+      { language: 'zh-Hans', label: '中文', kind: 'translation', syncedLyrics: lrc(0, words.map((_, index) => `译文第${index + 1}句`)), source: '网易云音乐 · 翻译' }] })
+    const merged = mergeProviderSet([null, video, album, null], 145_000, 'ja')
+    expect(merged?.source).toBe(video.source)
+    const translation = merged?.additionalTracks?.find(track => track.language === 'zh-Hans')
+    const rows = translation?.syncedLyrics?.split('\n') ?? []
+    expect(rows).toHaveLength(words.length)
+    // Re-timed onto the video's timeline, line by line.
+    expect(rows[0]).toBe(`${video.syncedLyrics!.split('\n')[0].slice(0, 10)}译文第1句`)
+    expect(rows[11]).toBe(`${video.syncedLyrics!.split('\n')[11].slice(0, 10)}译文第12句`)
+  })
+
+  it('does not take it from another song or from an impossible length', () => {
+    const video = result('LRCLIB · 精确匹配', 15_000, { matchedDurationMs: 145_000 })
+    const translationOf = (texts: string[]) => [{ language: 'zh-Hans', label: '中文', kind: 'translation' as const, syncedLyrics: lrc(0, texts.map((_, index) => `译文第${index + 1}句`)), source: '网易云音乐 · 翻译' }]
+    // Half of the lines are other words: similar, not the same.
+    const otherWords = words.map((text, index) => index % 2 ? `別の歌の別の言葉が並ぶ行${index}` : text)
+    const arrangement = result('网易云音乐 · 搜索候选', 0, { matchedDurationMs: 130_000, syncedLyrics: lrc(0, otherWords), additionalTracks: translationOf(otherWords) })
+    expect(mergeProviderSet([null, video, arrangement, null], 145_000, 'ja')?.additionalTracks?.some(track => track.language === 'zh-Hans')).toBeFalsy()
+    // The same words in a 45 s clip: not the same song length.
+    const clip = result('网易云音乐 · 搜索候选', 0, { matchedDurationMs: 45_000, additionalTracks: translationOf(words) })
+    expect(mergeProviderSet([null, video, clip, null], 145_000, 'ja')?.additionalTracks?.some(track => track.language === 'zh-Hans')).toBeFalsy()
+  })
 })

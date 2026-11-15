@@ -14,7 +14,8 @@ describe('restoring a library backup', () => {
     const before = useAppStore.getState()
     try {
       const playing = document('playing', 10)
-      useAppStore.setState({ lyrics: playing, library: { playing, same: document('same', 10), stale: document('stale', 10) } })
+      useAppStore.setState({ lyrics: playing, demoMode: false, library: { playing, same: document('same', 10), stale: document('stale', 10) },
+        playback: { track: { id: 'playing', name: 'n', artist: 'a', album: '', coverUrl: '', durationMs: 1 }, positionMs: 0, observedAtMs: 0, isPlaying: true } as never })
       const backup = serializeLibraryBackup({
         fresh: document('fresh', 3, { offsetMs: 250 }),
         stale: document('stale', 99, { listenedOffset: { timingKey: 'k', state: 'decided', offsetMs: 300, lines: 6, measuredAt: 1 } }),

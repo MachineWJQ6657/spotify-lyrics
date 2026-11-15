@@ -7,7 +7,7 @@ import { activeLineIndex, alignSecondaryTrack, visibleTracks } from './lib/lyric
 import { useWindowSync } from './hooks/useWindowSync'
 import { displayLyricsOffset } from './lib/listened-offset'
 import { displayedLyricPosition } from './lib/session-calibration'
-import { FIT_START, fitSearchStep, overlayContent, upcomingLine, type FitSearch } from './lib/overlay-content'
+import { FIT_START, fitSearchStep, hidesWhilePaused, overlayContent, PAUSED_HIDE_DELAY_MS, upcomingLine, type FitSearch } from './lib/overlay-content'
 import { scriptPresentation } from './lib/script'
 import { msUntilNextLyricChange, wallDelayMs } from './lib/lyric-clock'
 import { activeAcousticAnchor } from './lib/clock'
@@ -37,6 +37,17 @@ export function Overlay() {
   const upcoming = settings.overlayNextLine && content.kind !== 'idle' && !activeLyrics?.untimedOriginal ? upcomingLine(base?.lines, index) : undefined
   const titlePresentation = content.kind === 'title' ? scriptPresentation(content.title, `${playback?.track?.artist ?? ''} ${playback?.track?.album ?? ''}`, base?.language) : null
   const hitRegionText = JSON.stringify([Boolean(activeLyrics?.untimedOriginal), content.kind, content.kind === 'title' ? [content.title, content.subtitle] : line?.text, ...secondaries.map(item => [item.track.id, item.line?.text]), upcoming?.text])
+  // Optional: a locked overlay leaves the desktop after playback has been
+  // paused for a while and returns the moment it plays again.
+  const playing = Boolean(playback?.isPlaying)
+  const pauseHiding = settings.overlayHideWhenPaused === true && settings.positionLocked
+  const [pausedLong, setPausedLong] = useState(false)
+  useEffect(() => {
+    if (!pauseHiding || playing) { setPausedLong(false); return }
+    const timer = window.setTimeout(() => setPausedLong(true), PAUSED_HIDE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [pauseHiding, playing])
+  const hiddenWhilePaused = hidesWhilePaused({ enabled: settings.overlayHideWhenPaused === true, locked: settings.positionLocked, playing, pausedForMs: pausedLong ? PAUSED_HIDE_DELAY_MS : 0 })
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; active: boolean } | null>(null)
   const layoutGeneration = useRef(0)
   const [layoutRevision, setLayoutRevision] = useState(0)
@@ -155,8 +166,9 @@ export function Overlay() {
         const pixel = (value: number) => Math.round(value * 2) / 2
         return { x: pixel(rect.x), y: pixel(rect.y), width: pixel(rect.width), height: pixel(rect.height) }
       }).filter(rect => rect.width > 0 && rect.height > 0)
-      const textRegions = readRegions(['.overlay-primary', '.overlay-secondary'])
-      const regions = settings.backgroundEnabled ? readRegions(['.overlay-surface']) : textRegions
+      // Hidden while paused: nothing to hover or click, the whole window passes input through.
+      const textRegions = hiddenWhilePaused ? [] : readRegions(['.overlay-primary', '.overlay-secondary'])
+      const regions = hiddenWhilePaused ? [] : settings.backgroundEnabled ? readRegions(['.overlay-surface']) : textRegions
       const controlsAnchor = textRegions.length ? (() => {
         const left = Math.min(...textRegions.map(rect => rect.x))
         const right = Math.max(...textRegions.map(rect => rect.x + rect.width))
@@ -214,7 +226,7 @@ export function Overlay() {
       if (frame) window.cancelAnimationFrame(frame)
       observer.disconnect()
     }
-  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.fontWeight, settings.lineHeight, settings.alignment, line?.startMs, hitRegionText, layoutRevision, fit])
+  }, [settings.backgroundEnabled, settings.positionLocked, settings.fontSize, settings.fontWeight, settings.lineHeight, settings.alignment, line?.startMs, hitRegionText, layoutRevision, fit, hiddenWhilePaused])
   const overlayStyle = {
     '--overlay-blur': `${settings.blur}px`, '--overlay-size': `${Math.max(34, settings.fontSize)}px`,
     '--overlay-bg-opacity': settings.backgroundOpacity / 100, '--overlay-text-opacity': settings.textOpacity / 100,
@@ -223,7 +235,7 @@ export function Overlay() {
     '--overlay-text-color': settings.textColor === 'green' ? '#1ed760' : settings.textColor === 'warm' ? '#fff4e6' : '#ffffff'
   } as React.CSSProperties
 
-  return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
+  return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''} ${hiddenWhilePaused ? 'idle-hidden' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>
     <div className="overlay-surface">
       <div ref={lyricsRef} className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
         onWheel={adjustFontSize} onDoubleClick={() => { if (!settings.positionLocked) void window.syllable.window.show() }}

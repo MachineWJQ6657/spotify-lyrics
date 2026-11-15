@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlaybackSnapshot } from '../types'
-import { FIT_START, fitSearchStep, MIN_OVERLAY_FIT, overlayContent, upcomingLine } from './overlay-content'
+import { FIT_START, fitSearchStep, hidesWhilePaused, MIN_OVERLAY_FIT, overlayContent, PAUSED_HIDE_DELAY_MS, upcomingLine } from './overlay-content'
 
 const playback = (name = '春泥棒', artist = 'ヨルシカ') => ({
   track: { id: 't', name, artist, album: '', coverUrl: '', durationMs: 240_000 }, positionMs: 0, observedAtMs: 0, isPlaying: true
@@ -63,5 +63,20 @@ describe('next line preview', () => {
     expect(upcomingLine(lines, 3)).toBeUndefined()
     expect(upcomingLine(undefined, 0)).toBeUndefined()
     expect(upcomingLine([], -1)).toBeUndefined()
+  })
+})
+
+describe('hide while paused', () => {
+  const paused = { enabled: true, locked: true, playing: false, pausedForMs: PAUSED_HIDE_DELAY_MS }
+  it('hides a locked overlay once playback has been paused long enough', () => {
+    expect(hidesWhilePaused(paused)).toBe(true)
+  })
+  it('never hides during playback, a short pause, or with the option off', () => {
+    expect(hidesWhilePaused({ ...paused, playing: true })).toBe(false)
+    expect(hidesWhilePaused({ ...paused, pausedForMs: PAUSED_HIDE_DELAY_MS - 1 })).toBe(false)
+    expect(hidesWhilePaused({ ...paused, enabled: false })).toBe(false)
+  })
+  it('keeps an unlocked overlay visible: it is being moved or resized', () => {
+    expect(hidesWhilePaused({ ...paused, locked: false })).toBe(false)
   })
 })

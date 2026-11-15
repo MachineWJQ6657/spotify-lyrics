@@ -26,6 +26,38 @@ const containsJapanese = (value: string) => /[\u3040-\u30ff\u3400-\u9fff]/.test(
 // Revision 43 drops a timeline that two agreeing providers prove is shifted,
 // instead of only reopening the quality race (where it could still win).
 const LYRICS_PROVIDER_REVISION = 43
+/**
+ * Raised when translation matching learns to find more (0.4.68: entries of
+ * another length with the same words). A saved song without a Chinese
+ * translation is looked up once more at each new value; songs that have one,
+ * Chinese songs and the user's own lyrics stay on the cached path, so this
+ * does not re-fetch the whole library the way a provider revision would.
+ */
+export const TRANSLATION_RECHECK_REVISION = 1
+export function needsTranslationRecheck(document: LyricsDocument): boolean {
+  if (document.untimedOriginal || document.instrumental) return false
+  const original = document.tracks.find(track => track.kind === 'original')
+  if (!original || original.language.startsWith('zh') || isUserOwnedTrack(original, document)) return false
+  if (document.tracks.some(track => track.kind === 'translation' && track.language.startsWith('zh'))) return false
+  return document.translationRecheck !== TRANSLATION_RECHECK_REVISION
+}
+// A lookup whose answer was dropped because the document changed meanwhile is
+// run again, at most three times per song in half a minute.
+const discardedReruns = new Map<string, { count: number; since: number }>()
+export function mayRerunDiscardedLookup(trackId: string, now = Date.now()) {
+  const entry = discardedReruns.get(trackId)
+  if (!entry || now - entry.since > 30_000) {
+    if (discardedReruns.size >= 50) discardedReruns.delete(discardedReruns.keys().next().value!)
+    discardedReruns.set(trackId, { count: 1, since: now })
+    return true
+  }
+  if (entry.count >= 3) return false
+  entry.count += 1
+  return true
+}
+// Songs already looked up again in this run: a lookup that ends without a
+// committed document (a definitive miss keeps the saved copy) is not repeated on every play.
+const translationRechecked = new Set<string>()
 // Separate from provider timing/content: repair old generated readings without
 // refetching correct originals/translations or overwriting provider romaji.
 // Revision 2: reading-based long vowels (taiyou), number+counter compounds
@@ -183,7 +215,7 @@ export async function completeRomanization(original: ReturnType<typeof makeTrack
 export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = true) {
   const {
     connected, demoMode, setConnected, setLocalConnected, setDemoMode, setPlayback,
-    setLyrics, setTransientLyrics, retryTransientLyrics
+    setLyrics, setTransientLyrics, retryTransientLyrics, rerunLyricsLookup
   } = useAppStore()
 
   useEffect(() => {
@@ -311,7 +343,12 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
       lastRequestRetryTokenByTrack.set(latestTrack.id, lyricsRetryToken)
       if (lastRequestRetryTokenByTrack.size > 80) lastRequestRetryTokenByTrack.delete(lastRequestRetryTokenByTrack.keys().next().value!)
       const cached = latest.library[latestTrack.id]
-      if (cached?.tracks.length && cached.providerRevision === LYRICS_PROVIDER_REVISION && cached.providerContext === providerContext) {
+      const recheckTranslation = Boolean(cached && needsTranslationRecheck(cached) && !translationRechecked.has(latestTrack.id))
+      if (recheckTranslation) {
+        translationRechecked.add(latestTrack.id)
+        if (translationRechecked.size > 500) translationRechecked.delete(translationRechecked.values().next().value!)
+      }
+      if (cached?.tracks.length && cached.providerRevision === LYRICS_PROVIDER_REVISION && cached.providerContext === providerContext && !recheckTranslation) {
         // Render the known-good original immediately. Romanizer startup can
         // take seconds and must never blank an otherwise valid cached lyric.
         const cachedView = { ...cached }
@@ -347,12 +384,13 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         }
         inheritedTransientRetry = undefined
       }
+      /** Schedules the one automatic retry; false when it has already been used and nothing is pending. */
       const scheduleTransientRetry = () => {
         if (transientRetryTokens.get(retryKey) === requestIdentity.retryToken) {
           // This was the one bounded retry. Release the session guard so a
           // later revisit can recover, but do not start an immediate loop.
           releaseInheritedRetry()
-          return
+          return false
         }
         if (transientRetryTokens.size >= 80) transientRetryTokens.delete(transientRetryTokens.keys().next().value!)
         const expectedRetryToken = requestIdentity.retryToken + 1
@@ -370,11 +408,17 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           // generation while the retry runs.
           retryTransientLyrics()
         }, 12_000)
+        return true
       }
       const commit = (document: LyricsDocument, transient: boolean) => {
         const current = useAppStore.getState()
         if (!requestIsCurrent() || current.lyrics !== requestBaseline) {
           releaseInheritedRetry()
+          // The song is the same but its document changed under the lookup (an
+          // offset nudge, a dropped LRC, "立即重新校准"): this answer was built
+          // against the old one. Dropping it left a chosen source unapplied, and
+          // listening waiting for it, for the rest of the song; ask again.
+          if (requestIsCurrent() && current.lyrics?.trackId === latestTrack.id && mayRerunDiscardedLookup(latestTrack.id)) rerunLyricsLookup()
           return null
         }
         const calibrated = preserveLyricsCalibration(document, requestBaseline)
@@ -392,7 +436,11 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
         if (calibrated.untimedOriginal && calibrated.textReference?.status === 'conflict') setLyrics(calibrated)
         else setTransientLyrics(visibleDocument)
         transientGeneration = useAppStore.getState().lyrics
-        scheduleTransientRetry()
+        // The retry was already used: say so instead of "searching" with nothing pending.
+        if (!scheduleTransientRetry() && transientGeneration && !transientGeneration.tracks.length && !transientGeneration.untimedOriginal) {
+          setTransientLyrics({ ...transientGeneration, lookupFailed: true })
+          transientGeneration = useAppStore.getState().lyrics
+        }
         return transientGeneration
       }
       // The song's saved source choice, and whether this lookup is that choice
@@ -400,7 +448,8 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
       const sourceBaseline = requestBaseline?.trackId === latestTrack.id ? requestBaseline : cached
       const preferredSource = sourceBaseline?.sourcePreference
       const reuseProviderResults = latest.sourceSwitchToken === lyricsRetryToken
-      const sourceFields = (result: { availableSources?: LyricsDocument['availableSources']; preferredSourceUnavailable?: boolean } | null) => ({
+      const sourceFields = (result: { availableSources?: LyricsDocument['availableSources']; preferredSourceUnavailable?: boolean; transient?: boolean } | null) => ({
+        ...(result && !result.transient ? { translationRecheck: TRANSLATION_RECHECK_REVISION } : {}),
         ...(preferredSource ? { sourcePreference: preferredSource } : {}),
         ...(preferredSource && sourceBaseline?.sourceChosenBy ? { sourceChosenBy: sourceBaseline.sourceChosenBy } : {}),
         ...(sourceBaseline?.sourceTrials ? { sourceTrials: sourceBaseline.sourceTrials } : {}),
@@ -467,7 +516,18 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           if (!tracks.some(item => item.kind === 'romanization')) tracks = [...tracks, makeRomanizedTrack(original)]
         }
         const current = useAppStore.getState()
-        if (!requestIsCurrent() || current.lyrics !== committedGeneration) return
+        if (!requestIsCurrent()) return
+        if (current.lyrics !== committedGeneration) {
+          // Something other than the tracks changed while the readings were
+          // generated (an offset, a listening result, a source verdict): keep
+          // that and add the romaji. Edited tracks are left alone.
+          const latest = current.lyrics
+          if (!latest || latest.trackId !== latestTrack.id || result.transient
+            || latest.tracks.length !== committedGeneration.tracks.length
+            || latest.tracks.some((track, index) => track !== committedGeneration.tracks[index])) return
+          setLyrics({ ...latest, tracks, updatedAt: Date.now() })
+          return
+        }
         const enriched = {
           ...providerDocument,
           ...(committedGeneration.offsetMs != null ? { offsetMs: committedGeneration.offsetMs } : {}),

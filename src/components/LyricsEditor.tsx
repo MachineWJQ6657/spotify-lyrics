@@ -57,6 +57,16 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
     return () => window.removeEventListener('keydown', close)
   }, [editorOpen])
 
+  // Search results belong to the song they were searched for. When another
+  // song starts they are dropped, so a candidate cannot be applied to it.
+  const editedSong = playback?.track?.id ?? lyrics?.trackId ?? ''
+  useEffect(() => {
+    if (!editorOpen) return
+    setResults([]); setMessage('')
+    setQuery({ track: playback?.track?.name ?? '', artist: playback?.track?.artist ?? '' })
+    setActiveId(useAppStore.getState().lyrics?.tracks[0]?.id ?? '')
+  }, [editedSong])
+
   const active = useMemo(() => lyrics?.tracks.find(track => track.id === activeId) ?? lyrics?.tracks[0], [lyrics, activeId])
   const playingIndex = active ? activeLineIndex(active.lines, positionMs) : -1
   const listRef = useRef<HTMLDivElement>(null)
@@ -77,10 +87,14 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
   const search = async () => {
     if (!query.track.trim()) return
     setSearching(true); setMessage('')
+    const song = editedSong
+    const sameSong = () => (useAppStore.getState().playback?.track?.id ?? useAppStore.getState().lyrics?.trackId ?? '') === song
     try {
       const found = await window.syllable.lyrics.search({ ...query, album: playback?.track?.album, durationMs: playback?.track?.durationMs })
+      // The song changed while searching: these candidates are for the previous one.
+      if (!sameSong()) return
       setResults(found); if (!found.length) setMessage('没有找到候选歌词')
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { if (sameSong()) setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setSearching(false) }
   }
   const applyCandidate = async (candidate: LyricsCandidate) => {
@@ -89,9 +103,13 @@ export function LyricsEditor({ positionMs }: { positionMs: number }) {
     const label = language === 'ja' ? '日本語' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
     const original = makeTrack(`remote-${candidate.id}`, language, label, 'original', candidate.syncedLyrics, `${candidate.provider} · 手动选择`)
     addLyricTrack(original); setActiveId(original.id); setResults([]); setMessage('已应用候选歌词')
+    const song = useAppStore.getState().lyrics?.trackId
     if (language === 'ja') {
       try {
         const converted = await window.syllable.lyrics.romanize(original.lines.map(line => line.text))
+        // The readings belong to the song they were made for, and only while its candidate is still there.
+        const latest = useAppStore.getState().lyrics
+        if (!latest || latest.trackId !== song || !latest.tracks.some(track => track.id === original.id)) return
         const base = makeRomanizedTrack(original)
         addLyricTrack({ ...base, source: 'Kuroshiro · Kuromoji', lines: base.lines.map((line, index) => ({ ...line, text: converted[index] ?? line.text })) })
       } catch { /* original lyrics remain usable */ }

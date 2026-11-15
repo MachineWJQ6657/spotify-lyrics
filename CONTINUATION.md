@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.67 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.66-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.68 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.67-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (105 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (109 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,30 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.68 deployed: translations across versions of another length, hide while paused, lookup-lifecycle fixes from a third review
+
+- `release/current` = **0.4.68** (asar SHA256 `bd3e91fee724dc7629c00b959017cb980522c75e897110a58072e171ac06cdb7`, verifier 109/109, 1228 tests). Rollback: `release/current-0.4.67-backup-20261115`; the 0.4.66 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0468`.
+- **Translation coverage.** In the user's library 7 of 200 Japanese songs had no Chinese translation. Three were saved under older provider revisions and refresh on their next play. The other four (群青, 革命道中 - On The Way, Surges, Koi suru wakusei "Anata") share one cause: the length Spotify reported (263 s, 218 s, 235 s) is that of the **music-video cut**, 15–27 s longer than the album recording (confirmed against the Web API: 248 s, 198 s, 208 s), and the entry that carries the NetEase translation is the album recording. Three places discarded it as "another length":
+  - `supplementalOwnerCompatible` (merge): now also true when `lengthsCompatible` (within 12 s or the 0.82–1.18 ratio) and the normalized whole-song text similarity is ≥ `SAME_WORDS_SIMILARITY` (0.9).
+  - `withSiblingTranslation` (NetEase siblings): a sibling more than 3 s away lends its translation on the same two conditions.
+  - `enrichTranslationByLyricText` (lyric-text lookup): candidates beyond 15 s are kept when `lengthsCompatible`, and must then reach 0.9 instead of 0.75.
+  Rows are re-timed onto the base by text (`alignSupplementalTimeline`), so the other length does not matter to them. Probed live: all four get correctly paired rows; three controls that already had translations are unchanged.
+- **Hide while paused** (`AppSettings.overlayHideWhenPaused`, off by default; 设置 → 悬浮窗 → 暂停时隐藏). `hidesWhilePaused` in overlay-content.ts: only a locked overlay, after `PAUSED_HIDE_DELAY_MS` (10 s) without playback. `Overlay.tsx` adds the class `idle-hidden` (one opacity fade, then `visibility: hidden`; not `paused-…`, because the 0.4.58 verifier check forbids any `.overlay-shell.paused` rule) and publishes **no hit regions**, so the whole window passes input through. Checked in the test instance: hidden after 12 s, regions `[]`, back on unlock. Returning on resume is by construction (`playing` clears the state); not exercised with real playback.
+- How the probe was run: a temporary `electron/zz-probe-*.test.ts` (vitest only collects tests inside the repo) calling `fetchLyrics` and writing JSON lines to the scratchpad, deleted right after. Never commit such a file; `git add -A -- electron src` would pick it up.
+- Writing TypeScript through a Bash heredoc that feeds Python still collapses `\\n` to a real newline (it broke a test file again). Use the Write tool for any patch whose text contains backslashes.
+- **Targeted recheck** (`needsTranslationRecheck`, `TRANSLATION_RECHECK_REVISION` in usePlayback.ts): a saved song with no Chinese translation skips the cached path once per revision of the matching (and once per run when the lookup commits nothing). Raise the constant when translation matching improves again; it does not re-fetch songs that have a translation.
+- **Credit headers**: `CREDIT_LABEL` in lyric-metadata.ts accepts combined roles ("作詞/作曲/編曲：MIMI") and singer credits (歌唱, 演唱, 原唱, 唄, vocal); `stripTimedTrackMetadata` drops a first-15-seconds row that is only the title in brackets.
+- **Third independent review** (lookup lifecycle, store, editor, window sync, at 51b53ab). Seven of eight findings fixed:
+  1. LyricsEditor: results are cleared when the song changes; a search that finishes after a song change is dropped; romaji of an applied candidate is added only to its own song.
+  2. `deleteLibraryDocument` on the song on screen also clears the view and bumps `lyricsRetryToken` (fresh lookup); `restoreLibraryDocument` puts the removed copy back over whatever was fetched since. `compactLibrary(library, protect)` keeps the song on screen through a prune.
+  3. `retryCurrentLyrics` and `setLyricsSource` change the saved copy only when one exists; the view (possibly a "not found" placeholder or a partial result) is never written into the library. `savedDocument()` strips view-only state from saved copies.
+  4. `importLibrary` identifies the song on screen by `playback.track.id`; when it has no lyrics the backup's copy is taken and shown.
+  5. `commit()` in usePlayback: when the document of the same song changed under the lookup, the answer is still dropped but `rerunLyricsLookup()` asks again (`mayRerunDiscardedLookup`: three times per song in 30 s; a source switch stays a source switch). Romanization finishing after a non-track change (offset, listening result) is merged into the current document.
+  6. (Not changed: a manual `offsetMs` is carried over an automatic refetch; an existing test asserts it.)
+  7. `lookupFailed` (view only) is set when the one automatic retry has failed too; the badge then reads 歌词源暂时不可用.
+  8. `removeLyricTrack` also removes the id from `userEditedTrackIds`.
+- New tests: `src/store/library-consistency.test.ts`, two flow tests in `usePlayback.flow.test.ts`, `src/hooks/translation-recheck.test.ts`. `setLyricsSource` changed, so the source chain script was run again: it passes on the dev build (it was not run against the packaged 0.4.68).
 
 ## 2026-11-15 / 0.4.67 deployed: overlay windows survive Alt+F4, quit and control-bar fixes from a second review, recent updates on the help page
 

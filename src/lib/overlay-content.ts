@@ -34,6 +34,18 @@ export function upcomingLine(lines: LyricLine[] | undefined, index: number): Lyr
   return undefined
 }
 
+/** How long playback stays paused before the "hide while paused" option takes the lyrics off the desktop. */
+export const PAUSED_HIDE_DELAY_MS = 10_000
+
+/**
+ * Whether the optional "hide while paused" applies. Only a locked overlay
+ * hides: an unlocked one is being moved or resized and must stay visible, and
+ * a short pause (a skip, a queue boundary) never hides it.
+ */
+export function hidesWhilePaused(input: { enabled: boolean; locked: boolean; playing: boolean; pausedForMs: number }): boolean {
+  return input.enabled && input.locked && !input.playing && input.pausedForMs >= PAUSED_HIDE_DELAY_MS
+}
+
 /** Smallest scale a long line may be shrunk to before it is clipped instead. */
 export const MIN_OVERLAY_FIT = .6
 

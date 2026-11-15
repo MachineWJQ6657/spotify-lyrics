@@ -418,3 +418,8 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
   font-size: max(18px, var(--overlay-size, 52px) * 5 / 13);
 }
 .overlay-shell:not(.center) .overlay-secondary.next-line { margin-left: -3px; }
+
+/* 0.4.68 overlay: optional "hide while paused". One fade, no running animation;
+   Overlay.tsx publishes no hit regions while hidden, so the window passes all input through. */
+.overlay-shell.position-locked .overlay-surface { transition: opacity 240ms ease; }
+.overlay-shell.idle-hidden .overlay-surface { opacity: 0; visibility: hidden; transition: opacity 600ms ease, visibility 0s linear 600ms; }

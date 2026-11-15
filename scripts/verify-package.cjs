@@ -79,6 +79,9 @@ const checks = {
   // 0.4.61: main window remembers its place, optional start at login (tray only), Noto Sans SC for large Chinese text.
   mainWindowStateAndLogin: main.includes('function fitWindowToWorkArea(') && /--syllable-autostart/.test(main) && /app:set-login-item/.test(main) && renderer.includes('开机启动'),
   typography: /Noto Sans SC/.test(rendererCss) && /Segoe UI Variable Display/.test(rendererCss),
+  // 0.4.62: translation/romaji rows scale with the lyric size (never below the outlined 18/16 px), recent errors on the help page.
+  proportionalSecondaryRows: /max\(18px, var\(--overlay-size, 52px\) \* 9 \/ 26\)/.test(rendererCss) && /var\(--lyric-size\) \* 17 \/ 52/.test(rendererCss),
+  recentErrorsCard: /app:recent-errors/.test(main) && main.includes('function recentErrorEntries(') && renderer.includes('最近的程序错误'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

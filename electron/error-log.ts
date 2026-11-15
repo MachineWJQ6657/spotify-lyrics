@@ -28,3 +28,9 @@ export function createErrorLog(resolvePath: () => string | null, maxBytes = ERRO
     return queue
   }
 }
+
+/** The newest entries' first lines (time, kind, message), newest first, for the help page. */
+export function recentErrorEntries(log: string, limit = 5) {
+  return log.split(/\r?\n/).filter(line => /^\d{4}-\d{2}-\d{2}T/.test(line)).slice(-limit).reverse()
+    .map(line => line.length > 220 ? `${line.slice(0, 220)}…` : line)
+}

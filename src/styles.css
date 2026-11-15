@@ -378,11 +378,15 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
    all the time. (0.4.57's paused dimming was removed in 0.4.58: it capped the
    text opacity setting at 50% whenever Spotify was paused.) */
 .overlay-primary { font-size: calc(var(--overlay-size) * var(--overlay-fit, 1)); }
-.overlay-shell .overlay-secondary { font-size: calc(18px * var(--overlay-fit, 1)); }
-.overlay-shell .overlay-secondary.romanization { font-size: calc(16px * var(--overlay-fit, 1)); }
+/* Translation and romaji follow the chosen lyric size, in the ratio that gives
+   exactly 18 px and 16 px at the default 52 px (9/26 and 4/13), instead of
+   staying fixed beside a larger line. They never go below 18 px / 16 px, the
+   sizes the outline was tuned for (verify-overlay-contrast). */
+.overlay-shell .overlay-secondary { font-size: calc(max(18px, var(--overlay-size, 52px) * 9 / 26) * var(--overlay-fit, 1)); }
+.overlay-shell .overlay-secondary.romanization { font-size: calc(max(16px, var(--overlay-size, 52px) * 4 / 13) * var(--overlay-fit, 1)); }
 .overlay-primary:lang(ja), .overlay-secondary:lang(ja) { word-break: auto-phrase; }
 .overlay-primary.title-card { font-size: calc(var(--overlay-size) * .62 * var(--overlay-fit, 1)); }
-.overlay-shell .overlay-secondary.artist { color: rgba(255, 255, 255, .82); font-size: calc(16px * var(--overlay-fit, 1)); }
+.overlay-shell .overlay-secondary.artist { color: rgba(255, 255, 255, .82); font-size: calc(max(16px, var(--overlay-size, 52px) * 4 / 13) * var(--overlay-fit, 1)); }
 
 /* 0.4.58 overlay interaction. The control pill holds only what works in the
    current state (no drag handle while locked), so it lays out as a flex row. */

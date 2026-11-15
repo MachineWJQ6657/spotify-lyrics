@@ -1,6 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, shell, Tray } from 'electron'
 import path from 'node:path'
-import { appendFile, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SpotifyRateLimitError, SpotifyService } from './spotify'
 import { fetchLyrics, isLyricsSourceId, searchLyrics, timedLyricsStats } from './lyrics-provider'
@@ -10,7 +10,7 @@ import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
 import { inspectWindowRegion } from './windows-window-region'
 import { TransportGate, type TransportBackend } from './transport-gate'
-import { createErrorLog } from './error-log'
+import { createErrorLog, recentErrorEntries } from './error-log'
 import { createMainWindowStateWriter, fitWindowToWorkArea, readMainWindowState } from './main-window-state'
 import { PlaybackRequestGate } from './playback-request-gate'
 import { PlaybackRefreshGate } from './playback-refresh-gate'
@@ -2037,6 +2037,17 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     app.setLoginItemSettings({ openAtLogin: enabled === true, path: process.execPath, args: LOGIN_ITEM_ARGS })
     qaLog(`login item: ${enabled === true}`)
     return loginItem()
+  })
+  // Help page: the last few logged errors, and a way to find the file.
+  const errorLogFile = () => path.join(app.getPath('userData'), 'error.log')
+  ipcMain.handle('app:recent-errors', async event => {
+    if (event.sender !== mainWindow?.webContents) return []
+    return recentErrorEntries(await readFile(errorLogFile(), 'utf8').catch(() => ''))
+  })
+  ipcMain.handle('app:reveal-error-log', event => {
+    if (event.sender !== mainWindow?.webContents) return false
+    shell.showItemInFolder(errorLogFile())
+    return true
   })
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
   ipcMain.handle('window:visibility', event => {

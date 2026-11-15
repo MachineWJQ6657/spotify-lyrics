@@ -11,7 +11,7 @@
   --sy-stroke-strong: rgba(255, 255, 255, .15);
   --sy-text: #f4f6f5;
   --sy-text-2: rgba(244, 246, 245, .7);
-  --sy-text-3: rgba(244, 246, 245, .48);
+  --sy-text-3: rgba(244, 246, 245, .56);
   --sy-accent: #1ed760;
   --sy-accent-hover: #3be477;
   --sy-accent-ink: #03130a;
@@ -583,3 +583,12 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .content-page-header p, .info-note, .source-card-grid p, .help-grid span { text-wrap: pretty; }
 /* Numbers that change in place keep their width. */
 .setting-label small, .progress-row, .lyric-seek-hint, .version, .library-toolbar > span { font-variant-numeric: tabular-nums; }
+
+/* 0.4.62: translation and romaji scale with the lyric size (17 px / 15 px at
+   the default 52 px), so a larger lyric setting is not paired with tiny rows. */
+.lyric-secondary { font-size: clamp(17px, calc(var(--lyric-size) * 17 / 52), 30px); }
+.lyric-secondary.romanization { font-size: clamp(15px, calc(var(--lyric-size) * 15 / 52), 26px); }
+/* Recent errors on the help page. */
+.error-log-card { display: grid; gap: 8px; }
+.error-log-card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.error-log-card li { overflow: hidden; color: var(--sy-text-2); font: 12px var(--sy-mono); text-overflow: ellipsis; white-space: nowrap; user-select: text; }

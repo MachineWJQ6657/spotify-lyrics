@@ -23,6 +23,13 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     void window.syllable.app?.loginItem().then(value => { if (current) setLoginItem(value) }).catch(() => undefined)
     return () => { current = false }
   }, [])
+  const [recentErrors, setRecentErrors] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (mode !== 'help') return
+    let current = true
+    void window.syllable.app?.recentErrors?.().then(value => { if (current) setRecentErrors(value) }).catch(() => undefined)
+    return () => { current = false }
+  }, [mode])
   const toggleLoginItem = async () => {
     if (!loginItem?.supported) return
     const next = await window.syllable.app?.setLoginItem(!loginItem.enabled).catch(() => null)
@@ -86,6 +93,11 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       {exportStatus && <p role="status">{exportStatus}</p>}
     </div>
     {playback?.transition && <div className="info-note">已识别 Spotify 自定义转场：音乐 cue {playback.transition.cuePointMs} ms，重叠 {playback.transition.overlapMs == null ? '未知' : `${playback.transition.overlapMs} ms`}。</div>}
+    {recentErrors && <div className="info-note error-log-card">
+      <strong>{recentErrors.length ? '最近的程序错误' : '没有记录到程序错误'}</strong>
+      {recentErrors.length > 0 && <ul>{recentErrors.map((line, index) => <li key={index} title={line}>{line}</li>)}</ul>}
+      {recentErrors.length > 0 && <button onClick={() => void window.syllable.app?.revealErrorLog?.()}>打开日志所在位置</button>}
+    </div>}
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>

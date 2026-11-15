@@ -678,3 +678,20 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   background: transparent; color: var(--sy-text-2); font-size: 12px; white-space: nowrap;
 }
 .library-backup button:hover { border-color: var(--sy-stroke-strong); color: var(--sy-text); }
+
+/* 0.4.67: recent updates on the help page, and a dot on its sidebar item
+   until they have been opened. The dot does not animate. */
+.nav-item .nav-news { width: 7px; height: 7px; margin-left: auto; flex: none; border-radius: 50%; background: var(--sy-accent); }
+.changelog-card > strong { display: block; margin-bottom: 4px; }
+.changelog-card section { margin-top: 12px; }
+.changelog-card h4 { margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; color: var(--sy-text); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.changelog-card h4 span { color: var(--sy-text-3); font-size: 11px; font-weight: 400; }
+.changelog-card ul { margin: 0; padding-left: 18px; color: var(--sy-text-2); font-size: 12.5px; line-height: 1.7; }
+.changelog-card > button { margin-top: 12px; }
+
+/* Library rows without a saved cover: the title's first character on a colour
+   derived from the title. */
+.library-cover:has(.cover-initial) {
+  background: linear-gradient(135deg, hsl(var(--tile-hue, 150) 38% 30%), hsl(calc(var(--tile-hue, 150) + 45) 34% 17%));
+}
+.library-cover .cover-initial { color: hsl(var(--tile-hue, 150) 70% 88%); font-size: 22px; font-weight: 700; line-height: 1; }

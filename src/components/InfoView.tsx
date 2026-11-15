@@ -4,6 +4,8 @@ import { useAppStore } from '../store/useAppStore'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { lyricDiagnosticContext } from '../lib/sync-diagnostics'
 import { AudioSyncPanel } from './AudioSyncPanel'
+import { releasedEntries } from '../lib/changelog'
+import { version as appVersion } from '../../package.json'
 import { referenceLabel } from '../lib/source-label'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { currentSessionCalibration } from '../lib/session-calibration'
@@ -98,6 +100,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       {recentErrors.length > 0 && <ul>{recentErrors.map((line, index) => <li key={index} title={line}>{line}</li>)}</ul>}
       {recentErrors.length > 0 && <button onClick={() => void window.syllable.app?.revealErrorLog?.()}>打开日志所在位置</button>}
     </div>}
+    <ChangelogCard />
     <div className="help-grid">
       <article><Keyboard /><strong>Ctrl + Alt + U</strong><span>解锁并显示歌词控制栏；鼠标移到锁定歌词上也可唤出控制栏。快捷键被占用时，可右键绿色音符托盘选择“解锁并显示歌词控制栏”。</span></article>
       <article><Keyboard /><strong>Ctrl + Alt + S</strong><span>打开客户端；关闭窗口后也可单击右下角绿色音符托盘图标。右键托盘可退出程序；图标可能在 Windows 的隐藏图标箭头中。</span></article>
@@ -109,5 +112,21 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
     </div>
     <AudioSyncPanel />
     <a className="docs-link" href="https://github.com/tranxuanthang/lrcget" target="_blank">了解 LRC 歌词格式 <ExternalLink size={13} /></a>
+  </div>
+}
+
+/** Recent updates, newest first; older ones unfold on request. */
+function ChangelogCard() {
+  const entries = releasedEntries(appVersion)
+  const [all, setAll] = useState(false)
+  if (!entries.length) return null
+  const shown = all ? entries : entries.slice(0, 3)
+  return <div className="info-note changelog-card">
+    <strong>最近更新</strong>
+    {shown.map(entry => <section key={entry.version}>
+      <h4>{entry.version}<span>{entry.date}</span></h4>
+      <ul>{entry.items.map((item, index) => <li key={index}>{item}</li>)}</ul>
+    </section>)}
+    {entries.length > shown.length && <button onClick={() => setAll(true)}>显示更早的 {entries.length - shown.length} 次更新</button>}
   </div>
 }

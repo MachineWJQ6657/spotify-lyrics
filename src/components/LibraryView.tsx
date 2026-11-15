@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, BookOpen, CheckCircle2, Cloud, Database, Download, FileText, Languages, Search, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
+import { Archive, BookOpen, CheckCircle2, Cloud, Database, Download, Languages, Search, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { LyricsDocument } from '../types'
 import { listenedLyricsOffset } from '../lib/listened-offset'
@@ -22,6 +22,19 @@ export function libraryTimingTag(document: LyricsDocument) {
   if (document.offsetMs) return `手动 · ${shiftDirection(document.offsetMs)} ${shiftAmount(document.offsetMs)}`
   const listened = listenedLyricsOffset(document)
   return listened ? `听音 · ${shiftDirection(listened)} ${shiftAmount(listened)}` : ''
+}
+
+/**
+ * A tile for a song without a saved cover (covers of locally detected songs
+ * are not stored): the first character of the title on a colour derived from
+ * it, so rows are told apart at a glance.
+ */
+export function coverTile(name: string | undefined): { initial: string; hue: number } {
+  const text = (name ?? '').trim()
+  const initial = text ? Array.from(text)[0].toUpperCase() : '♪'
+  let hash = 0
+  for (const char of text) hash = (hash * 31 + char.codePointAt(0)!) % 360
+  return { initial, hue: hash }
 }
 
 /** Where a saved song's lyrics came from: the provider's name, or "本地" for imported and edited lyrics. */
@@ -119,7 +132,7 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     {!documents.length ? <div className="library-empty"><BookOpen size={31} /><h3>资料库还是空的</h3><p>播放一首 Spotify 歌曲并搜索或导入歌词后，它会出现在这里。</p><button onClick={openEditor}><Search size={14} />搜索歌词</button></div>
     : !shown.length ? <div className="library-empty"><Search size={28} /><h3>没有匹配的歌曲</h3><p>换个关键词试试，歌名、艺人和专辑都可以。</p><button onClick={() => setQuery('')}><X size={14} />清除筛选</button></div>
     : <div className="library-grid">{shown.map(document => <article key={document.trackId}>
-      <div className="library-cover">{document.track?.coverUrl ? <img src={document.track.coverUrl} /> : <FileText size={20} />}</div>
+      <div className="library-cover" style={document.track?.coverUrl ? undefined : { '--tile-hue': coverTile(document.track?.name).hue } as React.CSSProperties}>{document.track?.coverUrl ? <img src={document.track.coverUrl} /> : <span className="cover-initial" aria-hidden="true">{coverTile(document.track?.name).initial}</span>}</div>
       <div className="library-copy"><strong {...libraryTrackPresentation(document, 'name')}>{document.track?.name ?? document.trackId}</strong><span><span {...libraryTrackPresentation(document, 'artist')}>{document.track?.artist ?? '本地歌词'}</span> · {document.tracks.length} 条轨道</span><div>{document.tracks.map(track => <i key={track.id}>{track.label}</i>)}{librarySourceTag(document) && <i className="source-tag" title="歌词来源">{librarySourceTag(document)}</i>}{libraryTimingTag(document) && <i className="timing-tag" title="这首歌的歌词时间已整体校正">{libraryTimingTag(document)}</i>}</div></div>
       <div className="library-actions"><button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`, serializeLrc(track)) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
     </article>)}</div>}

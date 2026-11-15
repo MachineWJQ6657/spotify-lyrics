@@ -3,7 +3,9 @@ import { Captions, CircleHelp, LayoutDashboard, Radio, Settings2, Sparkles } fro
 
 export type AppView = 'now' | 'library' | 'sources' | 'settings' | 'help'
 
-export const Sidebar = memo(function Sidebar({ active, onChange }: { active: AppView; onChange(view: AppView): void }) {
+export const Sidebar = memo(function Sidebar({ active, onChange, news = false }: { active: AppView; onChange(view: AppView): void
+  /** An update the user has not read about yet: marks the help page, where the list is. */
+  news?: boolean }) {
   return <aside className="sidebar">
     <nav>
       <button onClick={() => onChange('now')} className={`nav-item ${active === 'now' ? 'active' : ''}`}><LayoutDashboard size={18} /><span>正在播放</span></button>
@@ -17,7 +19,7 @@ export const Sidebar = memo(function Sidebar({ active, onChange }: { active: App
     </div>
     <nav>
       <button className={`nav-item ${active === 'settings' ? 'active' : ''}`} onClick={() => onChange('settings')}><Settings2 size={18} /><span>偏好设置</span></button>
-      <button className={`nav-item ${active === 'help' ? 'active' : ''}`} onClick={() => onChange('help')}><CircleHelp size={18} /><span>帮助与诊断</span></button>
+      <button className={`nav-item ${active === 'help' ? 'active' : ''}`} onClick={() => onChange('help')}><CircleHelp size={18} /><span>帮助与诊断</span>{news && <i className="nav-news" title="有新的更新内容" aria-label="有新的更新内容" />}</button>
     </nav>
   </aside>
 })

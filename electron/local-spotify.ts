@@ -320,6 +320,20 @@ export class LocalSpotifyService {
     await this.request({ type: 'seek', positionMs: Math.max(0, Math.round(positionMs)) })
   }
 
+  /**
+   * Worker stops in flight: this close, an earlier close, or a failed worker
+   * being torn down. close() waits for all of them, so a second quit request
+   * (or a quit right after a worker failure) cannot let the process exit while
+   * a native event thread is still being stopped.
+   */
+  private stopping = new Set<Promise<void>>()
+  private stop(worker: Worker) {
+    const stopped = stopWorker(worker).catch(() => undefined)
+    this.stopping.add(stopped)
+    void stopped.then(() => { this.stopping.delete(stopped) })
+    return stopped
+  }
+
   async close() {
     this.closed = true
     if (this.restartTimer) clearTimeout(this.restartTimer)
@@ -327,7 +341,8 @@ export class LocalSpotifyService {
     const worker = this.worker
     this.worker = null
     this.rejectPending('本地 Spotify 服务已关闭')
-    if (worker) await stopWorker(worker)
+    if (worker) void this.stop(worker)
+    await Promise.all([...this.stopping])
     this.state = null
     this.coverTrackId = ''
     this.coverUrl = ''
@@ -813,7 +828,7 @@ export class LocalSpotifyService {
     this.worker = null
     if (worker) {
       worker.removeAllListeners()
-      void stopWorker(worker)
+      void this.stop(worker)
     }
     this.state = null
     this.listener?.(null)

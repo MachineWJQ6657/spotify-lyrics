@@ -238,15 +238,31 @@ function secondaryDisplay() {
   return screen.getAllDisplays().find(display => display.id !== primary.id) ?? primary
 }
 
+/** Whether the window's title bar is on a connected display, so it can be seen and grabbed. */
+function mainWindowReachable(bounds: Electron.Rectangle) {
+  const point = { x: bounds.x + bounds.width / 2, y: bounds.y + 20 }
+  return screen.getAllDisplays().some(display => {
+    const area = display.workArea
+    return point.x >= area.x && point.x < area.x + area.width && point.y >= area.y && point.y < area.y + area.height
+  })
+}
+// A window that was maximized when the app last quit, but started hidden at login (maximize() would show it).
+let mainWindowMaximizePending = false
+
 function revealMainWindow(preferredDisplay: 'preserve' | 'cursor' | 'overlay' = 'preserve') {
   if (headlessAudioQa) return false
   if (!mainWindow || mainWindow.isDestroyed()) return false
-  if (preferredDisplay !== 'preserve') {
+  // The window opens where it was left: its place and size are remembered
+  // (main-window-state). Centring it on every reveal overwrote that memory and
+  // un-maximized a maximized window. It moves only when it is no longer on a
+  // connected display, or in the secondary-display test mode.
+  const stranded = !mainWindow.isMaximized() && !mainWindowMaximizePending && !mainWindowReachable(mainWindow.getNormalBounds())
+  if (preferredDisplay !== 'preserve' && (secondaryMonitorQa || stranded)) {
     const display = secondaryMonitorQa ? secondaryDisplay() : preferredDisplay === 'overlay' && overlayWindow && !overlayWindow.isDestroyed()
       ? screen.getDisplayMatching(overlayWindow.getBounds())
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const area = display.workArea
-    const current = mainWindow.getBounds()
+    const current = mainWindow.getNormalBounds()
     const width = Math.min(current.width, area.width)
     const height = Math.min(current.height, area.height)
     mainWindow.setBounds({
@@ -258,6 +274,7 @@ function revealMainWindow(preferredDisplay: 'preserve' | 'cursor' | 'overlay' = 
   }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
+  if (mainWindowMaximizePending) { mainWindowMaximizePending = false; mainWindow.maximize() }
   mainWindow.focus()
   return true
 }
@@ -301,7 +318,23 @@ function startOverlayControlsVisibilityTracking() {
   refreshTransparentHoverTracking()
 }
 
+let overlayControlsResumeTimer: NodeJS.Timeout | null = null
+/**
+ * A suppression (after a drag, after a click on the bar) ends without a hover
+ * edge when the pointer simply stays on the lyrics, so nothing would show the
+ * bar again until the pointer left and came back. Look again when it ends.
+ */
+function resumeControlsAfterSuppression() {
+  if (overlayControlsResumeTimer) return
+  overlayControlsResumeTimer = setTimeout(() => {
+    overlayControlsResumeTimer = null
+    if (!quitting) updateControlsVisibility()
+  }, Math.max(0, overlayControlsSuppressedUntil - Date.now()) + 20)
+}
+
 function stopOverlayControlsVisibilityTracking() {
+  if (overlayControlsResumeTimer) clearTimeout(overlayControlsResumeTimer)
+  overlayControlsResumeTimer = null
   if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
   transparentHoverTimer = null
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
@@ -359,7 +392,9 @@ function updateControlsVisibility() {
   if (headlessAudioQa) return
   if (!isShown(overlayWindow) || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
   if (overlayHovered || overlayControlsHovered) {
-    if (overlayPointerDrag || Date.now() < overlayControlsSuppressedUntil) return
+    // A drag ends with its own settle step, which looks again.
+    if (overlayPointerDrag) return
+    if (Date.now() < overlayControlsSuppressedUntil) { resumeControlsAfterSuppression(); return }
     if (!overlayControlsWindow.isVisible()) {
       const reveal = () => {
         if (!overlayControlsWindow || overlayControlsWindow.isDestroyed() || overlayControlsWindow.isVisible() || !isShown(overlayWindow)) return
@@ -374,7 +409,9 @@ function updateControlsVisibility() {
       if (!dwell) { reveal(); return }
       overlayControlsDwellTimer ??= setTimeout(() => {
         overlayControlsDwellTimer = null
-        if ((overlayHovered || overlayControlsHovered) && !overlayPointerDrag && Date.now() >= overlayControlsSuppressedUntil) reveal()
+        if (!(overlayHovered || overlayControlsHovered) || overlayPointerDrag) return
+        if (Date.now() < overlayControlsSuppressedUntil) { resumeControlsAfterSuppression(); return }
+        reveal()
       }, OVERLAY_CONTROLS_DWELL_MS)
     }
     return
@@ -690,6 +727,7 @@ async function applyOverlayBounds(bounds: StoredWindowBounds, animate = false, i
     if (!overlayWindow || overlayWindow.isDestroyed() || operation !== overlayBoundsOperation || !isCurrent()) return bounds
     setExactOverlaySize(bounds.width, bounds.height, animate)
     await new Promise(resolve => setTimeout(resolve, 40))
+    if (!overlayWindow || overlayWindow.isDestroyed()) return bounds
     return overlayWindow.getBounds()
   } finally {
     if (operation === overlayBoundsOperation) {
@@ -728,6 +766,7 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: !headlessAudioQa, offscreen: headlessAudioQa }
   })
   if (savedMain?.maximized && !startedAtLogin) mainWindow.maximize()
+  mainWindowMaximizePending = Boolean(savedMain?.maximized && startedAtLogin)
   if (!testArea && !headlessAudioQa) {
     const writeMainState = createMainWindowStateWriter(mainStateFile)
     let mainStateTimer: NodeJS.Timeout | null = null
@@ -736,7 +775,8 @@ function createWindows() {
       mainStateTimer = setTimeout(() => {
         mainStateTimer = null
         if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return
-        void writeMainState({ ...mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() })
+        // Hidden since a login start: the remembered maximized state has not been applied yet.
+        void writeMainState({ ...mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() || mainWindowMaximizePending })
       }, 400)
     }
     for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const) mainWindow.on(event as 'resize', saveMainState)
@@ -1359,6 +1399,10 @@ function createWindows() {
     }, 7000)
   }
 
+  // Electron's default application menu carries accelerators (Ctrl+W close,
+  // Ctrl+R reload, F11) that act on whichever window has focus, including the
+  // lyrics and the control bar. Nothing here uses a menu bar.
+  Menu.setApplicationMenu(null)
   const initialOverlayBounds = defaultOverlayBounds()
   overlayWindow = new BrowserWindow({
     ...initialOverlayBounds,
@@ -1366,6 +1410,10 @@ function createWindows() {
     frame: false, transparent: true, backgroundColor: '#00000000', resizable: true, thickFrame: true, show: false, focusable: true, alwaysOnTop: true, skipTaskbar: true,
     hasShadow: false, webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
+  // The lyrics take keyboard focus when clicked or dragged, so Alt+F4 would
+  // close them: the window was destroyed and stayed gone until the next start,
+  // with every later show, hide and lock throwing. It closes only on quit.
+  overlayWindow.on('close', event => { if (!quitting) event.preventDefault() })
   // DOM/layout-ready precedes the first paint. Register before navigation and
   // retry a failed renderer once; never leave show() waiting forever on it.
   const firstPaint = waitForFirstPaint(overlayWindow)
@@ -1469,6 +1517,8 @@ function createWindows() {
     webPreferences: { preload: path.join(directory, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: true }
   })
   overlayControlsWindow.setAlwaysOnTop(true, 'screen-saver')
+  // Same as the lyrics: Alt+F4 after clicking a button must not destroy the bar.
+  overlayControlsWindow.on('close', event => { if (!quitting) event.preventDefault() })
   bindRenderVisibility(overlayControlsWindow)
   overlayControlsWindow.setOpacity(1)
   overlayControlsWindow.setMenu(null)
@@ -2014,6 +2064,8 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
       if (overlayPointerDrag || !overlayWindow || overlayWindow.isDestroyed()) return
       applyOverlayShape()
       syncOverlayControlsBounds()
+      // The pointer usually still rests on the lyrics it just dragged.
+      updateControlsVisibility()
     }, 520)
     publishOverlayBounds()
     qaLog(`overlay pointer drag end: ${JSON.stringify(overlayWindow?.getBounds())}`)

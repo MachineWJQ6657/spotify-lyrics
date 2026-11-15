@@ -99,6 +99,11 @@ const checks = {
   sourceMenuPolish: /\.source-popover p\.source-popover-note\s*\{[^}]*white-space:\s*normal/.test(rendererCss) && /span\.track-count\s*\{\s*display:\s*none/.test(rendererCss) && renderer.includes('内容与自动选择的不同'),
   triedSourcesStatus: renderer.includes('function sourceTrialsSummary(') && renderer.includes('__syllableListenQa'),
   libraryBackup: renderer.includes('function parseLibraryBackup(') && renderer.includes('function mergeLibraryBackup(') && renderer.includes('导入备份') && /Syllable 资料库备份/.test(main),
+  // 0.4.67: the lyrics and control-bar windows close only on quit (no default menu accelerators, Alt+F4 refused), close() waits for an in-flight worker stop, the control bar returns after a suppression, a reveal keeps the remembered window state, recent updates on the help page.
+  overlayWindowsStayOpen: /Menu\.setApplicationMenu\(null\)/.test(main) && (main.match(/\.on\(["']close["'], \(?event\)? => \{\s*if \(!quitting\) event\.preventDefault\(\)/g) ?? []).length >= 2,
+  quitWaitsForWorkerStop: native.includes('this.stopping') && /await Promise\.all\(\[\.\.\.this\.stopping\]\)/.test(native),
+  controlsResumeAndWindowState: main.includes('function resumeControlsAfterSuppression(') && main.includes('function mainWindowReachable(') && main.includes('mainWindowMaximizePending'),
+  recentUpdates: renderer.includes('function releasedEntries(') && renderer.includes('最近更新') && /\.nav-item \.nav-news/.test(rendererCss) && renderer.includes('function coverTile('),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

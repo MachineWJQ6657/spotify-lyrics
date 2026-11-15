@@ -24,6 +24,8 @@ import { currentSessionCalibration } from './lib/session-calibration'
 import { timingStatus } from './lib/timing-status'
 import { lyricSeekTarget, seekPlayback } from './lib/seek'
 import { formatTime } from './lib/clock'
+import { hasUnseenNews, markNewsSeen, readSeenVersion } from './lib/changelog'
+import { version as appVersion } from '../package.json'
 import type { LyricLine } from './types'
 
 const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
@@ -56,6 +58,13 @@ export function App() {
   const lyricOffset = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
   const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
   const [view, setView] = useState<AppView>('now')
+  // A dot on the help page until the list of recent updates there has been opened.
+  const [news, setNews] = useState(() => hasUnseenNews(readSeenVersion(), appVersion))
+  useEffect(() => {
+    if (view !== 'help' || !news) return
+    markNewsSeen(appVersion)
+    setNews(false)
+  }, [view, news])
   const [panelCollapsed, setPanelCollapsed] = useState(readPanelCollapsed)
   const togglePanel = useCallback(() => setPanelCollapsed(value => {
     try { localStorage.setItem(PANEL_KEY, value ? '0' : '1') } catch { /* view-only preference */ }
@@ -136,7 +145,7 @@ export function App() {
     <Backdrop cover={playback?.track?.coverUrl || undefined} />
     <Titlebar title={VIEW_TITLES[view]} />
     <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''}`}>
-      <Sidebar active={view} onChange={setView} />
+      <Sidebar active={view} onChange={setView} news={news} />
       <main className="main-content">
         {view === 'library' || view === 'sources' ? <LibraryView mode={view} openEditor={openEditor} /> : view === 'settings' || view === 'help' ? <InfoView mode={view} openEditor={openEditor} /> : <>
         <div className="now-header">

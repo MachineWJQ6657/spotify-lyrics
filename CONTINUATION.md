@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.66 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.65-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.67 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.66-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (101 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (105 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,19 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.67 deployed: overlay windows survive Alt+F4, quit and control-bar fixes from a second review, recent updates on the help page
+
+- `release/current` = **0.4.67** (asar SHA256 `73f2d699c32d3506bae38bc5c0969f48f9d0b0cbf06cf931e160e1d58ebbadd4`, verifier 105/105, 1190 tests). Rollback: `release/current-0.4.66-backup-20261115`; the 0.4.65 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0467`.
+- **Second independent review** (a subagent read the overlay, quit and window-state paths at 4b96458). All five findings fixed:
+  1. The lyrics and control-bar windows had no `close` handler and take keyboard focus, so Alt+F4, or Ctrl+W from Electron's default application menu, destroyed them; every later show/hide/lock then threw. Now `Menu.setApplicationMenu(null)` and `close` is refused unless `quitting`. Verified in the test instance by posting WM_CLOSE to its three windows (`post-wm-close.ps1` in the scratchpad): all three stay alive, the main window hides to the tray as designed. A renderer `window.close()` still destroys a window (it bypasses the `close` event); nothing in the app calls it.
+  2. `LocalSpotifyService.close()` returned at once when a stop was already in flight, so a second `before-quit` could exit during the native stop. `stopping` now tracks every in-flight `stopWorker` (close and worker failure) and `close()` awaits them all.
+  3. `updateControlsVisibility` returned during a suppression without re-arming; `resumeControlsAfterSuppression` looks again when it ends, and the drag settle step calls `updateControlsVisibility`.
+  4. `revealMainWindow('cursor' | 'overlay')` recentred on every reveal, overwriting the remembered state and un-maximizing. It now moves the window only when its title bar is on no connected display (`mainWindowReachable`) or in the secondary-display test mode. A maximized state skipped at a login start is applied at the first reveal (`mainWindowMaximizePending`) and kept in the saved state meanwhile.
+  5. `overlayWindow.getBounds()` after a 40 ms await is guarded.
+- **Recent updates** (`src/lib/changelog.ts`, `ChangelogCard` in InfoView, dot on the sidebar's help item via `hasUnseenNews`). `changelog.test.ts` requires an entry for the version in package.json, so **every release adds an entry to `CHANGELOG` before bumping** (user-facing wording, plain, no disclaimers).
+- Library rows without a cover show the title's first character on a colour derived from the title (`coverTile`).
+- Not exercised: a real keyboard Alt+F4, the double-quit timing, and the control bar returning after a real mouse drag.
 
 ## 2026-11-15 / 0.4.66 deployed: library backup, source chain exercised without audio, source menu and status polish
 

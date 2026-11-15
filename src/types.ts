@@ -17,6 +17,10 @@ export interface LyricsDocument {
   availableSources?: Array<{ id: LyricsSourceId; lines: number }>
   /** The chosen source had no timed lyrics at the last lookup; the automatic choice is shown. */
   sourceUnavailable?: boolean
+  /** Who set sourcePreference: the user in the menu, or listening calibration after another source proved inconsistent. */
+  sourceChosenBy?: 'user' | 'listening'
+  /** Listening's verdict per provider timeline for this song; an inconsistent source is not listened to again. */
+  sourceTrials?: Partial<Record<LyricsSourceId, 'consistent' | 'inconsistent'>>
   /** Actual original words without trusted timing; never drive active-line playback. */
   untimedOriginal?: { text: string; language: string; source: string }
   textReference?: { referenceSource: string; status: 'consistent' | 'partial' | 'conflict'; matchedLines: number; referenceLines: number }

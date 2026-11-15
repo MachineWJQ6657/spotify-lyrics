@@ -3,6 +3,7 @@ import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
 import { listenLines, listenTimingKey } from './listened-offset'
+import { lyricsSourceIdOf, nextSourceToTry } from './lyrics-source'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
 
 /**
@@ -43,6 +44,10 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   const timingKey = listenTimingKey(original)
   if (!timingKey) return { reason: 'invalid-lines' }
   if (lyrics.listenedOffset?.timingKey === timingKey) return { reason: 'already-measured' }
+  // This provider's timeline was already found inconsistent for the song (a
+  // lookup may have rebuilt it with a different timing key): do not listen again.
+  const shownSource = lyricsSourceIdOf(original.source)
+  if (shownSource && lyrics.sourceTrials?.[shownSource] === 'inconsistent') return { reason: 'source-inconsistent' }
   if ((attempts.get(`${playback.track.id}\0${timingKey}`) ?? 0) >= MAX_SESSION_ATTEMPTS) return { reason: 'attempts-exhausted' }
   return { target: { trackId: playback.track.id, timingKey, language, lines } }
 }
@@ -148,6 +153,7 @@ async function begin(target: ListenTarget) {
             timingKey: target.timingKey, state: result.state, offsetMs: result.state === 'decided' ? result.offsetMs ?? 0 : 0,
             measuredDeltaMs: result.measuredDeltaMs, spreadMs: result.spreadMs, lines: result.lines, measuredAt: Date.now() })
           await stop()
+          afterVerdict(target.trackId, result.state)
           return
         }
         const unusable = result.reason === 'invalid-input' || result.reason === 'no-lines' || result.reason === 'unsupported-language'
@@ -161,6 +167,26 @@ async function begin(target: ListenTarget) {
     failed()
     await stop()
   }
+}
+
+/**
+ * After a verdict: remember it for the provider on screen, and when that
+ * provider's lines disagree with each other, let another provider's timeline
+ * be measured instead. An explicit choice in the source menu is never
+ * overridden; when every source is inconsistent the automatic choice returns.
+ */
+export function afterVerdict(trackId: string, state: 'decided' | 'inconsistent') {
+  const store = useAppStore.getState()
+  const document = store.lyrics
+  if (!document || document.trackId !== trackId || document.untimedOriginal) return
+  const shown = lyricsSourceIdOf(document.tracks.find(track => track.kind === 'original')?.source)
+  if (!shown) return
+  store.recordSourceTrial(trackId, shown, state === 'decided' ? 'consistent' : 'inconsistent')
+  if (state !== 'inconsistent') return
+  if (document.sourcePreference && document.sourceChosenBy !== 'listening') return
+  const next = nextSourceToTry(useAppStore.getState().lyrics)
+  if (next) store.setLyricsSource(next, 'listening')
+  else if (document.sourcePreference) store.setLyricsSource(null, 'listening')
 }
 
 /**
@@ -185,6 +211,7 @@ export function relistenCurrentSong() {
   for (const key of [...attempts.keys()]) if (key.startsWith(`${track.id}\0`)) attempts.delete(key)
   if (store.lyrics.offsetMs) store.setLyricsOffset(0)
   store.setListenedOffset(track.id, null)
+  store.clearSourceTrials(track.id)
   void reconcile()
   return true
 }

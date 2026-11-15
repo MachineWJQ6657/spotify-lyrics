@@ -39,7 +39,11 @@ interface AppState {
   restoreLibraryDocument(document: LyricsDocument): void
   retryCurrentLyrics(): void
   /** Picks the provider for the current song's timed original (null = automatic) and looks it up again. */
-  setLyricsSource(source: LyricsSourceId | null): void
+  setLyricsSource(source: LyricsSourceId | null, chosenBy?: 'user' | 'listening'): void
+  /** Records what listening found for one provider's timeline of a song. */
+  recordSourceTrial(trackId: string, source: LyricsSourceId, verdict: 'consistent' | 'inconsistent'): void
+  /** Forgets listening's per-source verdicts for a song ("立即重新校准"). */
+  clearSourceTrials(trackId: string): void
   /** Re-runs provider lookup without deleting the last usable document. */
   retryTransientLyrics(): void
   setEditorOpen(value: boolean): void
@@ -278,19 +282,33 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     const library = pending ? { ...state.library, [trackId]: pending } : state.library
     return { library, lyrics: pending, lyricsRetryToken: state.lyricsRetryToken + 1 }
   }),
-  setLyricsSource: source => set(state => {
+  setLyricsSource: (source, chosenBy = 'user') => set(state => {
     const track = state.playback?.track
     if (!track || state.demoMode) return state
     const baseline = state.lyrics?.trackId === track.id ? state.lyrics : state.library[track.id]
     const pending: LyricsDocument = { ...(baseline ?? { trackId: track.id, track, tracks: [] }), providerRevision: undefined, updatedAt: Date.now() }
-    if (source) pending.sourcePreference = source
-    else delete pending.sourcePreference
+    if (source) { pending.sourcePreference = source; pending.sourceChosenBy = chosenBy }
+    else { delete pending.sourcePreference; delete pending.sourceChosenBy }
+    // A choice in the menu starts over; listening keeps its verdicts so it never retries a source.
+    if (chosenBy === 'user') delete pending.sourceTrials
     delete pending.sourceUnavailable
     // A manual offset was tuned against the previous file's timing. A listened
     // offset carries its own timing key and simply stops applying.
     delete pending.offsetMs
     const lyricsRetryToken = state.lyricsRetryToken + 1
     return { library: { ...state.library, [track.id]: pending }, lyrics: pending, lyricsRetryToken, sourceSwitchToken: lyricsRetryToken, sessionCalibration: null }
+  }),
+  recordSourceTrial: (trackId, source, verdict) => set(state => {
+    const apply = (document: LyricsDocument): LyricsDocument => ({ ...document, sourceTrials: { ...document.sourceTrials, [source]: verdict } })
+    const lyrics = state.lyrics?.trackId === trackId ? apply(state.lyrics) : state.lyrics
+    const stored = state.library[trackId]
+    return { lyrics, library: stored ? { ...state.library, [trackId]: apply(stored) } : state.library }
+  }),
+  clearSourceTrials: trackId => set(state => {
+    const apply = (document: LyricsDocument): LyricsDocument => { const next = { ...document }; delete next.sourceTrials; return next }
+    const lyrics = state.lyrics?.trackId === trackId && state.lyrics.sourceTrials ? apply(state.lyrics) : state.lyrics
+    const stored = state.library[trackId]
+    return { lyrics, library: stored?.sourceTrials ? { ...state.library, [trackId]: apply(stored) } : state.library }
   }),
   retryTransientLyrics: () => set(state => ({ lyricsRetryToken: state.lyricsRetryToken + 1 })),
   setEditorOpen: editorOpen => set(state => state.editorOpen === editorOpen ? state : { editorOpen }),

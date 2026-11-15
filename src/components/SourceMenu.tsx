@@ -45,6 +45,7 @@ export const SourceMenu = memo(function SourceMenu({ document, label, disabled =
         {option.chosen && <Check size={14} />}
       </button>)}
       {document?.sourceUnavailable && <p className="source-popover-note">所选来源没有这首歌的同步歌词，当前显示的是自动选择的结果。</p>}
+      {document?.sourcePreference && document.sourceChosenBy === 'listening' && <p className="source-popover-note listening">听音校准发现原来的来源各句偏差不一致，改用了这个来源。</p>}
       <button type="button" role="menuitem" className="source-popover-search" onClick={() => { setOpen(false); onSearch() }}><Search size={13} />手动搜索其他版本…</button>
     </div>}
   </div>

@@ -42,3 +42,19 @@ export function sourceOptions(document: LyricsDocument | null): SourceOption[] {
       chosen: document?.sourcePreference === item.id, inUse: inUse === item.id }]
   })
 }
+
+/** Order in which listening tries other providers after one proved inconsistent. */
+const TRIAL_ORDER: readonly LyricsSourceId[] = ['netease', 'lrclib', 'kugou', 'spotify']
+
+/**
+ * The next provider listening calibration should try for this song: one that
+ * has timed lyrics, is not on screen now and has no verdict yet. Undefined
+ * when every available source has been tried.
+ */
+export function nextSourceToTry(document: LyricsDocument | null): LyricsSourceId | undefined {
+  if (!document?.availableSources?.length) return undefined
+  const original = document.untimedOriginal ? undefined : document.tracks.find(track => track.kind === 'original')
+  const current = lyricsSourceIdOf(original?.source)
+  const available = new Set(document.availableSources.map(item => item.id))
+  return TRIAL_ORDER.find(id => available.has(id) && id !== current && !document.sourceTrials?.[id])
+}

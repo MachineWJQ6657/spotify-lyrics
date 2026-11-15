@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.62 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.61-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.63 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.62-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (89 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (90 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,13 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-15 / 0.4.63 deployed: listening tries another source when the shown one is inconsistent (not yet verified live)
+
+- `release/current` = **0.4.63** (asar SHA256 `31e67b3ef23c36423b2ce4c17dee3705697a2fe4d64bd95e40187ea1a7b472fc`, verifier 90/90, 1119 tests). Rollback: `release/current-0.4.62-backup-20261115`; the 0.4.61 backup went to the Recycle Bin. Profile backup: `.qa-user-data-preupdate-0463`.
+- **Why:** an "inconsistent" verdict left a song uncorrected (5 of the first 30 measured songs in the user's library). Recorded clips show providers differ in consistency for the same song (花に亡霊: LRCLIB MAD 80 ms, Kugou 20 ms; 夜行: LRCLIB 140 ms, NetEase/Kugou 60 ms; `listen/decide-all-sources.mjs` in the older scratchpad runs the estimator per provider).
+- **How:** `afterVerdict(trackId, state)` (listen-controller) records the verdict for the provider on screen in `LyricsDocument.sourceTrials`. On "inconsistent", unless the user chose the source (`sourceChosenBy: 'user'`), it calls `setLyricsSource(nextSourceToTry(...), 'listening')` (order netease → lrclib → kugou → spotify, only providers in `availableSources`, never one with a verdict). The normal lookup then shows that timeline and the normal listener measures it. When nothing is left it returns to the automatic choice, and `listenTarget` answers `source-inconsistent` for a provider already judged, so nothing loops. A menu choice or "立即重新校准" clears the trials.
+- **Not verified live.** No recording of an inconsistent song exists, and no audible playback was started while the user was present. Verify by playing one of ランデブー, 思想犯, ヨヒラ, 金木犀 with listening on and reading the 同步 tab and the source menu; `error.log` and the `lyrics:` qa-log lines show the switches.
 
 ## 2026-11-15 / 0.4.62 deployed: proportional secondary rows, recent errors on the help page
 

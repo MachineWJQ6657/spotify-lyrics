@@ -592,3 +592,5 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .error-log-card { display: grid; gap: 8px; }
 .error-log-card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .error-log-card li { overflow: hidden; color: var(--sy-text-2); font: 12px var(--sy-mono); text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+
+.source-popover-note.listening { color: var(--sy-accent-text); }

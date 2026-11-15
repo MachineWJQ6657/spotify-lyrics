@@ -22,7 +22,7 @@ export function listenStatus(input: { document: LyricsDocument | null; listening
   const original = document?.untimedOriginal ? undefined : document?.tracks.find(track => track.kind === 'original')
   const measured = document?.listenedOffset && original && document.listenedOffset.timingKey === listenTimingKey(original)
     ? document.listenedOffset : null
-  const again = Boolean(measured || document?.offsetMs || input.reason === 'attempts-exhausted')
+  const again = Boolean(measured || document?.offsetMs || input.reason === 'attempts-exhausted' || input.reason === 'source-inconsistent')
   const action = again ? '立即重新校准' : '立即校准'
   if (!input.enabled) return { text: '听音自动校准已关闭，打开上面的开关后可以使用。', action, canRun: false }
   if (input.listening) return { text: '正在听这首歌，通常需要 25–60 秒。', action, canRun: false }
@@ -42,5 +42,6 @@ export function listenStatus(input: { document: LyricsDocument | null; listening
   if (measured?.state === 'inconsistent') return { text: '上次各句测得的偏差不一致，没有调整。', action, canRun: true }
   if (measured?.state === 'dismissed') return { text: '你已把这首歌归零，听音结果没有使用。', action, canRun: true }
   if (input.reason === 'attempts-exhausted') return { text: '这首歌已经试过两次，没有得出结果。', action, canRun: true }
+  if (input.reason === 'source-inconsistent') return { text: '各个歌词来源测得的偏差都不一致，没有调整。', action, canRun: true }
   return { text: paused ? '这首歌还没有校准，播放后会自动开始。' : '这首歌还没有校准，马上开始。', action, canRun: false }
 }

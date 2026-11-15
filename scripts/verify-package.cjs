@@ -82,6 +82,8 @@ const checks = {
   // 0.4.62: translation/romaji rows scale with the lyric size (never below the outlined 18/16 px), recent errors on the help page.
   proportionalSecondaryRows: /max\(18px, var\(--overlay-size, 52px\) \* 9 \/ 26\)/.test(rendererCss) && /var\(--lyric-size\) \* 17 \/ 52/.test(rendererCss),
   recentErrorsCard: /app:recent-errors/.test(main) && main.includes('function recentErrorEntries(') && renderer.includes('最近的程序错误'),
+  // 0.4.63: when listening finds the shown source inconsistent it measures another provider's timeline instead.
+  listeningPicksSource: renderer.includes('function afterVerdict(') && renderer.includes('function nextSourceToTry(') && renderer.includes('source-inconsistent') && renderer.includes('recordSourceTrial'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

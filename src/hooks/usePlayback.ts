@@ -397,10 +397,13 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
       }
       // The song's saved source choice, and whether this lookup is that choice
       // being changed (then the providers' known results are re-ranked).
-      const preferredSource = requestBaseline?.trackId === latestTrack.id ? requestBaseline.sourcePreference : cached?.sourcePreference
+      const sourceBaseline = requestBaseline?.trackId === latestTrack.id ? requestBaseline : cached
+      const preferredSource = sourceBaseline?.sourcePreference
       const reuseProviderResults = latest.sourceSwitchToken === lyricsRetryToken
       const sourceFields = (result: { availableSources?: LyricsDocument['availableSources']; preferredSourceUnavailable?: boolean } | null) => ({
         ...(preferredSource ? { sourcePreference: preferredSource } : {}),
+        ...(preferredSource && sourceBaseline?.sourceChosenBy ? { sourceChosenBy: sourceBaseline.sourceChosenBy } : {}),
+        ...(sourceBaseline?.sourceTrials ? { sourceTrials: sourceBaseline.sourceTrials } : {}),
         ...(result?.availableSources?.length ? { availableSources: result.availableSources } : {}),
         ...(result?.preferredSourceUnavailable ? { sourceUnavailable: true } : {})
       })

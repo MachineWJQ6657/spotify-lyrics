@@ -23,6 +23,7 @@ import { createQaChecks } from './qa-checks'
 import { overlayInputState } from './overlay-input'
 import { OverlayLayoutGate } from './overlay-layout'
 import { isOverOverlayRegion } from './overlay-hover'
+import { advanceHoverIntent, HOVER_OUTSIDE, HOVER_REST_MS, type HoverIntent } from './overlay-hover-intent'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 import { LocalAsr } from './audio-sync/local-asr'
 import { VocalSync } from './audio-sync/vocal-sync'
@@ -63,10 +64,11 @@ let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
 let overlayControlsWindow: BrowserWindow | null = null
 let overlayControlsHideTimer: NodeJS.Timeout | null = null
-// Locked lyrics pass clicks through; a pointer merely crossing them on its way
-// elsewhere should not pop up the control bar. Show it after a short dwell.
-const OVERLAY_CONTROLS_DWELL_MS = 350
-let overlayControlsDwellTimer: NodeJS.Timeout | null = null
+// A pointer merely crossing the lyrics, or parked on them while the user
+// works underneath, should not pop up the control bar: it opens when the
+// pointer comes to rest on them after moving there (overlay-hover-intent.ts).
+let overlayHoverIntent: HoverIntent = HOVER_OUTSIDE
+let overlayHoverReady = false
 let overlayHovered = false
 let overlayControlsHovered = false
 let transparentHoverTimer: NodeJS.Timeout | null = null
@@ -310,6 +312,8 @@ function startOverlayControlsVisibilityTracking() {
   overlayControlsHideTimer = null
   overlayHovered = false
   overlayControlsHovered = false
+  overlayHoverIntent = HOVER_OUTSIDE
+  overlayHoverReady = false
   refreshTransparentHoverTracking()
 }
 
@@ -334,10 +338,10 @@ function stopOverlayControlsVisibilityTracking() {
   transparentHoverTimer = null
   if (overlayControlsHideTimer) clearTimeout(overlayControlsHideTimer)
   overlayControlsHideTimer = null
-  if (overlayControlsDwellTimer) clearTimeout(overlayControlsDwellTimer)
-  overlayControlsDwellTimer = null
   overlayHovered = false
   overlayControlsHovered = false
+  overlayHoverIntent = HOVER_OUTSIDE
+  overlayHoverReady = false
   hideIfAlive(overlayControlsWindow)
 }
 
@@ -371,13 +375,18 @@ function refreshTransparentHoverTracking() {
 function sampleTransparentHover(cursor: Electron.Point) {
     if (quitting || !isShown(overlayWindow) || !overlayControlsWindow || overlayControlsWindow.isDestroyed()) return
     applyOverlayMouseIgnore(overlayInputTransparent(cursor))
-    const lyricsHover = isOverOverlayRegion(cursor, overlayWindow.getBounds(), overlayHitRegions)
+    const overLyrics = isOverOverlayRegion(cursor, overlayWindow.getBounds(), overlayHitRegions)
+    const intent = advanceHoverIntent(overlayHoverIntent, Date.now(), cursor, overLyrics)
+    overlayHoverIntent = intent.state
+    // Over the lyrics keeps an open bar open, unless the pointer has been parked there.
+    const lyricsHover = overLyrics && !intent.idle
     const controlsBounds = overlayControlsWindow.getBounds()
     const controlsHover = isShown(overlayControlsWindow) && isOverOverlayRegion(cursor, controlsBounds,
       [{ x: 0, y: 0, width: controlsBounds.width, height: controlsBounds.height }])
-    if (lyricsHover === overlayHovered && controlsHover === overlayControlsHovered) return
+    if (lyricsHover === overlayHovered && controlsHover === overlayControlsHovered && intent.ready === overlayHoverReady) return
     overlayHovered = lyricsHover
     overlayControlsHovered = controlsHover
+    overlayHoverReady = intent.ready
     updateControlsVisibility()
 }
 
@@ -391,28 +400,16 @@ function updateControlsVisibility() {
     if (overlayPointerDrag) return
     if (Date.now() < overlayControlsSuppressedUntil) { resumeControlsAfterSuppression(); return }
     if (!overlayControlsWindow.isVisible()) {
-      const reveal = () => {
-        if (!overlayControlsWindow || overlayControlsWindow.isDestroyed() || overlayControlsWindow.isVisible() || !isShown(overlayWindow)) return
-        syncOverlayControlsBounds()
-        overlayControlsWindow.showInactive()
-        raiseOverlayControls()
-        qaLog(`overlay controls shown: ${overlayHovered ? 'lyrics' : 'controls'}`)
-      }
-      // Only input-transparent (locked) lyrics wait; an unlocked overlay or an
-      // explicit unlock/recovery shows the bar at once.
-      const dwell = overlayHovered && !overlayControlsHovered && overlayInputTransparent() && Date.now() >= controlsRecoveryUntil
-      if (!dwell) { reveal(); return }
-      overlayControlsDwellTimer ??= setTimeout(() => {
-        overlayControlsDwellTimer = null
-        if (!(overlayHovered || overlayControlsHovered) || overlayPointerDrag) return
-        if (Date.now() < overlayControlsSuppressedUntil) { resumeControlsAfterSuppression(); return }
-        reveal()
-      }, OVERLAY_CONTROLS_DWELL_MS)
+      // Opening needs intent: the pointer at rest on the lyrics after moving
+      // there, locked or not. An explicit unlock/recovery opens it at once.
+      if (!overlayControlsHovered && !overlayHoverReady && Date.now() >= controlsRecoveryUntil) return
+      syncOverlayControlsBounds()
+      overlayControlsWindow.showInactive()
+      raiseOverlayControls()
+      qaLog(`overlay controls shown: ${overlayHovered ? 'lyrics' : 'controls'}`)
     }
     return
   }
-  if (overlayControlsDwellTimer) clearTimeout(overlayControlsDwellTimer)
-  overlayControlsDwellTimer = null
   // The pill lives in a separate HWND with a small visual gap above the lyric
   // text. Keep it alive long enough for the pointer to cross that gap, then
   // hide it without flickering while the pointer crosses the gap.
@@ -957,10 +954,16 @@ function createWindows() {
         transparentHoverTimer = null
         overlayHitRegions = [{ x: 28, y: 40, width: 400, height: 90 }]
         overlayHovered = false; overlayControlsHovered = false
+        overlayHoverIntent = HOVER_OUTSIDE; overlayHoverReady = false
         overlayControlsWindow.hide()
-        sampleTransparentHover({ x: initialBounds.x + 100, y: initialBounds.y + 70 })
+        const resting = { x: initialBounds.x + 100, y: initialBounds.y + 70 }
+        // The pointer comes from outside the lyrics, as a real one does.
+        sampleTransparentHover({ x: initialBounds.x - 100, y: initialBounds.y - 100 })
+        sampleTransparentHover(resting)
         checks.record('hover-dwell', !overlayControlsWindow.isVisible())
-        await new Promise(resolve => setTimeout(resolve, OVERLAY_CONTROLS_DWELL_MS + 80))
+        // Still there after the rest time: the next sample opens the bar.
+        await new Promise(resolve => setTimeout(resolve, HOVER_REST_MS + 80))
+        sampleTransparentHover(resting)
         checks.record('hover', overlayControlsWindow.isVisible())
         const native = enforceWindowsToolWindow(overlayWindow)
         checks.record('pass-through', overlayMouseIgnored && !overlayMovable && Boolean((native.after ?? 0) & 0x20))
@@ -1238,18 +1241,31 @@ function createWindows() {
         }
       }
       if (qaView === 'overlay-controls' && overlayWindow && overlayControlsWindow) {
-        showOverlay()
+        await showOverlay()
         syncOverlayControlsBounds()
-        await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
-        await new Promise(resolve => setTimeout(resolve, 180 + OVERLAY_CONTROLS_DWELL_MS))
+        // The native sampler decides hover. Feed it fixed points (the real
+        // cursor must not decide this check): reach the lyrics, rest, leave.
+        if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
+        transparentHoverTimer = null
+        if (!overlayHitRegions.length) overlayHitRegions = [{ x: 28, y: 40, width: 400, height: 90 }]
+        const box = overlayWindow.getBounds()
+        const region = overlayHitRegions[0]
+        const away = { x: box.x - 200, y: box.y - 200 }
+        const over = { x: Math.round(box.x + region.x + Math.min(40, region.width / 2)), y: Math.round(box.y + region.y + region.height / 2) }
+        const restOnLyrics = async () => {
+          sampleTransparentHover(away)
+          sampleTransparentHover(over)
+          await new Promise(resolve => setTimeout(resolve, HOVER_REST_MS + 80))
+          sampleTransparentHover(over)
+        }
+        await restOnLyrics()
         qaLog(`overlay hover control: visible=${overlayControlsWindow.isVisible()}`)
         checks.record('hover', overlayControlsWindow.isVisible())
-        await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }))`)
+        sampleTransparentHover(away)
         await new Promise(resolve => setTimeout(resolve, 700))
         qaLog(`overlay leave control: hidden=${!overlayControlsWindow.isVisible()}`)
         checks.record('leave', !overlayControlsWindow.isVisible())
-        await overlayWindow.webContents.executeJavaScript(`document.querySelector('.overlay-shell')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`)
-        await new Promise(resolve => setTimeout(resolve, 180 + OVERLAY_CONTROLS_DWELL_MS))
+        await restOnLyrics()
         const opened = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]'); button?.click(); return Boolean(button) })()`)
         await new Promise(resolve => setTimeout(resolve, 220))
         qaLog(`overlay open-client control: found=${opened}, visible=${mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, bounds=${JSON.stringify(mainWindow.getBounds())}`)

@@ -240,6 +240,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
     })
     const unsubscribe = window.syllable.playback.onUpdate(value => {
       if (!alive || (value && 'error' in value)) return
+      if (window.__syllableQa && window.__syllablePlaybackHold) return
       if (value?.playbackSource === 'local') {
         setLocalConnected(true); setDemoMode(false); setPlayback(value); return
       }

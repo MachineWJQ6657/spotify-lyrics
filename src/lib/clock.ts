@@ -44,6 +44,16 @@ export class TransportClock {
   }
 }
 
+/**
+ * Ms until the player bar shows something new: its time text (whole seconds)
+ * or its fill (one pixel of `barWidthPx`). At least 16 ms.
+ */
+export function progressRefreshMs(positionMs: number, durationMs: number | undefined, barWidthPx: number) {
+  const toNextSecond = 1000 - (((Math.floor(positionMs) % 1000) + 1000) % 1000)
+  const perPixel = durationMs && durationMs > 0 && barWidthPx > 0 ? durationMs / barWidthPx : 160
+  return Math.max(16, Math.min(toNextSecond, perPixel))
+}
+
 export function formatTime(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`

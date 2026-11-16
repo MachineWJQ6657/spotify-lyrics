@@ -50,6 +50,8 @@ for (let attempt = 0; attempt < 40; attempt++) {
   await wait(500)
   if (await evaluate('Boolean(window.__syllablePlaybackQa) && document.querySelectorAll(".lyric-group").length > 4').catch(() => false)) break
 }
+// Real playback must not move the clock under the checks (the user may be listening).
+await evaluate('window.__syllablePlaybackHold = true')
 const starts = JSON.parse(await evaluate('JSON.stringify(window.__syllablePlaybackQa?.lineStarts() ?? [])'))
 if (starts.length < 6) { console.error('no timed lyrics on screen'); process.exit(1) }
 
@@ -100,6 +102,7 @@ check('Esc closes it with the focus in the list', await evaluate('!document.quer
 const select = JSON.parse(await evaluate('JSON.stringify({ lyric: getComputedStyle(document.querySelector(".lyrics-viewport .lyric-primary")).userSelect, body: getComputedStyle(document.body).userSelect })'))
 check('lyric text can be selected, the window chrome cannot', select.lyric === 'text' && select.body === 'none', JSON.stringify(select))
 
+await evaluate('window.__syllablePlaybackHold = false')
 ws.close()
 console.log(failures.length ? `FAILED: ${failures.join('; ')}` : 'lyric list checks passed')
 process.exit(failures.length ? 1 : 0)

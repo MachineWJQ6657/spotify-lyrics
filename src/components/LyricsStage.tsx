@@ -4,6 +4,7 @@ import { AlertCircle, ChevronDown, ChevronUp, Copy, LocateFixed, Music2, Play, R
 import type { LyricLine, LyricTrack, LyricsDocument } from '../types'
 import { activeLineIndex, alignSecondaryTrack, visibleTracks } from '../lib/lyrics'
 import { lyricScrollTarget } from '../lib/lyrics-scroll'
+import { glideScroll } from '../lib/glide-scroll'
 import { findLineMatches, nearestMatch, stepMatch } from '../lib/find-lyrics'
 import { rowText, songText } from '../lib/copy-lyrics'
 
@@ -84,14 +85,23 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     setFollowing(true)
   }, [base, onSeekLine])
 
+  // A new line glides into place at about 60 positions a second (see
+  // glide-scroll.ts); the user's own scrolling stops it at once.
+  const glide = useRef<() => void>(() => {})
+  const stopGlide = useCallback(() => { glide.current(); glide.current = () => {} }, [])
+  useEffect(() => stopGlide, [stopGlide])
   const centerActive = useCallback((behavior: ScrollBehavior = 'auto') => {
     const viewport = viewportRef.current
     const list = listRef.current
     if (!viewport || !list) return
     const current = active >= 0 ? list.querySelector<HTMLElement>(`[data-line-index="${active}"]`) : null
     const top = lyricScrollTarget(active, viewport.clientHeight, current)
-    if (top != null) viewport.scrollTo({ top, behavior })
-  }, [active])
+    if (top == null) return
+    stopGlide()
+    if (behavior === 'smooth') glide.current = glideScroll(viewport, Math.min(top, viewport.scrollHeight - viewport.clientHeight))
+    else viewport.scrollTo({ top, behavior })
+  }, [active, stopGlide])
+  useEffect(() => { if (!following) stopGlide() }, [following, stopGlide])
 
   useEffect(() => setFollowing(true), [document?.trackId, base?.id])
 
@@ -197,9 +207,10 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     const row = listRef.current?.querySelector<HTMLElement>(`[data-line-index="${currentMatch}"]`)
     const top = viewport ? lyricScrollTarget(currentMatch, viewport.clientHeight, row) : null
     if (!viewport || top == null) return
+    stopGlide()
     setFollowing(false)
     viewport.scrollTo({ top, behavior: 'smooth' })
-  }, [currentMatch, find?.query])
+  }, [currentMatch, find?.query, stopGlide])
 
   const centerRef = useRef(centerActive)
   centerRef.current = centerActive
@@ -284,14 +295,14 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       className="lyrics-viewport"
       tabIndex={0}
       aria-label="同步歌词，可上下滚动查看"
-      onWheelCapture={() => setFollowing(false)}
+      onWheelCapture={() => { stopGlide(); setFollowing(false) }}
       onPointerDown={event => {
         // A right-click opens the row menu; it is not scrolling away. It used
         // to stop the list following the song until 回到当前歌词 was clicked.
-        if (event.button !== 2) setFollowing(false)
+        if (event.button !== 2) { stopGlide(); setFollowing(false) }
       }}
       onKeyDownCapture={event => {
-        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) setFollowing(false)
+        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) { stopGlide(); setFollowing(false) }
       }}
     >
       <div ref={listRef} className="lyrics-list" style={{ paddingTop: viewportHeight * .44, paddingBottom: viewportHeight * .56 }}>

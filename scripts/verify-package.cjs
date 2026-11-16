@@ -65,7 +65,7 @@ const checks = {
   boundaryLyricClock: renderer.includes('function msUntilNextLyricChange(') && renderer.includes('nextDue.current'),
   // 0.4.58 overlay interaction: one lock (no separate click-through), dwell before the bar over locked lyrics,
   // contextual bar with an overlay-settings shortcut, and no paused dimming capping the text opacity.
-  overlayLockInteraction: main.includes('function toggleOverlayLock(') && main.includes('OVERLAY_CONTROLS_DWELL_MS') && main.includes('window:show-section')
+  overlayLockInteraction: main.includes('function toggleOverlayLock(') && main.includes('advanceHoverIntent(') && main.includes('window:show-section')
     && renderer.includes('悬浮窗设置') && renderer.includes('syllable:panel-tab') && !/\.overlay-shell\.paused/.test(rendererCss),
   // 0.4.59 crash fixes: stop libspotifyctl's event thread off the JS thread before terminating its worker,
   // never touch destroyed windows from timers, log main-process errors instead of a modal dialog, quit on request.
@@ -141,6 +141,8 @@ const checks = {
   overlayPlacementKept: main.includes('function visibleOverlayPlacement(') && main.includes('OVERLAY_GRIP_PX') && renderer.includes('removed.length === 1'),
   // 0.4.76, regression review of 0.4.74-0.4.75: the track shift needs a dozen rows and ignores loose stamping; a sparse interleaved translation must read as Chinese; only part labels are tested for sung values; a resume continues from the held position only within 1.5 s; an overlay whose stored size does not fit is brought back whole.
   tightenedRules: renderer.includes('nearMs') && main.includes('CHINESE_ONLY_WORD') && renderer.includes('PART_LABEL') && native.includes('now - previous.observedAtMs <= 1500') && main.includes('width === bounds.width'),
+  // 0.4.77, frames and the overlay bar: fades in steps (a word 40 -> 4 frames, an overlay line 64 -> 9 at 240 Hz), the lyric list glides at about 60 Hz, the player bar redraws on a visible change, the bar opens on a resting pointer
+  fewerFramesRestingBar: /lyric-line-enter 260ms steps\(8, ?end\)/.test(rendererCss) && /\.karaoke-line span\s*\{\s*transition:\s*color 160ms steps\(3, ?jump-start\)/.test(rendererCss) && /\.lyric-group\.active,\s*\.lyric-group\.past\s*\{\s*transition-timing-function:\s*steps\(8, ?end\)/.test(rendererCss) && /color 120ms steps\(3, ?jump-start\)/.test(rendererCss) && renderer.includes('frameMs') && renderer.includes('onTrackWidth') && main.includes('advanceHoverIntent(') && !main.includes('OVERLAY_CONTROLS_DWELL_MS'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

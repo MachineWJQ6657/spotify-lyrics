@@ -283,3 +283,17 @@ describe('visibility-aware visual position clock', () => {
     expect(probe).toEqual({ ticks: 2, samples: 2 })
   })
 })
+
+describe('reading the position at the moment of a command', () => {
+  it('gives the clock as it is now, while the rendered value waits for its next refresh', () => {
+    const reader: { current: (() => number) | null } = { current: null }
+    hooks.index = 0
+    usePosition(sample({ positionMs: 10_000 }), 1000, undefined, reader)
+    hooks.pending.splice(0).forEach(effect => effect())
+    const rendered = lastPosition()
+    vi.advanceTimersByTime(600)
+    // No refresh yet (1 s cadence): a pause now must not write the old value back.
+    expect(lastPosition()).toBe(rendered)
+    expect(reader.current?.()).toBe(10_600)
+  })
+})

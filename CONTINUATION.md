@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.76 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.75-backup-20261115`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.77 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.76-backup-20261116`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (126 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (127 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,17 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-16 / 0.4.77 deployed: fewer frames for the overlay and the main window; the overlay bar opens on a resting pointer
+
+- `release/current` = **0.4.77** (asar SHA256 `f8c9031f23670bf737705e1f8af43533c6d1932981b8dc5cd1bc703f30fa2d13`, verifier 127/127, 1413 tests). Rollback: `release/current-0.4.76-backup-20261116`; profile backup `.qa-user-data-preupdate-0477`.
+- **Where the time went** (measured with the new `scripts/qa/perf.ps1`, `trace-frames.mjs`, `page-metrics.mjs`, `page-profile.mjs`, `main-profile.mjs`; README "Performance"): JS is nearly idle in every process; the cost is frames. On the 240 Hz displays Chromium draws every CSS transition at the refresh rate, and each frame of the transparent overlay is read back from the GPU. A 160 ms word fade drew 40 frames, the 260 ms line fade 64; on a word-timed song the overlay used ~28% of a core. The main window drew ~70 frames per line change (smooth scroll) and ~6 a second for the 160 ms player-bar tick.
+- **Changes**: `steps()` timing for the overlay's word (3) and line (8) fades and the main list's row opacity (8) and word colour (3): 40 -> 4 and 64 -> 9 frames. `src/lib/glide-scroll.ts`: the list glides with an ease-out writing `scrollTop` at most every 15 ms (24 frames per line instead of ~70), stopped by wheel / pointer / navigation keys and when following stops. `progressRefreshMs` in `src/lib/clock.ts`: the player bar re-renders at the next whole second or the next pixel of its measured width. Tried and rejected: `--frame-throttle-fps` and `--limit-fps` (no effect on Electron 44).
+- **Side by side, same song** (0.4.76 as a second instance with its own profile, listening off in both): both windows 9.5% -> 6.5% of a core, overlay only 3.3% -> 2.7%; synthetic word-timed overlay 28% -> 4.5%.
+- **Overlay bar**: `electron/overlay-hover-intent.ts` (`advanceHoverIntent`), evaluated in `sampleTransparentHover` on every native cursor sample (24 ms near the overlay): opens after the pointer rests within 6 DIP for 500 ms after moving onto the lyrics, closes when it has been parked 2.5 s (re-armed by movement). Replaces the 350 ms dwell that applied only to locked lyrics. `overlay-unlock` acceptance view passes except `shortcut` (the user's instance holds Ctrl+Alt+U).
+- **Twelfth review** (this diff only), 5 findings, all fixed: (1) the region growing / reappearing under a parked pointer armed the bar — `HoverIntent` now keeps the cursor position outside too (`seen`), and only the pointer's own movement arms it; (2) the player bar's rendered position can be ~1 s old, and pause / arrow keys used it — `usePosition` takes a `reader` ref and `PlayerBar` reads `positionNow()`; (3) row hover / find marks also faded in steps — steps only on `.active` / `.past`; (4) `steps(3, end)` delayed each word by a step — `jump-start`; (5) the `overlay-controls` QA view drove hover through DOM events — it feeds `sampleTransparentHover` fixed points, and `overlay-unlock` now approaches from outside. Both views pass all checks (with the user's instance stopped, `shortcut` passes too).
+- **QA**: `window.__syllablePlaybackHold` (honoured only with `__syllableQa`) stops a window following the player, so `verify-lyric-list.mjs` passes while the user listens.
+- The user's own Syllable exited by itself around 12:46 local on 2026-11-16 (last local-storage flush 12:46:09; no error.log, no crash event); none of the QA steps had touched it. The deploy started it again. During the second smoke run the secondary display disappeared for 3 s (Kernel-Power 566 session change at 13:33 local); the app moved the test overlay to the primary screen until the script hid it — a display event, not a regression.
 
 ## 2026-11-15 / 0.4.76 deployed: rules of 0.4.74-0.4.75 tightened after a second regression review
 

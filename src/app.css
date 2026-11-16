@@ -201,10 +201,14 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 }
 .lyric-group.past { opacity: .2; }
 .lyric-group.active { opacity: 1; }
+/* A line change fades in a few steps (each frame of the whole window costs);
+   hovering a row, find marks and calibration keep the eased fade. */
+.lyric-group.active, .lyric-group.past { transition-timing-function: steps(8, end); }
+.lyric-group.seekable:hover { transition-timing-function: var(--sy-ease); }
 .lyric-primary { color: #fff; font-size: var(--lyric-size); font-weight: 700; line-height: 1.22; letter-spacing: -.005em; overflow-wrap: anywhere; text-wrap: balance; }
 /* Break Japanese at phrase boundaries (Chromium's built-in segmenter), not mid-word. */
 .lyric-primary:lang(ja), .lyric-secondary:lang(ja) { word-break: auto-phrase; }
-.lyric-primary.karaoke-line span { color: rgba(255, 255, 255, .4); transition: color 120ms linear; }
+.lyric-primary.karaoke-line span { color: rgba(255, 255, 255, .4); transition: color 120ms steps(3, jump-start); }
 .lyric-primary.karaoke-line span.sung { color: #fff; text-shadow: none; }
 .lyric-secondary { margin-top: 8px; color: rgba(255, 255, 255, .75); font-size: 17px; font-weight: 500; line-height: 1.45; }
 .lyric-secondary.romanization { color: rgba(255, 255, 255, .62); font-size: 15px; letter-spacing: .01em; }

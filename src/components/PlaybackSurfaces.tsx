@@ -5,10 +5,10 @@ import { LyricsStage } from './LyricsStage'
 import { LyricsEditor } from './LyricsEditor'
 import { PlayerBar } from './PlayerBar'
 import { recordSurfaceRender } from '../lib/render-probe'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { visibleTracks } from '../lib/lyrics'
 import { msUntilNextLyricChange, wallDelayMs } from '../lib/lyric-clock'
-import { activeAcousticAnchor } from '../lib/clock'
+import { activeAcousticAnchor, progressRefreshMs } from '../lib/clock'
 
 interface ClockProps { playback: PlaybackSnapshot | null; document: LyricsDocument | null; offsetMs: number; sessionCalibration?: SessionCalibration | null }
 
@@ -36,8 +36,15 @@ export function ClockedLyricsStage(props: ClockProps & { enabled: string[]; roma
 
 export function ClockedPlayerBar({ playback, demoMode }: { playback: PlaybackSnapshot | null; demoMode: boolean }) {
   recordSurfaceRender('player')
-  const position = usePosition(playback, 160)
-  return <PlayerBar playback={playback} position={position} demoMode={demoMode} />
+  // Redraw when the time text or the bar would change, not every 160 ms: on a
+  // four-minute song the bar moves about 3 px a second.
+  const barWidth = useRef(0)
+  const onTrackWidth = useCallback((width: number) => { barWidth.current = width }, [])
+  const durationMs = playback?.track?.durationMs
+  const reader = useRef<(() => number) | null>(null)
+  const position = usePosition(playback, 1000, positionMs => progressRefreshMs(positionMs, durationMs, barWidth.current), reader)
+  const positionNow = useCallback(() => reader.current?.() ?? 0, [])
+  return <PlayerBar playback={playback} position={position} positionNow={positionNow} demoMode={demoMode} onTrackWidth={onTrackWidth} />
 }
 
 export function ClockedLyricsEditor(props: ClockProps) {

@@ -359,6 +359,8 @@ declare global {
     __syllableListenQa?: { verdict(state: 'decided' | 'inconsistent'): boolean; state(): unknown }
     /** UI checks without touching the player: put the lyric clock at a position, and read the line starts on screen. */
     __syllablePlaybackQa?: { position(positionMs: number, isPlaying?: boolean): boolean; lineStarts(): number[] }
+    /** QA only (with __syllableQa): while true this window ignores the player's snapshots, so the hook above keeps the clock during real playback. */
+    __syllablePlaybackHold?: boolean
   }
 }
 

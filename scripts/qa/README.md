@@ -113,6 +113,36 @@ Run it after any change to `local-spotify.ts`, `native-clock.ts` or the gate
 functions; it is the only check of that code that needs no live playback, and
 it does not replace one.
 
+## Performance
+
+```bash
+powershell -File scripts\qa\perf.ps1 -Name Syllable.exe -Match 'release\current'   # the user's app, read-only
+powershell -File scripts\qa\perf.ps1 -Name electron.exe -Match '.qa-test-profile'    # the test instance
+node scripts/qa/page-metrics.mjs 20        # renderer work per window (they share one process)
+node scripts/qa/trace-frames.mjs 10        # frames drawn, grouped into bursts
+node scripts/qa/page-profile.mjs index.html 15
+node scripts/qa/main-profile.mjs 15        # main process JS; launch with --inspect=9339
+```
+
+`perf.ps1` prints the CPU of each process of one instance (percent of one
+core) and its GPU engine time. `trace-frames.mjs` records a Chromium trace and
+groups the drawn frames into bursts: with one window visible, each burst is
+one repaint, e.g. one lyric line change, and its frame count is what it costs.
+On a 240 Hz display every CSS transition draws a frame per refresh; the
+transparent overlay is copied back from the GPU on each, so a 160 ms word fade
+cost 40 frames until 0.4.77 (now 4, with `steps(3, end)`).
+
+Measured on 2026-11-16 (16-core Ryzen, 240 Hz): the app idle 1.1% of a core;
+the overlay alone 2.7% (0.4.76: 3.3%, and 28% on a word-timed song); both
+windows 6.5% (0.4.76: 9.5%). Real playback is noisy (an interlude draws
+nothing, a new song starts a lookup): compare builds side by side on the same
+song, e.g. the deployed build as a second instance with its own profile
+(`release/current/Syllable.exe --user-data-dir=<repo>/.qa-old-profile
+--remote-debugging-port=9334 --syllable-secondary-test`), with listening off in
+both test profiles. `window.__syllablePlaybackHold = true` (with
+`__syllableQa`) stops a window following the player, so the clock hook can
+drive it while the user listens; `verify-lyric-list.mjs` sets it.
+
 ## Live playback check
 
 ```bash

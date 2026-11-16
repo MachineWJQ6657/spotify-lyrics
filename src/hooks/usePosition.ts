@@ -18,8 +18,11 @@ declare global {
  * just after it, so a line switches on time instead of up to one tick late,
  * and a line without word timing costs a couple of renders per second.
  */
-export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100, nextDueMs?: (positionMs: number) => number | undefined) {
+export function usePosition(playback: PlaybackSnapshot | null, refreshMs = 100, nextDueMs?: (positionMs: number) => number | undefined,
+  /** Receives a reader of the position at the moment it is called (the rendered value can be a second old). */
+  reader?: { current: (() => number) | null }) {
   const clock = useRef(new TransportClock())
+  if (reader) reader.current = () => clock.current.position()
   const nextDue = useRef(nextDueMs)
   nextDue.current = nextDueMs
   const plan = useRef<() => void>(() => {})

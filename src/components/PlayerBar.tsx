@@ -7,7 +7,9 @@ import { hasKana, scriptPresentation } from '../lib/script'
 import { BrandMark } from './BrandMark'
 import { isShortcutTarget, seekPlayback } from '../lib/seek'
 
-export function PlayerBar({ playback, position, demoMode }: { playback: PlaybackSnapshot | null; position: number; demoMode: boolean }) {
+export function PlayerBar({ playback, position, positionNow, demoMode, onTrackWidth }: { playback: PlaybackSnapshot | null; position: number; positionNow?: () => number; demoMode: boolean; onTrackWidth?: (width: number) => void }) {
+  // Commands use the clock as it is now: the rendered position can be up to a second old.
+  const currentPosition = () => positionNow?.() ?? position
   const track = playback?.track
   const title = track?.name ?? ''
   const artist = track?.artist ?? ''
@@ -25,6 +27,15 @@ export function PlayerBar({ playback, position, demoMode }: { playback: Playback
   const commandLockUntil = useRef(0)
   const pendingReleaseTimer = useRef<number | undefined>(undefined)
   const setPlayback = useAppStore(state => state.setPlayback)
+  const progressTrack = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const element = progressTrack.current
+    if (!element || !onTrackWidth) return
+    onTrackWidth(element.clientWidth)
+    const observer = new ResizeObserver(() => onTrackWidth(element.clientWidth))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [onTrackWidth])
 
   useEffect(() => {
     if (!pendingSkipTrackId || !track?.id || track.id === pendingSkipTrackId) return
@@ -45,7 +56,7 @@ export function PlayerBar({ playback, position, demoMode }: { playback: Playback
     if (value === 'play' || value === 'pause') {
       const nextPlaying = value === 'play'
       optimisticObservedAt = Date.now()
-      setPlayback({ ...playback, positionMs: position, observedAtMs: optimisticObservedAt, isPlaying: nextPlaying })
+      setPlayback({ ...playback, positionMs: currentPosition(), observedAtMs: optimisticObservedAt, isPlaying: nextPlaying })
     }
     try {
       if (!demoMode) {
@@ -103,7 +114,7 @@ export function PlayerBar({ playback, position, demoMode }: { playback: Playback
       if (pendingSkipTrackId) return
       // An unknown length (0) must not clamp the target to the start of the song.
       const latest = duration > 1000 ? duration - 1000 : Number.POSITIVE_INFINITY
-      void seekTo(Math.max(0, Math.min(latest, position + (event.key === 'ArrowLeft' ? -5000 : 5000))))
+      void seekTo(Math.max(0, Math.min(latest, currentPosition() + (event.key === 'ArrowLeft' ? -5000 : 5000))))
     }
   }
   useEffect(() => {
@@ -118,7 +129,7 @@ export function PlayerBar({ playback, position, demoMode }: { playback: Playback
     </div>
     <div className="transport">
       <div className="transport-buttons"><button disabled={busy || Boolean(pendingSkipTrackId)} title="上一首（播放超过 3 秒时先回到开头）" onClick={() => void command('previous')}><SkipBack size={17} /></button><button disabled={busy || Boolean(pendingSkipTrackId)} title={playback?.isPlaying ? '暂停' : '播放'} className="play-button" onClick={() => void command(playback?.isPlaying ? 'pause' : 'play')}>{busy ? <LoaderCircle className="spin-icon" size={16} /> : playback?.isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button disabled={busy || Boolean(pendingSkipTrackId)} title={pendingSkipTrackId ? '正在等待 Spotify 换曲…' : '下一首'} onClick={() => void command('next')}><SkipForward size={17} /></button></div>
-      <div className={`progress-row ${pendingSkipTrackId ? 'transport-pending' : ''}`}><span>{formatTime(position)}</span><div className="progress-track" onClick={event => { if (!pendingSkipTrackId) seek(event) }}
+      <div className={`progress-row ${pendingSkipTrackId ? 'transport-pending' : ''}`}><span>{formatTime(position)}</span><div ref={progressTrack} className="progress-track" onClick={event => { if (!pendingSkipTrackId) seek(event) }}
         onMouseMove={event => { if (playback?.track) setHoverMs(pointerMs(event)) }} onMouseLeave={() => setHoverMs(null)}>
         <i style={{ width: `${Math.min(100, position / duration * 100)}%` }} />
         {hoverMs && <b className="progress-hover" style={{ left: hoverMs.x }}>{formatTime(hoverMs.ms)}</b>}

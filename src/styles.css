@@ -182,8 +182,12 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell) { min-width
 .overlay-shell.effect-outline .overlay-primary { -webkit-text-stroke: 1px rgba(0,0,0,.92); paint-order: stroke fill; text-shadow: 0 1px 3px #000; }
 .overlay-shell.effect-outline .overlay-secondary { -webkit-text-stroke-width: 2px; }
 .overlay-shell.no-background.effect-none .overlay-primary { text-shadow: 0 2px 6px rgba(0,0,0,.92); }
-.karaoke-line span { transition: color 160ms linear; }
-.overlay-line-content { animation: lyric-line-enter 260ms cubic-bezier(.22, .61, .36, 1); }
+/* Fades in a few steps: the same look, a fraction of the frames. Every frame
+   of this transparent window is copied back from the GPU, and at 240 Hz a
+   160 ms word fade drew 40 frames and a 260 ms line fade 64 (4 and 9 now).
+   A word starts changing the moment it is sung (jump-start), not a step later. */
+.karaoke-line span { transition: color 160ms steps(3, jump-start); }
+.overlay-line-content { animation: lyric-line-enter 260ms steps(8, end); }
 @keyframes lyric-line-enter {
   /* Native window regions must not sample an intermediate translated box.
      Opacity-only entrance preserves stable text coordinates across frames. */

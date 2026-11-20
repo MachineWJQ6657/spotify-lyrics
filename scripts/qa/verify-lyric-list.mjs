@@ -56,7 +56,11 @@ const starts = JSON.parse(await evaluate('JSON.stringify(window.__syllablePlayba
 if (starts.length < 6) { console.error('no timed lyrics on screen'); process.exit(1) }
 
 // 1. A line change scrolls smoothly. Start inside line k, 700 ms before line k + 1.
-const k = Math.min(starts.length - 2, Math.max(2, Math.floor(starts.length / 2)))
+// Line k + 1 must stay the sung line while the scroll is watched (2.6 s): on a dense
+// song (a rap verse) three lines pass in that time. Take the roomy place nearest the middle.
+const middle = Math.min(starts.length - 2, Math.max(2, Math.floor(starts.length / 2)))
+const roomy = index => index >= 2 && index + 2 < starts.length && starts[index + 2] - starts[index + 1] >= 3200 && starts[index + 1] - starts[index] >= 1200
+const k = [...starts.keys()].filter(roomy).sort((left, right) => Math.abs(left - middle) - Math.abs(right - middle))[0] ?? middle
 await evaluate(`window.__syllablePlaybackQa.position(${starts[k] + 50}, false)`)
 await wait(900)
 const before = JSON.parse(await evaluate('JSON.stringify({ top: Math.round(document.querySelector(".lyrics-viewport").scrollTop), active: Number(document.querySelector(".lyric-group.active")?.dataset.lineIndex) })'))

@@ -33,6 +33,8 @@ interface SyllableApi {
       additionalTracks?: Array<{ language: string; label: string; kind: 'translation' | 'romanization'; syncedLyrics: string; source: string }>
     } | null>
     search(query: { track: string; artist: string; album?: string; durationMs?: number }): Promise<LyricsCandidate[]>
+    /** Songs matching free text (the search page). */
+    findSongs(text: string): Promise<{ hits: import('./lib/song-reader').SongHit[]; failed: Array<'lrclib' | 'netease'> }>
     romanize(lines: string[]): Promise<string[]>
     export(filename: string, content: string): Promise<string | null>
   }

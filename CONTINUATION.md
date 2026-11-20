@@ -2,11 +2,11 @@
 
 ## Current state (read first)
 
-- **Deployed:** 0.4.77 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.76-backup-20261116`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
+- **Deployed:** 0.4.78 at `release/current/Syllable.exe`; the desktop and Start Menu shortcuts point there with no arguments. Rollback: `release/current-0.4.77-backup-20261120`. Profile backups (ignored): `.qa-user-data-preupdate-04xx`.
 - **Workflow:** feature commits on `main`, pushed to `origin`.
   - `scripts/git-hooks/pre-push` and `npm run verify:repo` block artifacts.
   - GitHub Actions CI (`.github/workflows/ci.yml`) runs build, tests and the guard on windows-latest.
-  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (127 checks).
+  - Package with `npx electron-builder --win dir -c.directories.output=release/candidate-<ver>-<date>`, then `node scripts/verify-package.cjs <dir>/win-unpacked` (128 checks).
   - Smoke-test in an isolated `--user-data-dir` (with `--syllable-secondary-test`), back up `%APPDATA%/syllable`, stop the running app with `release/current/Syllable.exe --syllable-quit` (0.4.59+; wait for the processes to exit, force-kill only as a fallback), swap `current`, relaunch. Old versions go to the Recycle Bin.
   - Main-process errors and child-process crashes are logged to `%APPDATA%/syllable/error.log` (rotated at 256 KB); native crashes leave WER dumps in `%LOCALAPPDATA%/CrashDumps` and Application event 1000. `cdb.exe` is installed under `C:/Program Files (x86)/Windows Kits/10/Debuggers/x64`.
 - **Lyrics:** three community providers (LRCLIB / NetEase / Kugou).
@@ -27,6 +27,19 @@
 - **UI copy:** short and factual. The user asked for precautionary wording to be removed ("不保存、不上传", "不代表…", "未验证…"); the verifier's `plainCopy` check rejects the old phrases.
 - **UI QA:** launch the dev build with `--disable-features=CalculateNativeWinOcclusion`; otherwise a covered window reports `visibilityState=hidden`, the position clock stops (by design, `usePosition`) and CDP screenshots show 0:00. `Emulation.setDeviceMetricsOverride` checks the 1024×680 minimum layout.
 - **Older history:** `docs/history/continuation-2026-09-12-to-10-23.md` (0.4.9–0.4.44, verbatim).
+
+## 2026-11-20 / 0.4.78 deployed: the "查歌词" page reads lyrics without playback
+
+- `release/current` = **0.4.78** (asar SHA256 `f7e009822ec0e5f12206ada6e148236573d629106eeb7445b6d856cd91f8afef`, verifier 128/128, 1450 tests). Rollback: `release/current-0.4.77-backup-20261120`; profile backup `.qa-user-data-preupdate-0478`.
+- **Request** (2026-11-20): look at lyrics without listening, e.g. search a song while Spotify plays nothing.
+- **Search** (`electron/song-search.ts`, IPC `lyrics:find-songs`, preload `lyrics.findSongs`): free text to LRCLIB `/api/search?q=` and NetEase `/api/search/get` (type 1, 30 songs) in parallel; `mergeSongHits` folds entries with the same folded title, first performer and length within 3 s into one hit, ranks by title match, both-catalogue presence and catalogue order, caps at 40. One catalogue down still answers (`failed`); both down throws.
+- **Reading** (`src/store/useBrowseStore.ts`, `src/lib/song-reader.ts`, `src/components/BrowseView.tsx`): a hit becomes a synthetic track `browse:<key>` and goes through the ordinary `lyrics:fetch` (three providers, translation alignment), then `completeRomanization` for Japanese; the catalogue entry's own LRCLIB lyrics are the fallback. Documents live in a non-persisted zustand store (30 remembered); nothing is written to `useAppStore().lyrics` or the library. A retry never passes `bypassCache` (unfinished answers are not cached, and bypassing would drop a playing song's provider results under the same key). Library songs open through `openSaved` and are read live from the library.
+- **`LyricsStage` `reading` prop**: no centring or follow button, list from the top with fixed padding, every row at full opacity and smaller type (`.lyrics-stage-shell.reading`), no timing note on untimed text, its own empty state. Find (Ctrl+F), the row menu and text selection are the playback ones.
+- **Entries**: sidebar item, a `header-browse` pill on the now page when nothing plays, a "查看歌词" button per library song. A file dropped on the search page is not imported (it would go to the playing song).
+- **Thirteenth review** (this diff, run on Opus): no path from a reader lookup to the playing song's lyrics; 5 other findings, all fixed (drop target, retry and cache, "not found" with a failed catalogue, copy result, readable-lyrics predicate).
+- **QA**: `scripts/qa/verify-browse.mjs` (live search, reader, Esc, state kept across pages, library button). `verify-lyric-list.mjs` now picks a line with room after it: on a dense song (KILLA, 96 lines in 3 minutes) three lines passed inside its 2.6 s window and three checks failed without a regression.
+- Not done: saving a found song into the library, Spotify's own search (needs the Web API connection), covers in the result list.
+- Usage: the user chose to do this on Fable although the weekly Fable figure was already 52% (their 50% rule; asked on 2026-11-20).
 
 ## 2026-11-16 / 0.4.77 deployed: fewer frames for the overlay and the main window; the overlay bar opens on a resting pointer
 

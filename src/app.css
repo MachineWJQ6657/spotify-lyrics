@@ -721,3 +721,40 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
   left: 25%; right: 25%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .34), transparent);
 }
 .lyric-card.lyrics-centered .lyric-group.find-current::after { background: linear-gradient(90deg, transparent, var(--sy-accent), transparent); }
+
+/* ---------- 查歌词: search page and the reader ---------- */
+.browse-toolbar .library-search { flex: 1 1 420px; max-width: 560px; height: 42px; padding: 0 16px; }
+.browse-toolbar .library-search input { font-size: 14px; }
+.browse-submit { flex: none; height: 42px; padding: 0 22px; border: 0; border-radius: 999px; background: var(--sy-accent); color: var(--sy-accent-ink); font-size: 13px; font-weight: 700; }
+.browse-submit:hover:not(:disabled) { background: var(--sy-accent-hover); }
+.browse-submit:disabled { opacity: .45; }
+.browse-section { margin-top: 18px; }
+.browse-section h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; color: var(--sy-text); font-size: 14px; font-weight: 600; }
+.browse-section h2 span { color: var(--sy-text-3); font-size: 12px; font-weight: 400; }
+.library-grid article.browse-row { grid-template-columns: 52px minmax(0, 1fr); cursor: pointer; outline: 0; }
+.library-grid article.browse-row:focus-visible { box-shadow: inset 0 0 0 2px rgba(30, 215, 96, .6); }
+.browse-status { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--sy-text-3); text-align: center; }
+.browse-status p { max-width: 420px; margin: 0; color: var(--sy-text-2); font-size: 13px; line-height: 1.6; }
+.browse-status button { height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--sy-surface-2); color: var(--sy-text); font-size: 13px; }
+.browse-status button:hover { background: var(--sy-surface-3); }
+.browse-hint { margin: 22px 2px 0; color: var(--sy-text-3); font-size: 12px; }
+.browse-back { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--sy-stroke); border-radius: 50%; background: rgba(0, 0, 0, .18); color: var(--sy-text-2); }
+.browse-back:hover { border-color: var(--sy-stroke-strong); color: var(--sy-text); }
+.browse-reader-header .now-track-heading { gap: 14px; }
+.browse-reader-header .header-cover { width: 60px; height: 60px; }
+.header-cover .cover-initial { width: 100%; height: 100%; display: grid; place-items: center; background: linear-gradient(135deg, hsl(var(--tile-hue, 150) 45% 30%), hsl(calc(var(--tile-hue, 150) + 40) 40% 18%)); color: hsl(var(--tile-hue, 150) 70% 88%); font-size: 26px; font-weight: 700; }
+.source-badges .header-browse {
+  flex: none; height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--sy-stroke); border-radius: 999px;
+  background: rgba(0, 0, 0, .18); color: var(--sy-text-2); font-size: 12px; white-space: nowrap;
+}
+.source-badges .header-browse:hover { border-color: var(--sy-stroke-strong); color: var(--sy-text); }
+/* Reading: the whole song as a page. Every row alike, smaller type, no fade at the top. */
+.lyrics-stage-shell.reading .lyrics-viewport { mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 56px), transparent 100%); }
+.lyrics-stage-shell.reading .lyric-group, .lyrics-stage-shell.reading .lyric-group.past { min-height: 0; padding: 10px 0; opacity: 1; transition: none; }
+.lyrics-stage-shell.reading .lyric-primary { font-size: clamp(18px, calc(var(--lyric-size) * .5), 27px); line-height: 1.34; }
+.lyrics-stage-shell.reading .untimed-lyrics .lyric-primary { font-size: clamp(17px, calc(var(--lyric-size) * .46), 25px); font-weight: 600; }
+.lyrics-stage-shell.reading .untimed-lyrics .lyric-group { padding: 5px 0; }
+.lyrics-stage-shell.reading .lyric-secondary { margin-top: 4px; font-size: clamp(13px, calc(var(--lyric-size) * .3), 17px); }
+.lyrics-stage-shell.reading .lyric-secondary.romanization { font-size: clamp(12px, calc(var(--lyric-size) * .27), 15px); }
+.lyrics-stage-shell.reading.has-find .lyric-group:not(.find-match):not(.find-current) { opacity: .42; }
+.lyrics-stage-shell.reading .lyric-group.find-match, .lyrics-stage-shell.reading .lyric-group.find-current { opacity: 1; }

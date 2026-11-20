@@ -31,6 +31,13 @@ Checks that need no audio:
   scrolls smoothly and ends centred, that a right-click keeps the list
   following, that Esc closes the find bar from anywhere, and that lyric text
   can be selected. Run it after changes to `LyricsStage.tsx`.
+- `node scripts/qa/verify-browse.mjs ["query"] [screenshot prefix]` walks the
+  "查歌词" page: searches a song by text (live requests to LRCLIB and
+  NetEase), opens the first hit and checks the reader (from the top, every
+  row alike, nothing followed, the playing song untouched), Esc back to the
+  results, the search kept across pages, and a library song opened from the
+  library page. Run it after changes to `BrowseView.tsx`, `useBrowseStore.ts`,
+  `electron/song-search.ts` or the `reading` mode of `LyricsStage.tsx`.
 - `powershell -File scripts\qa\post-wm-close.ps1` posts WM_CLOSE (what Alt+F4
   sends) to the test instance's windows; all three must survive.
 - `./node_modules/electron/dist/electron.exe scripts/verify-overlay-contrast.cjs`

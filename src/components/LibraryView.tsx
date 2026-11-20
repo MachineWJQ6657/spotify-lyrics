@@ -8,6 +8,7 @@ import { serializeLrc } from '../lib/lyrics'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { LYRICS_SOURCES, lyricsSourceIdOf } from '../lib/lyrics-source'
 import { backupFileName, parseLibraryBackup, serializeLibraryBackup } from '../lib/library-backup'
+import { hasReadableLyrics } from '../lib/song-reader'
 
 /** Case-, width- and space-insensitive match on title, artist and album. */
 export function matchesLibraryQuery(document: Pick<LyricsDocument, 'track' | 'trackId'>, query: string) {
@@ -45,7 +46,9 @@ export function librarySourceTag(document: LyricsDocument) {
   return LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(original.source))?.label ?? ''
 }
 
-export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources'; openEditor(): void }) {
+export function LibraryView({ mode, openEditor, onRead }: { mode: 'library' | 'sources'; openEditor(): void
+  /** Open a saved song's lyrics for reading (the search page). */
+  onRead?(document: LyricsDocument): void }) {
   const library = useAppStore(state => state.library)
   const deleteDocument = useAppStore(state => state.deleteLibraryDocument)
   const restoreDocument = useAppStore(state => state.restoreLibraryDocument)
@@ -136,7 +139,7 @@ export function LibraryView({ mode, openEditor }: { mode: 'library' | 'sources';
     : <div className="library-grid">{shown.map(document => <article key={document.trackId}>
       <div className="library-cover" style={document.track?.coverUrl ? undefined : { '--tile-hue': coverTile(document.track?.name).hue } as React.CSSProperties}>{document.track?.coverUrl ? <img src={document.track.coverUrl} /> : <span className="cover-initial" aria-hidden="true">{coverTile(document.track?.name).initial}</span>}</div>
       <div className="library-copy"><strong {...libraryTrackPresentation(document, 'name')}>{document.track?.name ?? document.trackId}</strong><span><span {...libraryTrackPresentation(document, 'artist')}>{document.track?.artist ?? '本地歌词'}</span> · {document.tracks.length} 条轨道</span><div>{document.tracks.map(track => <i key={track.id}>{track.label}</i>)}{librarySourceTag(document) && <i className="source-tag" title="歌词来源">{librarySourceTag(document)}</i>}{libraryTimingTag(document) && <i className="timing-tag" title="这首歌的歌词时间已整体校正">{libraryTimingTag(document)}</i>}</div></div>
-      <div className="library-actions"><button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`.replace(/[<>:"/\\|?*]/g, '_'), serializeLrc(track)).catch(() => undefined) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
+      <div className="library-actions">{onRead && hasReadableLyrics(document) && <button title="查看歌词" onClick={() => onRead(document)}><BookOpen size={14} /></button>}<button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`.replace(/[<>:"/\\|?*]/g, '_'), serializeLrc(track)).catch(() => undefined) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
     </article>)}</div>}
   </div>
 }

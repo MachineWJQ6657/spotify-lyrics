@@ -1,7 +1,7 @@
 import { memo } from 'react'
-import { Captions, CircleHelp, LayoutDashboard, Radio, Settings2, Sparkles } from 'lucide-react'
+import { Captions, CircleHelp, LayoutDashboard, Radio, Search, Settings2, Sparkles } from 'lucide-react'
 
-export type AppView = 'now' | 'library' | 'sources' | 'settings' | 'help'
+export type AppView = 'now' | 'browse' | 'library' | 'sources' | 'settings' | 'help'
 
 export const Sidebar = memo(function Sidebar({ active, onChange, news = false }: { active: AppView; onChange(view: AppView): void
   /** An update the user has not read about yet: marks the help page, where the list is. */
@@ -9,6 +9,7 @@ export const Sidebar = memo(function Sidebar({ active, onChange, news = false }:
   return <aside className="sidebar">
     <nav>
       <button onClick={() => onChange('now')} className={`nav-item ${active === 'now' ? 'active' : ''}`}><LayoutDashboard size={18} /><span>正在播放</span></button>
+      <button onClick={() => onChange('browse')} className={`nav-item ${active === 'browse' ? 'active' : ''}`}><Search size={18} /><span>查歌词</span></button>
       <button onClick={() => onChange('library')} className={`nav-item ${active === 'library' ? 'active' : ''}`}><Captions size={18} /><span>歌词资料库</span></button>
       <button onClick={() => onChange('sources')} className={`nav-item ${active === 'sources' ? 'active' : ''}`}><Radio size={18} /><span>歌词源</span></button>
     </nav>

@@ -46,3 +46,26 @@ it('marks lines as seekable with the song time they jump to, only when seeking i
   expect(plain).not.toContain('seekable')
   expect(plain).not.toContain('lyric-seek-hint')
 })
+
+it('reads a song that is not playing: every row alike, no sung line, no timing note', () => {
+  const lines = Array.from({ length: 6 }, (_, index) => ({ startMs: index * 4000, text: `row number ${index}` }))
+  const html = renderToStaticMarkup(<LyricsStage reading document={{ trackId: 'browse:x', tracks: [{ id: 'o', language: 'en', label: 'English', kind: 'original', source: 'LRCLIB', lines }] }}
+    positionMs={-1} enabled={['en']} romanization={false} />)
+  expect(html).toContain('lyrics-stage-shell  reading')
+  expect(html).toContain('row number 5')
+  expect(html).not.toContain('lyric-group active')
+  expect(html).not.toContain('past')
+  expect(html).not.toContain('回到当前歌词')
+  const untimed = renderToStaticMarkup(<LyricsStage reading document={{ trackId: 'browse:y', tracks: [], untimedOriginal: { text: 'plain words\nmore words', language: 'en', source: 'LRCLIB' } }}
+    positionMs={-1} enabled={['en']} romanization={false} />)
+  expect(untimed).toContain('plain words')
+  expect(untimed).not.toContain('info-note')
+})
+
+it('reading a saved song without a displayable row does not suggest dropping a file (that imports into the playing song)', () => {
+  const html = renderToStaticMarkup(<LyricsStage reading document={{ trackId: 'saved', tracks: [{ id: 'o', language: 'zh-Hans', label: '中文原文', kind: 'original', source: 'LRCLIB', lines: [] }] }}
+    positionMs={-1} enabled={['zh-Hans']} romanization={false} />)
+  expect(html).toContain('没有可显示的歌词')
+  expect(html).not.toContain('拖进窗口')
+  expect(html).not.toContain('重新匹配')
+})

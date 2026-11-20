@@ -11,7 +11,9 @@ import { rowText, songText } from '../lib/copy-lyrics'
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
   onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
   /** Click a line to play from it; `seekLabel` names the song time it jumps to. */
-  onSeekLine?: (line: LyricLine) => void; seekLabel?: (line: LyricLine) => string; onSearch?: () => void }
+  onSeekLine?: (line: LyricLine) => void; seekLabel?: (line: LyricLine) => string; onSearch?: () => void
+  /** Reading a song that is not playing (the search page): every row alike, from the top, nothing follows. */
+  reading?: boolean }
 
 interface LineGroupProps {
   line: LyricLine
@@ -51,7 +53,7 @@ const LineGroup = memo(function LineGroup({ line, language, index, active, past,
   </div>
 })
 
-export function LyricsStage({ document, positionMs, enabled, romanization, onRetry, onHeardLine, onClearCalibration, calibrationLabel, onSeekLine, seekLabel, onSearch }: Props) {
+export function LyricsStage({ document, positionMs, enabled, romanization, onRetry, onHeardLine, onClearCalibration, calibrationLabel, onSeekLine, seekLabel, onSearch, reading = false }: Props) {
   const tracks = useMemo(() => visibleTracks(document, enabled, romanization), [document, enabled, romanization])
   const base = tracks.find(track => track.kind === 'original') ?? tracks[0]
   const active = base ? activeLineIndex(base.lines, positionMs) : -1
@@ -93,14 +95,15 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
   const centerActive = useCallback((behavior: ScrollBehavior = 'auto') => {
     const viewport = viewportRef.current
     const list = listRef.current
-    if (!viewport || !list) return
+    // Reading: there is no sung line to keep in view; the list stays where the reader put it.
+    if (reading || !viewport || !list) return
     const current = active >= 0 ? list.querySelector<HTMLElement>(`[data-line-index="${active}"]`) : null
     const top = lyricScrollTarget(active, viewport.clientHeight, current)
     if (top == null) return
     stopGlide()
     if (behavior === 'smooth') glide.current = glideScroll(viewport, Math.min(top, viewport.scrollHeight - viewport.clientHeight))
     else viewport.scrollTo({ top, behavior })
-  }, [active, stopGlide])
+  }, [active, stopGlide, reading])
   useEffect(() => { if (!following) stopGlide() }, [following, stopGlide])
 
   useEffect(() => setFollowing(true), [document?.trackId, base?.id])
@@ -268,9 +271,9 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
   }, [following])
 
   if (!document) return <div className="empty-lyrics"><span className="spinner" /><p>正在寻找最合适的歌词…</p></div>
-  if (document.untimedOriginal) return <div className="lyrics-stage-shell">
+  if (document.untimedOriginal) return <div className={`lyrics-stage-shell ${reading ? 'reading' : ''}`}>
     <div className="lyrics-viewport untimed-lyrics" tabIndex={0} aria-label="原文歌词，暂无可信时间轴，可上下滚动查看">
-      <div className="info-note"><strong>已取得原文，暂无可信时间轴</strong><p>{document.textReference?.status === 'conflict' ? '已排除与 Spotify 原文冲突的同步歌词。' : '下方是歌词原文，不随播放滚动。'}</p>{onRetry && <button onClick={onRetry}>重新匹配时间轴</button>}</div>
+      {!reading && <div className="info-note"><strong>已取得原文，暂无可信时间轴</strong><p>{document.textReference?.status === 'conflict' ? '已排除与 Spotify 原文冲突的同步歌词。' : '下方是歌词原文，不随播放滚动。'}</p>{onRetry && <button onClick={onRetry}>重新匹配时间轴</button>}</div>}
       <div className="lyrics-list" style={{ paddingTop: 24, paddingBottom: 80 }}>
         {document.untimedOriginal.text.split(/\r?\n/).filter(Boolean).map((text, index) => <div className="lyric-group" key={index}>
           <div lang={document.untimedOriginal!.language} className={`lyric-primary ${document.untimedOriginal!.language === 'ja' ? 'japanese-grid' : document.untimedOriginal!.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'}`}>{text}</div>
@@ -279,9 +282,10 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     </div>
   </div>
   if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>纯音乐</h3><p>歌词源确认这首歌没有歌词。</p>{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />不是纯音乐？手动搜索</button>}</div>
+  if (!base?.lines.length && reading) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>这首歌没有可显示的歌词</h3><p>保存下来的只有制作名单或空白行。</p></div>
   if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配、换个关键词手动搜索，或把 LRC 文件拖进窗口。</p><div className="empty-actions">{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />手动搜索</button>}</div></div>
 
-  return <div className={`lyrics-stage-shell ${calibrating ? 'is-calibrating' : ''}`}>
+  return <div className={`lyrics-stage-shell ${calibrating ? 'is-calibrating' : ''} ${reading ? 'reading' : ''} ${reading && find?.query.trim() && matches.length ? 'has-find' : ''}`}>
     {base.kind === 'original' && (onHeardLine || calibrationLabel) && <div className="lyrics-calibration-bar">
       <div className="lyrics-calibration-actions">
         <button disabled={!onHeardLine} aria-pressed={calibrating} onClick={() => { setCalibrating(!calibrating); setFollowing(false); setCalibrationError('') }}>{calibrating ? '取消选句' : '跟歌声校准'}</button>
@@ -305,7 +309,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) { stopGlide(); setFollowing(false) }
       }}
     >
-      <div ref={listRef} className="lyrics-list" style={{ paddingTop: viewportHeight * .44, paddingBottom: viewportHeight * .56 }}>
+      <div ref={listRef} className="lyrics-list" style={reading ? { paddingTop: 18, paddingBottom: 96 } : { paddingTop: viewportHeight * .44, paddingBottom: viewportHeight * .56 }}>
         {groups.map(({ line, secondary }, index) => <LineGroup
           key={`${line.startMs}-${index}`} line={line} language={base.language} index={index} secondary={secondary}
           active={index === active} past={index < active} positionMs={index === active && line.words?.length ? positionMs : undefined}
@@ -345,7 +349,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       <button type="button" role="menuitem" onClick={() => { setMenu(null); openFind() }}><Search size={14} />在歌词中查找<kbd>Ctrl+F</kbd></button>
     </div>, window.document.body)}
     {toast && <div className="lyrics-toast" role="status">{toast}</div>}
-    {!following && <button className="lyrics-follow-button" title="同步到正在播放的歌词" onClick={() => {
+    {!following && !reading && <button className="lyrics-follow-button" title="同步到正在播放的歌词" onClick={() => {
       // Explicit recovery must not depend on requestAnimationFrame: Chromium
       // can suspend rAF in a minimized/background desktop window, leaving an
       // early-song target at scrollTop=0 permanently stranded below it.

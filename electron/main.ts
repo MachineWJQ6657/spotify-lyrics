@@ -23,6 +23,7 @@ import { createQaChecks } from './qa-checks'
 import { overlayInputState } from './overlay-input'
 import { OverlayLayoutGate } from './overlay-layout'
 import { isOverOverlayRegion } from './overlay-hover'
+import { searchSongs } from './song-search'
 import { advanceHoverIntent, HOVER_OUTSIDE, HOVER_REST_MS, type HoverIntent } from './overlay-hover-intent'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 import { LocalAsr } from './audio-sync/local-asr'
@@ -1897,6 +1898,8 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     return result
   })
   ipcMain.handle('lyrics:search', (_event, query) => searchLyrics(query))
+  // The search page: songs by free text, from the catalogues the lookup already uses.
+  ipcMain.handle('lyrics:find-songs', (_event, text: unknown) => searchSongs(text))
   ipcMain.handle('lyrics:romanize', (_event, lines: string[]) => romanizeLines(lines))
   ipcMain.handle('lyrics:export', async (_event, filename: string, content: string) => {
     if (!mainWindow) return null

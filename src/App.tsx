@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
 import './app.css'
 import { sourceLabel } from './lib/source-label'
-import { Languages, Maximize2, Minimize2, PanelRightOpen, PencilLine, Radio, Sparkles } from 'lucide-react'
+import { Languages, Maximize2, Minimize2, PanelRightOpen, PencilLine, Radio, Search, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ClockedLyricsStage, ClockedLyricsEditor, ClockedPlayerBar } from './components/PlaybackSurfaces'
@@ -9,6 +9,8 @@ import { PANEL_TAB_EVENT, SettingsPanel, TAB_KEY } from './components/SettingsPa
 import { SourceMenu } from './components/SourceMenu'
 import { LYRICS_SOURCES, lyricsSourceIdOf } from './lib/lyrics-source'
 import { LibraryView } from './components/LibraryView'
+import { BrowseView } from './components/BrowseView'
+import { useBrowseStore } from './store/useBrowseStore'
 import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
 import { usePlaybackConnection } from './hooks/usePlayback'
@@ -26,9 +28,9 @@ import { lyricSeekTarget, seekPlayback } from './lib/seek'
 import { formatTime } from './lib/clock'
 import { hasUnseenNews, markNewsSeen, readSeenVersion } from './lib/changelog'
 import { version as appVersion } from '../package.json'
-import type { LyricLine } from './types'
+import type { LyricLine, LyricsDocument } from './types'
 
-const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
+const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', browse: '查歌词', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
 const PANEL_KEY = 'syllable-ui-panel-collapsed'
 const readPanelCollapsed = () => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } }
 const FOCUS_KEY = 'syllable-ui-focus'
@@ -110,6 +112,8 @@ export function App() {
   })
   const [dropMessage, setDropMessage] = useState('')
   const openEditor = useCallback(() => setEditorOpen(true), [setEditorOpen])
+  // A song of the library is read on the search page, whatever is playing.
+  const readSaved = useCallback((document: LyricsDocument) => { useBrowseStore.getState().openSaved(document); setView('browse') }, [])
   const headingTitle = playback?.track?.name ?? ''
   const headingArtist = playback?.track?.artist ?? ''
   const headingAlbum = playback?.track?.album ?? ''
@@ -129,6 +133,13 @@ export function App() {
 
   const importDroppedLyrics = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    // A dropped file belongs to the playing song. On the search page another
+    // song is on screen, and the file would silently go to the wrong one.
+    if (view === 'browse') {
+      setDropMessage('歌词文件是导入给正在播放的歌的：请拖到「正在播放」页')
+      window.setTimeout(() => setDropMessage(''), 4000)
+      return
+    }
     const files = [...event.dataTransfer.files].filter(file => /\.(?:lrc|txt)$/i.test(file.name))
     if (!files.length) { setDropMessage('只支持 LRC 或 TXT 歌词文件'); return }
     const texts = await Promise.all(files.map(async file => ({ name: file.name, text: decodeLyricFile(await file.arrayBuffer()) })))
@@ -163,7 +174,7 @@ export function App() {
     <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''} ${focusActive ? 'focus-mode' : ''}`}>
       <Sidebar active={view} onChange={setView} news={news} />
       <main className="main-content">
-        {view === 'library' || view === 'sources' ? <LibraryView mode={view} openEditor={openEditor} /> : view === 'settings' || view === 'help' ? <InfoView mode={view} openEditor={openEditor} /> : <>
+        {view === 'browse' ? <BrowseView /> : view === 'library' || view === 'sources' ? <LibraryView mode={view} openEditor={openEditor} onRead={readSaved} /> : view === 'settings' || view === 'help' ? <InfoView mode={view} openEditor={openEditor} /> : <>
         <div className="now-header">
           <div className="now-track-heading">
             <div className="header-cover">{playback?.track?.coverUrl ? <img src={playback.track.coverUrl} /> : <BrandMark size={40} title="Syllable" />}</div>
@@ -173,7 +184,7 @@ export function App() {
             <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-focus" aria-pressed={focusActive} aria-label="专注模式" title={focusActive ? '退出专注模式（Esc 或 F11）' : '专注模式：只显示歌词（F11）'} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{(demoMode || !playback?.track) && <button className="header-browse" title="不用播放，搜索一首歌看歌词" onClick={() => setView('browse')}><Search size={13} />查歌词</button>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-focus" aria-pressed={focusActive} aria-label="专注模式" title={focusActive ? '退出专注模式（Esc 或 F11）' : '专注模式：只显示歌词（F11）'} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
         </div>
         <div className={`lyric-card ${settings.mainAlignment === 'center' ? 'lyrics-centered' : ''}`}>
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>

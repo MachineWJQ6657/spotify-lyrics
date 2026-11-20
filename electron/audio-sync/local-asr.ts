@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path'
 import { parseWhisperTokens, type HeardToken } from './lyric-aligner'
 import { captureQuality } from './capture-quality'
+import { t } from '../../src/lib/i18n'
 
 export interface AsrConfig { executable: string; model: string }
 export interface AsrStatus { ready: boolean; modelName: string; message: string }
@@ -19,14 +20,14 @@ export function dtwModelPreset(model: string): string | undefined {
 export function encodePcmWav(pcm: Float32Array): Buffer {
   // The IPC still accepts only a fresh 6–15 s capture. Internally a fast
   // recognizer may receive that capture plus real preceding audio context.
-  if (!(pcm instanceof Float32Array) || pcm.length < 96000 || pcm.length > 480000) throw new Error('本地识别音频长度必须为 6–30 秒（16 kHz）')
+  if (!(pcm instanceof Float32Array) || pcm.length < 96000 || pcm.length > 480000) throw new Error(t('本地识别音频长度必须为 6–30 秒（16 kHz）'))
   const buffer = Buffer.alloc(44 + pcm.length * 2)
   buffer.write('RIFF'); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write('WAVEfmt ', 8)
   buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22)
   buffer.writeUInt32LE(16000, 24); buffer.writeUInt32LE(32000, 28); buffer.writeUInt16LE(2, 32); buffer.writeUInt16LE(16, 34)
   buffer.write('data', 36); buffer.writeUInt32LE(pcm.length * 2, 40)
   for (let i = 0; i < pcm.length; i++) {
-    if (!Number.isFinite(pcm[i])) throw new Error('录音包含无效采样')
+    if (!Number.isFinite(pcm[i])) throw new Error(t('录音包含无效采样'))
     buffer.writeInt16LE(Math.round(Math.max(-1, Math.min(1, pcm[i])) * 32767), 44 + i * 2)
   }
   return buffer
@@ -60,11 +61,11 @@ export class LocalAsr {
     }
     const ready = Boolean(this.config && await this.valid(this.config))
     return { ready, modelName: ready ? path.basename(this.config!.model) : '', message: ready
-      ? '本地识别引擎就绪；仅启用时加载模型，停止后释放。' : '未配置识别引擎。选择本地 whisper-cli 和多语言 GGML 模型；不会自动下载或上传声音。' }
+      ? t('本地识别引擎就绪；仅启用时加载模型，停止后释放。') : t('未配置识别引擎。选择本地 whisper-cli 和多语言 GGML 模型；不会自动下载或上传声音。') }
   }
   async configure(config: AsrConfig) {
-    if (this.busy) throw new Error('请先停止人声对齐')
-    if (!await this.valid(config)) throw new Error('需要有效的 whisper-cli 可执行文件和 GGML .bin 模型')
+    if (this.busy) throw new Error(t('请先停止人声对齐'))
+    if (!await this.valid(config)) throw new Error(t('需要有效的 whisper-cli 可执行文件和 GGML .bin 模型'))
     await mkdir(path.dirname(this.configFile), { recursive: true })
     await writeFile(`${this.configFile}.tmp`, JSON.stringify(config), 'utf8')
     await rename(`${this.configFile}.tmp`, this.configFile)
@@ -74,8 +75,8 @@ export class LocalAsr {
   cancel() { this.generation++; this.child?.kill() }
 
   async recognize(pcm: Float32Array, language: string): Promise<HeardToken[]> {
-    if (this.busy) throw new Error('本地识别仍在进行，不会排队积压录音')
-    if (!['ja', 'en', 'zh', 'auto'].includes(language)) throw new Error('不支持的识别语言')
+    if (this.busy) throw new Error(t('本地识别仍在进行，不会排队积压录音'))
+    if (!['ja', 'en', 'zh', 'auto'].includes(language)) throw new Error(t('不支持的识别语言'))
     this.busy = true
     const token = this.generation
     let directory: string | undefined
@@ -85,20 +86,20 @@ export class LocalAsr {
       // Missing/quiet signal is a rejected observation, not an engine failure.
       // Keep sampling; a later continuous phrase may recover without a restart.
       if (quality !== 'usable') return []
-      if (!(await this.status()).ready) throw new Error('请先配置本地识别引擎')
-      if (token !== this.generation) throw new Error('识别已取消')
+      if (!(await this.status()).ready) throw new Error(t('请先配置本地识别引擎'))
+      if (token !== this.generation) throw new Error(t('识别已取消'))
       // Silence never starts a heavyweight model. Non-silent accompaniment is
       // rejected later by lexical matching, not incorrectly labelled speech.
       await mkdir(this.tempRoot, { recursive: true })
       directory = await mkdtemp(path.join(this.tempRoot, 'syllable-asr-'))
       const input = path.join(directory, 'input.wav'), output = path.join(directory, 'result')
       await writeFile(input, wav)
-      if (token !== this.generation) throw new Error('识别已取消')
+      if (token !== this.generation) throw new Error(t('识别已取消'))
       const config = this.config!
       const dtw = dtwModelPreset(config.model)
       const deadline = Date.now() + 15000
       const run = (executable: string) => new Promise<void>((resolve, reject) => {
-        if (deadline - Date.now() < 500 || token !== this.generation) { reject(new Error('识别预算已用尽或任务已取消')); return }
+        if (deadline - Date.now() < 500 || token !== this.generation) { reject(new Error(t('识别预算已用尽或任务已取消'))); return }
         const child = spawn(executable, ['-m', config.model, '-f', input, '-l', language,
           '-t', '4', '-p', '1', '-bs', '5', '-bo', '5', '-nf', '-nfa',
           ...(dtw ? ['-dtw', dtw] : []), '-ojf', '-of', output],
@@ -107,12 +108,12 @@ export class LocalAsr {
         let timedOut = false, stderr = ''
         const timeout = setTimeout(() => { timedOut = true; child.kill() }, Math.max(1, deadline - Date.now()))
         child.stderr?.on('data', data => { stderr = (stderr + data.toString()).slice(-2000) })
-        child.on('error', error => { clearTimeout(timeout); reject(new Error(`无法启动识别引擎：${error.message}`)) })
+        child.on('error', error => { clearTimeout(timeout); reject(new Error(t('无法启动识别引擎：{error}', { error: error.message }))) })
         child.on('close', code => {
           clearTimeout(timeout)
-          if (token !== this.generation) reject(new Error('识别已取消'))
-          else if (timedOut) reject(new Error('本地识别超过 15 秒预算，已释放模型；可配置更快的多语言模型或 GPU 版引擎'))
-          else if (code !== 0) reject(new Error(`本地识别失败（${code}）：${stderr.slice(-400)}`))
+          if (token !== this.generation) reject(new Error(t('识别已取消')))
+          else if (timedOut) reject(new Error(t('本地识别超过 15 秒预算，已释放模型；可配置更快的多语言模型或 GPU 版引擎')))
+          else if (code !== 0) reject(new Error(t('本地识别失败（{code}）：{details}', { code: String(code), details: stderr.slice(-400) })))
           else resolve()
         })
       })
@@ -126,9 +127,9 @@ export class LocalAsr {
         this.config = fallback
         await run(cpuExecutable)
       }
-      if (token !== this.generation) throw new Error('识别已取消')
+      if (token !== this.generation) throw new Error(t('识别已取消'))
       const resultFile = `${output}.json`
-      if ((await stat(resultFile)).size > 2_000_000) throw new Error('识别结果超出安全大小')
+      if ((await stat(resultFile)).size > 2_000_000) throw new Error(t('识别结果超出安全大小'))
       return parseWhisperTokens(JSON.parse(await readFile(resultFile, 'utf8')), pcm.length / 16,
         dtw ? { timing: 'dtw' } : undefined)
     } finally {

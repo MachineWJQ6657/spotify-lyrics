@@ -24,6 +24,7 @@ import { overlayInputState } from './overlay-input'
 import { OverlayLayoutGate } from './overlay-layout'
 import { isOverOverlayRegion } from './overlay-hover'
 import { searchSongs } from './song-search'
+import { setLanguage, t } from '../src/lib/i18n'
 import { advanceHoverIntent, HOVER_OUTSIDE, HOVER_REST_MS, type HoverIntent } from './overlay-hover-intent'
 import { AcousticClock, type AcousticObservation } from './audio-sync/acoustic-clock'
 import { LocalAsr } from './audio-sync/local-asr'
@@ -829,7 +830,7 @@ function createWindows() {
         mainWindow.hide()
         const bounds = overlayWindow.getBounds()
         const probe = new BrowserWindow({ x: bounds.x - 40, y: bounds.y - 70, width: 900, height: 370,
-          frame: false, title: 'Syllable click-through QA', webPreferences: { sandbox: true, contextIsolation: true } })
+          frame: false, title: 'Syllable click-through QA', webPreferences: { sandbox: true, contextIsolation: true } }) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await probe.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8"><title>Syllable click-through QA</title>
           <style>body{margin:0;background:#e8eef2;font:18px sans-serif;color:#102030}h3{margin:16px}button{position:absolute;height:80px;font:18px sans-serif;background:#fff;border:2px solid #369;border-radius:12px}#center{left:200px;top:105px;width:300px}#edge{left:10px;top:215px;width:150px;height:50px}#finish{left:670px;top:300px;width:190px;height:44px}#state{position:absolute;top:300px;left:20px}</style>
           <h3>本地鼠标穿透验证（副屏；无网络和播放操作）</h3>
@@ -1012,7 +1013,7 @@ function createWindows() {
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`overlay restoration: ${JSON.stringify({ bounds: overlayWindow.getBounds(), firstOverlayPresentation, style, native })}`)
       }
-      if (qaView === 'audio-sync') {
+      if (qaView === 'audio-sync') { // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         const result = await mainWindow.webContents.executeJavaScript(`(async () => {
           [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -1039,12 +1040,12 @@ function createWindows() {
           mainWindow.close()
           checks.record('headless-close', !mainWindow.isDestroyed() && !mainWindow.isVisible()
             && !overlayWindow?.isVisible() && !overlayControlsWindow?.isVisible() && !tray)
-          const readings = await analyzeJapaneseLines(['思い出を届ける', '想い出を届ける'])
+          const readings = await analyzeJapaneseLines(['思い出を届ける', '想い出を届ける']) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
           const pronounce = (words: typeof readings[number]) => words.map(word => word.pronunciation ?? word.reading ?? word.surface_form).join('')
           const dictionary = readings.length === 2 && readings[0].length > 1 && pronounce(readings[0]) === pronounce(readings[1])
           checks.record('dictionary', dictionary)
           qaLog(`packaged dictionary: ${dictionary}; headless=${!mainWindow.isVisible()}`)
-          const romaji = await romanizeLines(['待って', 'なっていく', '行った', 'ずっと'])
+          const romaji = await romanizeLines(['待って', 'なっていく', '行った', 'ずっと']) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
           checks.record('romaji', JSON.stringify(romaji) === JSON.stringify(['matte', 'natte iku', 'itta', 'zutto']))
           qaLog(`packaged romaji: ${JSON.stringify(romaji)}`)
         }
@@ -1052,13 +1053,13 @@ function createWindows() {
       if (liveAudioQa) {
         // Explicit diagnostic only, on an isolated test profile. Exercise the
         // real visible controls and PCM -> IPC -> local model path. A passing
-        // liveness check does not assert a correct audible lyric lock.
+        // liveness check does not assert a correct audible lyric lock. // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         const enabled = await mainWindow.webContents.executeJavaScript(`(async () => {
           [...document.querySelectorAll('.nav-item')].find(item => item.textContent === '偏好设置')?.click();
           await new Promise(resolve => setTimeout(resolve, 600));
           const panel = document.querySelector('.audio-sync-panel');
           panel?.scrollIntoView({ block: 'end' });
-          const start = [...(panel?.querySelectorAll('button') ?? [])].find(item => item.textContent === ${JSON.stringify(qaView === 'audio-phoneme-live' ? '开启音素校验（不接管）' : '开启自动声音同步')});
+          const start = [...(panel?.querySelectorAll('button') ?? [])].find(item => item.textContent === ${JSON.stringify(qaView === 'audio-phoneme-live' ? '开启音素校验（不接管）' : '开启自动声音同步')}); // i18n-ignore: QA automation (scripts and test lyrics), not interface text
           if (!start || start.disabled) return false;
           start.click();
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -1067,7 +1068,7 @@ function createWindows() {
         checks.record('enabled', enabled === true)
         await new Promise(resolve => setTimeout(resolve, 65_000))
         checks.record('captures', qaVocalCaptures >= 3)
-        checks.record('analyses', qaVocalAnalyses >= 2)
+        checks.record('analyses', qaVocalAnalyses >= 2) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         const stopped = await mainWindow.webContents.executeJavaScript(`(async () => {
           const stop = [...document.querySelectorAll('.audio-sync-panel button')].find(item => item.textContent === '关闭声音同步');
           stop?.click();
@@ -1133,11 +1134,11 @@ function createWindows() {
         if (!passed) process.exitCode = 1
       }
       if (qaView === 'editor') {
-        await mainWindow.webContents.executeJavaScript(`document.querySelector('[title="搜索、编辑与校时"]')?.click()`)
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('[title="搜索、编辑与校时"]')?.click()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 500))
       }
       if (qaView === 'help') {
-        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(button => button.textContent?.includes('帮助与诊断'))?.click()`)
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(button => button.textContent?.includes('帮助与诊断'))?.click()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 350))
       }
       if (qaView === 'controls') {
@@ -1195,10 +1196,10 @@ function createWindows() {
         revealMainWindow()
       }
       if (qaView === 'overlay-sync') {
-        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.language-grid button')].find(button => button.textContent?.includes('中文'))?.click()`)
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.language-grid button')].find(button => button.textContent?.includes('中文'))?.click()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 350))
       }
-      if (qaView === 'overlay-custom') {
+      if (qaView === 'overlay-custom') { // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await mainWindow.webContents.executeJavaScript(`
           [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === '宽屏')?.click();
           document.querySelector('.position-presets button:nth-child(2)')?.click();
@@ -1267,12 +1268,12 @@ function createWindows() {
         qaLog(`overlay leave control: hidden=${!overlayControlsWindow.isVisible()}`)
         checks.record('leave', !overlayControlsWindow.isVisible())
         await restOnLyrics()
-        const opened = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]'); button?.click(); return Boolean(button) })()`)
+        const opened = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="打开 Syllable 客户端"]'); button?.click(); return Boolean(button) })()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 220))
         qaLog(`overlay open-client control: found=${opened}, visible=${mainWindow.isVisible()}, minimized=${mainWindow.isMinimized()}, bounds=${JSON.stringify(mainWindow.getBounds())}`)
         checks.record('open', Boolean(opened) && mainWindow.isVisible() && !mainWindow.isMinimized())
         overlayControlsWindow.showInactive()
-        const closed = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="关闭桌面歌词"]'); button?.click(); return Boolean(button) })()`)
+        const closed = await overlayControlsWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('button[aria-label="关闭桌面歌词"]'); button?.click(); return Boolean(button) })()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 250))
         qaLog(`overlay close control: found=${closed}, hidden=${!overlayWindow.isVisible()}`)
         checks.record('close', Boolean(closed) && !overlayWindow.isVisible())
@@ -1286,7 +1287,7 @@ function createWindows() {
         syncOverlayControlsBounds()
         overlayControlsWindow.showInactive()
         mainWindow.minimize()
-        await new Promise(resolve => setTimeout(resolve, 220))
+        await new Promise(resolve => setTimeout(resolve, 220)) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         const immediate = await overlayControlsWindow.webContents.executeJavaScript(`(async () => {
           window.syllable.overlay.beginMove();
           window.syllable.overlay.endMove();
@@ -1299,7 +1300,7 @@ function createWindows() {
         checks.record('guarded', Boolean(immediate) && mainWindow.isMinimized())
         await new Promise(resolve => setTimeout(resolve, 700))
         overlayControlsWindow.showInactive()
-        await overlayControlsWindow.webContents.executeJavaScript(`document.querySelector('button[aria-label="打开 Syllable 客户端"]')?.click()`)
+        await overlayControlsWindow.webContents.executeJavaScript(`document.querySelector('button[aria-label="打开 Syllable 客户端"]')?.click()`) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         await new Promise(resolve => setTimeout(resolve, 180))
         qaLog(`drag open guard deliberate: minimized=${mainWindow.isMinimized()}; visible=${mainWindow.isVisible()}`)
         checks.record('deliberate', mainWindow.isVisible() && !mainWindow.isMinimized())
@@ -1322,7 +1323,7 @@ function createWindows() {
         qaLog(`drag performance end: ${JSON.stringify(overlayWindow.getBounds())}`)
         await applyOverlayBounds(initial)
       }
-      if (qaView === 'font-metrics') {
+      if (qaView === 'font-metrics') { // i18n-ignore: QA automation (scripts and test lyrics), not interface text
         const metrics = await mainWindow.webContents.executeJavaScript(`(async () => {
           await document.fonts.ready;
           const test = document.createElement('div');
@@ -1550,6 +1551,20 @@ function toggleOverlay() {
   else showOverlay()
 }
 
+/** The tray menu in the interface language; set again when the language changes. */
+function applyTrayMenu() {
+  if (!tray || tray.isDestroyed()) return
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: t('打开 Syllable'), accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
+    { label: t('显示 / 隐藏桌面歌词'), accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
+    { label: t('锁定 / 解锁桌面歌词（锁定后点击穿透）'), accelerator: 'Ctrl+Alt+M', click: toggleOverlayLock },
+    { label: t('解锁并显示歌词控制栏'), accelerator: 'Ctrl+Alt+U', click: () => { void recoverOverlayControls() } },
+    { label: t('播放 / 暂停'), click: () => { void executePlaybackCommand(lastPlayback?.isPlaying ? 'pause' : 'play').catch(() => undefined) } },
+    { type: 'separator' },
+    { label: t('退出'), click: () => { quitting = true; app.quit() } }
+  ]))
+}
+
 function createTray() {
   if (headlessAudioQa) return false
   if (tray && !tray.isDestroyed()) return true
@@ -1562,15 +1577,7 @@ function createTray() {
   catch (error) { tray = null; console.error('Syllable tray creation failed:', error); return false }
   trayTooltip = trayTooltipText(lastPlayback?.track)
   tray.setToolTip(trayTooltip)
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开 Syllable', accelerator: 'Ctrl+Alt+S', click: () => revealMainWindow('cursor') },
-    { label: '显示 / 隐藏桌面歌词', accelerator: 'Ctrl+Alt+L', click: toggleOverlay },
-    { label: '锁定 / 解锁桌面歌词（锁定后点击穿透）', accelerator: 'Ctrl+Alt+M', click: toggleOverlayLock },
-    { label: '解锁并显示歌词控制栏', accelerator: 'Ctrl+Alt+U', click: () => { void recoverOverlayControls() } },
-    { label: '播放 / 暂停', click: () => { void executePlaybackCommand(lastPlayback?.isPlaying ? 'pause' : 'play').catch(() => undefined) } },
-    { type: 'separator' },
-    { label: '退出', click: () => { quitting = true; app.quit() } }
-  ]))
+  applyTrayMenu()
   tray.on('click', () => revealMainWindow('cursor'))
   qaLog(`tray ready: destroyed=${tray.isDestroyed()}, bounds=${JSON.stringify(tray.getBounds())}`)
   return true
@@ -1658,7 +1665,7 @@ async function executePlaybackCommand(command: 'play' | 'pause' | 'next' | 'prev
 async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'next' | 'previous'): Promise<PlaybackCommandResult> {
   const backend: TransportBackend = localSpotify?.hasTrack() ? 'local' : 'web'
   const service = backend === 'local' ? localSpotify : spotify
-  if (!service) throw new Error('Spotify 本地控制服务尚未启动')
+  if (!service) throw new Error(t('Spotify 本地控制服务尚未启动'))
   if (command === 'next' || command === 'previous') {
     const now = Date.now()
     const transportSnapshot = backend === 'local' ? localSpotify?.current() ?? lastPlayback : lastPlayback
@@ -1785,8 +1792,8 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   })
   ipcMain.handle('playback:command', (_event, command: 'play' | 'pause' | 'next' | 'previous') => executePlaybackCommand(command))
   ipcMain.handle('audio-sync:prepare', (event, mode?: string) => {
-    if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error('请先播放歌曲')
-    if (mode !== 'reference' && mode !== 'vocal' && mode !== 'phoneme' && mode !== 'listen') throw new Error('无效的声音后端')
+    if (event.sender !== mainWindow?.webContents || !lastPlayback?.isPlaying) throw new Error(t('请先播放歌曲'))
+    if (mode !== 'reference' && mode !== 'vocal' && mode !== 'phoneme' && mode !== 'listen') throw new Error(t('无效的声音后端'))
     activeAudioMode = mode
     vocalSync.clear()
     phonemeSession.clear()
@@ -1813,7 +1820,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     return true
   })
   ipcMain.handle('audio-sync:listen', async (event, value: VocalCapture) => {
-    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'listen') throw new Error('听音校准未启用')
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'listen') throw new Error(t('听音校准未启用'))
     const result = await lyricOffsetSession.process(value)
     qaLog(`listen offset: reason=${result.reason}; language=${value?.language}; state=${result.state}; windowLines=${result.windowLines}; lines=${result.lines}; windows=${result.windows}; measured=${result.measuredDeltaMs ?? 'none'}; spread=${result.spreadMs ?? 'none'}; offset=${result.offsetMs ?? 'none'}; elapsedMs=${result.elapsedMs}; track=${lastPlayback?.track?.artist ?? ''} - ${lastPlayback?.track?.name ?? ''}`)
     return result
@@ -1826,15 +1833,15 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     return result
   })
   ipcMain.handle('audio-sync:engine-status', event => {
-    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可配置识别')
+    if (event.sender !== mainWindow?.webContents) throw new Error(t('仅主窗口可配置识别'))
     return vocalSync.recognizer.status()
   })
   ipcMain.handle('audio-sync:phoneme-status', event => {
-    if (event.sender !== mainWindow?.webContents) throw new Error('仅主窗口可检查音素引擎')
+    if (event.sender !== mainWindow?.webContents) throw new Error(t('仅主窗口可检查音素引擎'))
     return localCtc.status()
   })
   ipcMain.handle('audio-sync:phoneme', async (event, value: VocalCapture) => {
-    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'phoneme') throw new Error('音素校验未启用')
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'phoneme') throw new Error(t('音素校验未启用'))
     if (qaView === 'audio-phoneme-live') qaVocalCaptures++
     const result = await phonemeSession.process(value)
     if (qaView === 'audio-phoneme-live' && result.inferenceMs > 0 && result.matchingMs > 0) qaVocalAnalyses++
@@ -1844,14 +1851,14 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   })
   ipcMain.handle('audio-sync:configure-engine', async event => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return null
-    const executable = await dialog.showOpenDialog(mainWindow, { title: '选择可信的本地 whisper-cli 引擎（将运行此程序）', properties: ['openFile'], filters: [{ name: 'Whisper CLI', extensions: ['exe'] }] })
+    const executable = await dialog.showOpenDialog(mainWindow, { title: t('选择可信的本地 whisper-cli 引擎（将运行此程序）'), properties: ['openFile'], filters: [{ name: 'Whisper CLI', extensions: ['exe'] }] })
     if (executable.canceled || !executable.filePaths[0]) return null
-    const model = await dialog.showOpenDialog(mainWindow, { title: '选择多语言 GGML Whisper 模型', properties: ['openFile'], filters: [{ name: 'GGML 模型', extensions: ['bin'] }] })
+    const model = await dialog.showOpenDialog(mainWindow, { title: t('选择多语言 GGML Whisper 模型'), properties: ['openFile'], filters: [{ name: t('GGML 模型'), extensions: ['bin'] }] })
     if (model.canceled || !model.filePaths[0]) return null
     return vocalSync.recognizer.configure({ executable: executable.filePaths[0], model: model.filePaths[0] })
   })
   ipcMain.handle('audio-sync:vocal', async (event, value: VocalCapture) => {
-    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'vocal') throw new Error('人声同步未启用')
+    if (event.sender !== mainWindow?.webContents || activeAudioMode !== 'vocal') throw new Error(t('人声同步未启用'))
     if (qaView === 'audio-sync-live') qaVocalCaptures++
     const result = await vocalSync.process(value)
     if (qaView === 'audio-sync-live' && result.elapsedMs >= 250) qaVocalAnalyses++
@@ -1864,7 +1871,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     const report = { appVersion: app.getVersion(), ...playbackDiagnostics.report(), lyricContext: sanitizeLyricDiagnosticContext(lyricContext) }
     const owner = mainWindow
     return diagnosticExporter.save(report,
-      () => dialog.showSaveDialog(owner, { defaultPath: 'Syllable-sync-diagnostics.json', filters: [{ name: '同步诊断 JSON', extensions: ['json'] }] }),
+      () => dialog.showSaveDialog(owner, { defaultPath: 'Syllable-sync-diagnostics.json', filters: [{ name: t('同步诊断 JSON'), extensions: ['json'] }] }),
       (filePath, content) => writeFile(filePath, content, 'utf8'))
   })
   ipcMain.handle('playback:seek', async (_event, positionMs: number) => {
@@ -1872,12 +1879,12 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     vocalSync.clear()
     phonemeSession.clear()
     const result = await playbackRequests.run(async () => {
-      if (transportGate.isPending()) throw new Error('Spotify 正在切换歌曲，请稍后再调整进度')
+      if (transportGate.isPending()) throw new Error(t('Spotify 正在切换歌曲，请稍后再调整进度'))
       playbackRefreshes.invalidate()
       if (lastPlayback?.playbackSource === 'local' && localSpotify) await localSpotify.seek(positionMs)
       else await spotify.seek(positionMs)
     })
-    if (!result.accepted) throw new Error('Spotify 控制请求尚未完成，请稍后再调整进度')
+    if (!result.accepted) throw new Error(t('Spotify 控制请求尚未完成，请稍后再调整进度'))
     setTimeout(() => void refreshPlayback().catch(() => undefined), 180)
   })
   ipcMain.handle('lyrics:fetch', async (_event, track, options?: { bypassCache?: boolean; preferredSource?: unknown; reuseProviderResults?: boolean }) => {
@@ -1906,7 +1913,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     // One save dialog for a lyric track (.lrc) and for the library backup (.json).
     const backup = typeof filename === 'string' && /\.json$/i.test(filename)
     const result = await dialog.showSaveDialog(mainWindow, { defaultPath: filename,
-      filters: [backup ? { name: 'Syllable 资料库备份', extensions: ['json'] } : { name: 'LRC 歌词', extensions: ['lrc'] }] })
+      filters: [backup ? { name: t('Syllable 资料库备份'), extensions: ['json'] } : { name: t('LRC 歌词'), extensions: ['lrc'] }] })
     if (result.canceled || !result.filePath) return null
     await writeFile(result.filePath, content, 'utf8')
     return result.filePath
@@ -2133,6 +2140,15 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   })
   // Copying lyrics from the main window. The renderer's own clipboard API
   // refuses while the window is not focused; this does not.
+  // The main window tells which language its interface is in; the tray menu and
+  // the messages worded here (errors shown in the window) follow it.
+  ipcMain.handle('app:set-language', (event, language: unknown) => {
+    if (event.sender !== mainWindow?.webContents) return false
+    setLanguage(language === 'en' ? 'en' : 'zh')
+    applyTrayMenu()
+    updateTrayTooltip(lastPlayback?.track)
+    return true
+  })
   ipcMain.handle('app:copy-text', (event, text: unknown) => {
     if (event.sender !== mainWindow?.webContents || typeof text !== 'string' || !text || text.length > 200_000) return false
     clipboard.writeText(text)

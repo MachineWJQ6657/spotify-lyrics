@@ -7,6 +7,7 @@ import { spotifySourcePosition } from '../src/lib/clock'
 import { resolveSpotifyTransitionProfile } from './spotify-transition'
 import { nativeClockPosition, observeNativeClock } from './native-clock'
 import { guardNativeBoundary } from './native-boundary'
+import { t } from '../src/lib/i18n'
 
 type Command = 'play' | 'pause' | 'next' | 'previous'
 
@@ -306,7 +307,7 @@ export class LocalSpotifyService {
   }
 
   async control(command: Command) {
-    if (!this.worker || !this.state?.title) throw new Error('尚未检测到 Spotify 桌面端媒体会话')
+    if (!this.worker || !this.state?.title) throw new Error(t('尚未检测到 Spotify 桌面端媒体会话'))
     const projected = command === 'play' || command === 'pause' ? projectTransportState(this.state, command) : null
     const guard = projected ? { trackIdentity: localTrackIdentity(projected), statusName: projected.statusName as 'PLAYING' | 'PAUSED', until: projected.sampledAtMs + 800, projection: projected } : null
     if (guard) this.transportStatusGuard = guard
@@ -328,7 +329,7 @@ export class LocalSpotifyService {
   }
 
   async seek(positionMs: number) {
-    if (!this.worker || !this.state?.title) throw new Error('尚未检测到 Spotify 桌面端媒体会话')
+    if (!this.worker || !this.state?.title) throw new Error(t('尚未检测到 Spotify 桌面端媒体会话'))
     const target = Math.max(0, Math.round(positionMs))
     const identity = localTrackIdentity(this.state)
     await this.request({ type: 'seek', positionMs: target })
@@ -361,7 +362,7 @@ export class LocalSpotifyService {
     this.restartTimer = null
     const worker = this.worker
     this.worker = null
-    this.rejectPending('本地 Spotify 服务已关闭')
+    this.rejectPending(t('本地 Spotify 服务已关闭'))
     if (worker) void this.stop(worker)
     await Promise.all([...this.stopping])
     this.state = null
@@ -392,6 +393,7 @@ export class LocalSpotifyService {
       const observeNativeClockSource = observeNativeClock.toString()
       const nativeClockPositionSource = nativeClockPosition.toString()
       const guardNativeBoundarySource = guardNativeBoundary.toString()
+      // i18n-ignore: runs in the worker (no language there); its error texts are translated where handleMessage receives them
       const workerSource = `
         const { parentPort, workerData } = require('node:worker_threads')
         const { performance } = require('node:perf_hooks')
@@ -667,7 +669,7 @@ export class LocalSpotifyService {
       worker.on('message', (message: WorkerMessage) => this.handleMessage(message))
       worker.on('error', error => this.handleWorkerFailure(error.message))
       worker.on('exit', code => {
-        if (this.worker === worker) this.handleWorkerFailure(code ? `Worker 异常退出（${code}）` : '')
+        if (this.worker === worker) this.handleWorkerFailure(code ? t('Worker 异常退出（{code}）', { code }) : '')
       })
     } catch (error) {
       this.handleWorkerFailure(error instanceof Error ? error.message : String(error))
@@ -780,7 +782,7 @@ export class LocalSpotifyService {
       return
     }
     if (message.type === 'fatal') {
-      this.handleWorkerFailure(message.error || '本地 Spotify 服务启动失败')
+      this.handleWorkerFailure(message.error || t('本地 Spotify 服务启动失败'))
       return
     }
     if (message.type === 'response' && message.requestId != null) {
@@ -789,7 +791,7 @@ export class LocalSpotifyService {
       clearTimeout(pending.timer)
       this.requests.delete(message.requestId)
       if (message.ok) pending.resolve()
-      else pending.reject(new Error(message.error || 'Spotify 控制操作失败'))
+      else pending.reject(new Error(message.error ? t(message.error) : t('Spotify 控制操作失败')))
     }
   }
 
@@ -848,11 +850,11 @@ export class LocalSpotifyService {
 
   private request(payload: Record<string, unknown>) {
     return new Promise<void>((resolve, reject) => {
-      if (!this.worker) return reject(new Error('本地 Spotify 服务未运行'))
+      if (!this.worker) return reject(new Error(t('本地 Spotify 服务未运行')))
       const requestId = ++this.requestId
       const timer = setTimeout(() => {
         this.requests.delete(requestId)
-        reject(new Error('Spotify 控制操作超时'))
+        reject(new Error(t('Spotify 控制操作超时')))
       }, 2500)
       this.requests.set(requestId, { resolve, reject, timer })
       this.worker.postMessage({ ...payload, requestId })
@@ -868,7 +870,7 @@ export class LocalSpotifyService {
     }
     this.state = null
     this.listener?.(null)
-    this.rejectPending(reason || '本地 Spotify 服务已断开')
+    this.rejectPending(reason || t('本地 Spotify 服务已断开'))
     if (reason) console.warn('Local Spotify worker unavailable:', reason)
     if (reason) this.statusListener?.(`worker failure: ${reason}`)
     this.scheduleRestart()

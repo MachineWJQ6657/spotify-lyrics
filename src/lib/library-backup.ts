@@ -1,5 +1,6 @@
 import type { LyricsDocument } from '../types'
 import { keepRank } from './library-budget'
+import { t } from './i18n'
 
 /**
  * Backup of the saved lyrics library (lyrics, per-song offsets, listening
@@ -36,9 +37,9 @@ export type ParsedBackup = { documents: LyricsDocument[]; skipped: number } | { 
 
 export function parseLibraryBackup(text: string): ParsedBackup {
   let parsed: unknown
-  try { parsed = JSON.parse(text) } catch { return { error: '这不是有效的备份文件（无法解析）' } }
-  if (!isRecord(parsed) || parsed.format !== BACKUP_FORMAT || !Array.isArray(parsed.documents)) return { error: '这不是 Syllable 的资料库备份文件' }
-  if (typeof parsed.version !== 'number' || parsed.version > BACKUP_VERSION) return { error: '这个备份来自更新的版本，请先升级 Syllable' }
+  try { parsed = JSON.parse(text) } catch { return { error: t('这不是有效的备份文件（无法解析）') } }
+  if (!isRecord(parsed) || parsed.format !== BACKUP_FORMAT || !Array.isArray(parsed.documents)) return { error: t('这不是 Syllable 的资料库备份文件') }
+  if (typeof parsed.version !== 'number' || parsed.version > BACKUP_VERSION) return { error: t('这个备份来自更新的版本，请先升级 Syllable') }
   const documents = parsed.documents.filter(isBackupDocument)
   return { documents, skipped: parsed.documents.length - documents.length }
 }

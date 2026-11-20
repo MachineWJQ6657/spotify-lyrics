@@ -217,7 +217,7 @@ export async function completeRomanization(original: ReturnType<typeof makeTrack
     text: generated[index]?.replace(/\s+/g, ' ').trim() || line.text
   }))
   return tracks.map(track => track.id === romanization.id ? { ...track,
-    source: /自动补全/.test(track.source) ? track.source : `${track.source} · 自动补全`,
+    source: /自动补全/.test(track.source) ? track.source : `${track.source} · 自动补全`, // i18n-ignore: stored source label, localized where shown
     generatedRomanizationRevision: ROMANIZATION_REVISION, lines: repaired } : track)
 }
 
@@ -498,7 +498,7 @@ export function usePlaybackConnection(loadLyrics = true, hydrateCachedLyrics = t
           return
         }
         const language = detectLyricsLanguage(result.syncedLyrics)
-        const label = language === 'ja' ? '日本語' : language === 'ko' ? '한국어' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
+        const label = language === 'ja' ? '日本語' : language === 'ko' ? '한국어' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original' // i18n-ignore: stored track label, localized where shown
         const original = makeTrack(`${latestTrack.id}-original`, language, label, 'original', result.syncedLyrics, result.source)
         let providerTracks = [original, ...(result.additionalTracks ?? []).map((item, index) =>
           makeTrack(`${latestTrack.id}-${item.language}-${index}`, item.language, item.label, item.kind, item.syncedLyrics, item.source)

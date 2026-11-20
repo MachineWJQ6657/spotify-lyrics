@@ -6,6 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { hasKana, scriptPresentation } from '../lib/script'
 import { BrandMark } from './BrandMark'
 import { isShortcutTarget, seekPlayback } from '../lib/seek'
+import { t } from '../lib/i18n'
 
 export function PlayerBar({ playback, position, positionNow, demoMode, onTrackWidth }: { playback: PlaybackSnapshot | null; position: number; positionNow?: () => number; demoMode: boolean; onTrackWidth?: (width: number) => void }) {
   // Commands use the clock as it is now: the rendered position can be up to a second old.
@@ -125,10 +126,10 @@ export function PlayerBar({ playback, position, positionNow, demoMode, onTrackWi
   return <footer className="player-bar">
     <div className="track-mini">
       <div className="mini-cover">{track?.coverUrl ? <img src={track.coverUrl} /> : <BrandMark size={34} title="Syllable" />}</div>
-      <div><strong {...titlePresentation}>{track?.name ?? '等待播放'}</strong><span {...artistPresentation}>{track?.artist ?? 'Spotify'}</span></div>
+      <div><strong {...titlePresentation}>{track?.name ?? t('等待播放')}</strong><span {...artistPresentation}>{track?.artist ?? 'Spotify'}</span></div>
     </div>
     <div className="transport">
-      <div className="transport-buttons"><button disabled={busy || Boolean(pendingSkipTrackId)} title="上一首（播放超过 3 秒时先回到开头）" onClick={() => void command('previous')}><SkipBack size={17} /></button><button disabled={busy || Boolean(pendingSkipTrackId)} title={playback?.isPlaying ? '暂停' : '播放'} className="play-button" onClick={() => void command(playback?.isPlaying ? 'pause' : 'play')}>{busy ? <LoaderCircle className="spin-icon" size={16} /> : playback?.isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button disabled={busy || Boolean(pendingSkipTrackId)} title={pendingSkipTrackId ? '正在等待 Spotify 换曲…' : '下一首'} onClick={() => void command('next')}><SkipForward size={17} /></button></div>
+      <div className="transport-buttons"><button disabled={busy || Boolean(pendingSkipTrackId)} title={t('上一首（播放超过 3 秒时先回到开头）')} onClick={() => void command('previous')}><SkipBack size={17} /></button><button disabled={busy || Boolean(pendingSkipTrackId)} title={playback?.isPlaying ? t('暂停') : t('播放')} className="play-button" onClick={() => void command(playback?.isPlaying ? 'pause' : 'play')}>{busy ? <LoaderCircle className="spin-icon" size={16} /> : playback?.isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button disabled={busy || Boolean(pendingSkipTrackId)} title={pendingSkipTrackId ? t('正在等待 Spotify 换曲…') : t('下一首')} onClick={() => void command('next')}><SkipForward size={17} /></button></div>
       <div className={`progress-row ${pendingSkipTrackId ? 'transport-pending' : ''}`}><span>{formatTime(position)}</span><div ref={progressTrack} className="progress-track" onClick={event => { if (!pendingSkipTrackId) seek(event) }}
         onMouseMove={event => { if (playback?.track) setHoverMs(pointerMs(event)) }} onMouseLeave={() => setHoverMs(null)}>
         <i style={{ width: `${Math.min(100, position / duration * 100)}%` }} />
@@ -136,6 +137,6 @@ export function PlayerBar({ playback, position, positionNow, demoMode, onTrackWi
       </div><span>{formatTime(duration)}</span></div>
       {error && <div className="player-error"><AlertTriangle size={10} />{error}</div>}
     </div>
-    <div className="device" title="空格 播放/暂停 · ← → 快退/快进 5 秒"><Laptop2 size={16} /><span>{playback?.deviceName ?? 'Spotify Connect'}</span></div>
+    <div className="device" title={t('空格 播放/暂停 · ← → 快退/快进 5 秒')}><Laptop2 size={16} /><span>{playback?.deviceName ?? 'Spotify Connect'}</span></div>
   </footer>
 }

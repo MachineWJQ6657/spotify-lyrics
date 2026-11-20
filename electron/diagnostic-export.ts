@@ -1,3 +1,4 @@
+import { t } from '../src/lib/i18n'
 /** Only a user-selected destination may receive the frozen report. */
 export class DiagnosticExporter {
   private busy = false
@@ -8,7 +9,7 @@ export class DiagnosticExporter {
     try {
       // Snapshot before showing the dialog: playback may change while it is open.
       const content = JSON.stringify(report, null, 2)
-      if (content == null) throw new Error('同步诊断内容无效')
+      if (content == null) throw new Error(t('同步诊断内容无效'))
       const destination = await choose()
       if (destination.canceled || !destination.filePath) return false
       await write(destination.filePath, content)

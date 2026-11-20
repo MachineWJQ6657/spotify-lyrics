@@ -9,6 +9,8 @@ import { hasKana, scriptPresentation } from '../lib/script'
 import { LYRICS_SOURCES, lyricsSourceIdOf } from '../lib/lyrics-source'
 import { backupFileName, parseLibraryBackup, serializeLibraryBackup } from '../lib/library-backup'
 import { hasReadableLyrics } from '../lib/song-reader'
+import { t } from '../lib/i18n'
+import { localizeLabel } from '../lib/source-label'
 
 /** Case-, width- and space-insensitive match on title, artist and album. */
 export function matchesLibraryQuery(document: Pick<LyricsDocument, 'track' | 'trackId'>, query: string) {
@@ -20,9 +22,9 @@ export function matchesLibraryQuery(document: Pick<LyricsDocument, 'track' | 'tr
 
 /** "听音 · 延后 0.85 秒" / "手动 · 提前 0.25 秒" for a song whose timing was corrected. */
 export function libraryTimingTag(document: LyricsDocument) {
-  if (document.offsetMs) return `手动 · ${shiftDirection(document.offsetMs)} ${shiftAmount(document.offsetMs)}`
+  if (document.offsetMs) return t('手动 · {direction} {amount}', { direction: shiftDirection(document.offsetMs), amount: shiftAmount(document.offsetMs) })
   const listened = listenedLyricsOffset(document)
-  return listened ? `听音 · ${shiftDirection(listened)} ${shiftAmount(listened)}` : ''
+  return listened ? t('听音 · {direction} {amount}', { direction: shiftDirection(listened), amount: shiftAmount(listened) }) : ''
 }
 
 /**
@@ -42,8 +44,8 @@ export function coverTile(name: string | undefined): { initial: string; hue: num
 export function librarySourceTag(document: LyricsDocument) {
   const original = document.tracks.find(track => track.kind === 'original') ?? document.tracks[0]
   if (!original) return ''
-  if (document.userEditedTrackIds?.includes(original.id)) return '本地'
-  return LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(original.source))?.label ?? ''
+  if (document.userEditedTrackIds?.includes(original.id)) return t('本地')
+  return localizeLabel(LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(original.source))?.label)
 }
 
 export function LibraryView({ mode, openEditor, onRead }: { mode: 'library' | 'sources'; openEditor(): void
@@ -85,37 +87,38 @@ export function LibraryView({ mode, openEditor, onRead }: { mode: 'library' | 's
   const exportBackup = async () => {
     try {
       const saved = await window.syllable.lyrics.export(backupFileName(), serializeLibraryBackup(library))
-      if (saved) say(`已导出 ${documents.length} 首歌的歌词和校准结果`)
-    } catch { say('导出失败，请换一个位置再试') }
+      if (saved) say(t('已导出 {count} 首歌的歌词和校准结果', { count: documents.length }))
+    } catch { say(t('导出失败，请换一个位置再试')) }
   }
   const importBackup = async (file: File | undefined) => {
     if (!file) return
-    if (file.size > 200 * 1024 * 1024) { say('文件太大，不是资料库备份'); return }
+    if (file.size > 200 * 1024 * 1024) { say(t('文件太大，不是资料库备份')); return }
     try {
       const parsed = parseLibraryBackup(await file.text())
       if ('error' in parsed) { say(parsed.error); return }
       const result = importLibrary(parsed.documents)
-      say(`已导入：新增 ${result.added} 首，更新 ${result.updated} 首，保留原有 ${result.kept} 首${parsed.skipped ? `，跳过 ${parsed.skipped} 条无法识别的记录` : ''}`)
-    } catch { say('读取备份文件失败') }
+      const summary = t('已导入：新增 {added} 首，更新 {updated} 首，保留原有 {kept} 首', { added: result.added, updated: result.updated, kept: result.kept })
+      say(parsed.skipped ? summary + t('，跳过 {count} 条无法识别的记录', { count: parsed.skipped }) : summary)
+    } catch { say(t('读取备份文件失败')) }
   }
   const backupControls = <div className="library-backup">
-    {documents.length > 0 && <button onClick={() => void exportBackup()} title="把全部歌词、手动校准和听音校准结果存成一个文件"><Archive size={13} />导出备份</button>}
-    <button onClick={() => backupInput.current?.click()} title="从备份文件恢复：新歌加入，较新的覆盖，其余保留"><Upload size={13} />导入备份</button>
+    {documents.length > 0 && <button onClick={() => void exportBackup()} title={t('把全部歌词、手动校准和听音校准结果存成一个文件')}><Archive size={13} />{t('导出备份')}</button>}
+    <button onClick={() => backupInput.current?.click()} title={t('从备份文件恢复：新歌加入，较新的覆盖，其余保留')}><Upload size={13} />{t('导入备份')}</button>
     <input ref={backupInput} type="file" accept=".json,application/json" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void importBackup(file) }} />
   </div>
 
   if (mode === 'sources') return <div className="content-page">
-    <div className="content-page-header"><span>SOURCE PIPELINE</span><h1>歌词源与处理器</h1><p>Syllable 同时查询下面几个来源，自动选出最合适的一份。想换一个来源时，在「正在播放」页点歌名右边的来源标签。</p></div>
+    <div className="content-page-header"><span>SOURCE PIPELINE</span><h1>{t('歌词源与处理器')}</h1><p>{t('Syllable 同时查询下面几个来源，自动选出最合适的一份。想换一个来源时，在「正在播放」页点歌名右边的来源标签。')}</p></div>
     <div className="source-card-grid">
-      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>Spotify / Musixmatch</strong><span>远程 · 原文对照</span></div><em>需连接 Web API</em><p>连接 Spotify Web API 后可以取得 Spotify 自带的歌词，用来核对内容和顺序。</p></article>
-      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>LRCLIB Exact</strong><span>远程 · 元数据查询</span></div><em><CheckCircle2 size={13} />已启用</em><p>按歌曲、艺人、专辑和时长精确查询。</p></article>
-      <article><i className="source-icon search"><Search size={19} /></i><div><strong>LRCLIB Search</strong><span>远程 · 自动回退</span></div><em><CheckCircle2 size={13} />已启用</em><p>以标题和艺人身份为主，结合专辑、版本时长与同步格式评分。</p></article>
-      <article><i className="source-icon cloud"><Languages size={19} /></i><div><strong>网易云多语言</strong><span>远程 · 原文与翻译补全</span></div><em><CheckCircle2 size={13} />已启用</em><p>提供原文和人工罗马音；中文翻译优先采用网易云，在确认对应关系后对齐原文。</p></article>
-      <article><i className="source-icon search"><Search size={19} /></i><div><strong>酷狗同步歌词</strong><span>远程 · 补充候选</span></div><em><CheckCircle2 size={13} />已启用</em><p>补充候选。会检查语言和录音版本，排除英文版等不匹配的文件。</p></article>
-      <article><i className="source-icon local"><Database size={19} /></i><div><strong>Local Library</strong><span>本机 · 最高优先级</span></div><em><CheckCircle2 size={13} />{documents.length} 首</em><p>你导入和编辑过的歌词优先使用。</p></article>
-      <article><i className="source-icon roman"><Sparkles size={19} /></i><div><strong>Kuromoji Romanizer</strong><span>本机 · 日文处理</span></div><em><CheckCircle2 size={13} />已启用</em><p>先分析汉字读音，再以 Hepburn 规则生成罗马音。</p></article>
+      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>Spotify / Musixmatch</strong><span>{t('远程 · 原文对照')}</span></div><em>{t('需连接 Web API')}</em><p>{t('连接 Spotify Web API 后可以取得 Spotify 自带的歌词，用来核对内容和顺序。')}</p></article>
+      <article><i className="source-icon cloud"><Cloud size={19} /></i><div><strong>LRCLIB Exact</strong><span>{t('远程 · 元数据查询')}</span></div><em><CheckCircle2 size={13} />{t('已启用')}</em><p>{t('按歌曲、艺人、专辑和时长精确查询。')}</p></article>
+      <article><i className="source-icon search"><Search size={19} /></i><div><strong>LRCLIB Search</strong><span>{t('远程 · 自动回退')}</span></div><em><CheckCircle2 size={13} />{t('已启用')}</em><p>{t('以标题和艺人身份为主，结合专辑、版本时长与同步格式评分。')}</p></article>
+      <article><i className="source-icon cloud"><Languages size={19} /></i><div><strong>{t('网易云多语言')}</strong><span>{t('远程 · 原文与翻译补全')}</span></div><em><CheckCircle2 size={13} />{t('已启用')}</em><p>{t('提供原文和人工罗马音；中文翻译优先采用网易云，在确认对应关系后对齐原文。')}</p></article>
+      <article><i className="source-icon search"><Search size={19} /></i><div><strong>{t('酷狗同步歌词')}</strong><span>{t('远程 · 补充候选')}</span></div><em><CheckCircle2 size={13} />{t('已启用')}</em><p>{t('补充候选。会检查语言和录音版本，排除英文版等不匹配的文件。')}</p></article>
+      <article><i className="source-icon local"><Database size={19} /></i><div><strong>Local Library</strong><span>{t('本机 · 最高优先级')}</span></div><em><CheckCircle2 size={13} />{t('{count} 首', { count: documents.length })}</em><p>{t('你导入和编辑过的歌词优先使用。')}</p></article>
+      <article><i className="source-icon roman"><Sparkles size={19} /></i><div><strong>Kuromoji Romanizer</strong><span>{t('本机 · 日文处理')}</span></div><em><CheckCircle2 size={13} />{t('已启用')}</em><p>{t('先分析汉字读音，再以 Hepburn 规则生成罗马音。')}</p></article>
     </div>
-    <button className="page-primary-action" onClick={openEditor}><Search size={15} />打开歌词搜索工作台</button>
+    <button className="page-primary-action" onClick={openEditor}><Search size={15} />{t('打开歌词搜索工作台')}</button>
   </div>
 
   const libraryTrackPresentation = (document: (typeof documents)[number], field: 'name' | 'artist') => {
@@ -125,21 +128,21 @@ export function LibraryView({ mode, openEditor, onRead }: { mode: 'library' | 's
     return scriptPresentation(value, context, originalLanguage)
   }
   return <div className="content-page">
-    <div className="content-page-header"><span>LOCAL LIBRARY</span><h1>歌词资料库</h1><p>播放过的歌曲的歌词保存在本机，下次播放直接使用。存得太多时先清掉最久没更新的自动匹配歌词，导入和编辑过的歌词始终保留。</p></div>
+    <div className="content-page-header"><span>LOCAL LIBRARY</span><h1>{t('歌词资料库')}</h1><p>{t('播放过的歌曲的歌词保存在本机，下次播放直接使用。存得太多时先清掉最久没更新的自动匹配歌词，导入和编辑过的歌词始终保留。')}</p></div>
     {documents.length > 0 && <div className="library-toolbar">
-      <label className="library-search"><Search size={14} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="按歌名、艺人或专辑筛选" aria-label="筛选资料库" />{query && <button title="清除筛选" aria-label="清除筛选" onClick={() => setQuery('')}><X size={13} /></button>}</label>
-      <span>{query ? `${shown.length} / ${documents.length} 首` : `共 ${documents.length} 首`}</span>
+      <label className="library-search"><Search size={14} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('按歌名、艺人或专辑筛选')} aria-label={t('筛选资料库')} />{query && <button title={t('清除筛选')} aria-label={t('清除筛选')} onClick={() => setQuery('')}><X size={13} /></button>}</label>
+      <span>{query ? t('{shown} / {total} 首', { shown: shown.length, total: documents.length }) : t('共 {count} 首', { count: documents.length })}</span>
       {backupControls}
     </div>}
     {!documents.length && <div className="library-toolbar">{backupControls}</div>}
     {backupMessage && <div className="library-undo" role="status"><span>{backupMessage}</span></div>}
-    {removed.length > 0 && <div className="library-undo" role="status"><span>{removed.length === 1 ? `已移除「${removed[0].track?.name ?? removed[0].trackId}」` : `已移除 ${removed.length} 首歌`}</span><button onClick={undo}><Undo2 size={13} />撤销</button></div>}
-    {!documents.length ? <div className="library-empty"><BookOpen size={31} /><h3>资料库还是空的</h3><p>播放一首 Spotify 歌曲并搜索或导入歌词后，它会出现在这里。</p><button onClick={openEditor}><Search size={14} />搜索歌词</button></div>
-    : !shown.length ? <div className="library-empty"><Search size={28} /><h3>没有匹配的歌曲</h3><p>换个关键词试试，歌名、艺人和专辑都可以。</p><button onClick={() => setQuery('')}><X size={14} />清除筛选</button></div>
+    {removed.length > 0 && <div className="library-undo" role="status"><span>{removed.length === 1 ? t('已移除「{name}」', { name: removed[0].track?.name ?? removed[0].trackId }) : t('已移除 {count} 首歌', { count: removed.length })}</span><button onClick={undo}><Undo2 size={13} />{t('撤销')}</button></div>}
+    {!documents.length ? <div className="library-empty"><BookOpen size={31} /><h3>{t('资料库还是空的')}</h3><p>{t('播放一首 Spotify 歌曲并搜索或导入歌词后，它会出现在这里。')}</p><button onClick={openEditor}><Search size={14} />{t('搜索歌词')}</button></div>
+    : !shown.length ? <div className="library-empty"><Search size={28} /><h3>{t('没有匹配的歌曲')}</h3><p>{t('换个关键词试试，歌名、艺人和专辑都可以。')}</p><button onClick={() => setQuery('')}><X size={14} />{t('清除筛选')}</button></div>
     : <div className="library-grid">{shown.map(document => <article key={document.trackId}>
       <div className="library-cover" style={document.track?.coverUrl ? undefined : { '--tile-hue': coverTile(document.track?.name).hue } as React.CSSProperties}>{document.track?.coverUrl ? <img src={document.track.coverUrl} /> : <span className="cover-initial" aria-hidden="true">{coverTile(document.track?.name).initial}</span>}</div>
-      <div className="library-copy"><strong {...libraryTrackPresentation(document, 'name')}>{document.track?.name ?? document.trackId}</strong><span><span {...libraryTrackPresentation(document, 'artist')}>{document.track?.artist ?? '本地歌词'}</span> · {document.tracks.length} 条轨道</span><div>{document.tracks.map(track => <i key={track.id}>{track.label}</i>)}{librarySourceTag(document) && <i className="source-tag" title="歌词来源">{librarySourceTag(document)}</i>}{libraryTimingTag(document) && <i className="timing-tag" title="这首歌的歌词时间已整体校正">{libraryTimingTag(document)}</i>}</div></div>
-      <div className="library-actions">{onRead && hasReadableLyrics(document) && <button title="查看歌词" onClick={() => onRead(document)}><BookOpen size={14} /></button>}<button title="导出第一条轨道" onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`.replace(/[<>:"/\\|?*]/g, '_'), serializeLrc(track)).catch(() => undefined) }}><Download size={14} /></button><button title="从资料库移除" onClick={() => remove(document)}><Trash2 size={14} /></button></div>
+      <div className="library-copy"><strong {...libraryTrackPresentation(document, 'name')}>{document.track?.name ?? document.trackId}</strong><span><span {...libraryTrackPresentation(document, 'artist')}>{document.track?.artist ?? t('本地歌词')}</span> · {t('{count} 条轨道', { count: document.tracks.length })}</span><div>{document.tracks.map(track => <i key={track.id}>{localizeLabel(track.label)}</i>)}{librarySourceTag(document) && <i className="source-tag" title={t('歌词来源')}>{librarySourceTag(document)}</i>}{libraryTimingTag(document) && <i className="timing-tag" title={t('这首歌的歌词时间已整体校正')}>{libraryTimingTag(document)}</i>}</div></div>
+      <div className="library-actions">{onRead && hasReadableLyrics(document) && <button title={t('查看歌词')} onClick={() => onRead(document)}><BookOpen size={14} /></button>}<button title={t('导出第一条轨道')} onClick={() => { const track = document.tracks[0]; if (track) void window.syllable.lyrics.export(`${document.track?.name ?? 'lyrics'}.${track.language}.lrc`.replace(/[<>:"/\\|?*]/g, '_'), serializeLrc(track)).catch(() => undefined) }}><Download size={14} /></button><button title={t('从资料库移除')} onClick={() => remove(document)}><Trash2 size={14} /></button></div>
     </article>)}</div>}
   </div>
 }

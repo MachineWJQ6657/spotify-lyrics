@@ -1,3 +1,4 @@
+import { tk } from './i18n'
 import { fingerprint, matchFingerprint, type AudioFingerprint } from '../../electron/audio-sync/fingerprint'
 
 let reference: AudioFingerprint | null = null
@@ -11,7 +12,7 @@ self.onmessage = (event: MessageEvent<{ id: number; type: 'reference' | 'query' 
       reference = features
       self.postMessage({ id, value: { durationMs: features.durationMs, bytes: features.frames.byteLength + features.active.byteLength } })
     } else {
-      if (!reference) throw new Error('请先导入参考音频')
+      if (!reference) throw new Error(tk('请先导入参考音频'))
       self.postMessage({ id, value: matchFingerprint(reference, features) })
     }
   } catch (error) { self.postMessage({ id, error: error instanceof Error ? error.message : String(error) }) }

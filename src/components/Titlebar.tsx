@@ -1,8 +1,9 @@
 import { memo } from 'react'
 import { BrandMark } from './BrandMark'
 import { WindowControls } from './Icons'
+import { t } from '../lib/i18n'
 
-export const Titlebar = memo(function Titlebar({ title = '正在播放' }: { title?: string }) {
+export const Titlebar = memo(function Titlebar({ title = t('正在播放') }: { title?: string }) {
   return <header className="titlebar drag-region">
     <div className="brand"><span className="brand-mark"><BrandMark size={22} /></span><span>Syllable</span><span className="version">{version}</span></div>
     <div className="titlebar-center">{title}</div>

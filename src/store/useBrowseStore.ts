@@ -3,6 +3,7 @@ import type { LyricsDocument } from '../types'
 import { hitTrack, readingDocument, type SongHit } from '../lib/song-reader'
 import { makeRomanizedTrack } from '../lib/lyrics'
 import { completeRomanization } from '../hooks/usePlayback'
+import { t } from '../lib/i18n'
 
 /**
  * The "查歌词" page: a search for songs and the lyrics of the one opened,
@@ -71,7 +72,7 @@ export const useBrowseStore = create<BrowseState>((set, get) => ({
       set({ hits: result.hits, failed: result.failed, searchedQuery: query, searching: false })
     } catch {
       if (sequence !== searchSequence) return
-      set({ hits: [], failed: [], searchedQuery: query, searching: false, searchError: '歌曲搜索暂时没有响应，请稍后再试。' })
+      set({ hits: [], failed: [], searchedQuery: query, searching: false, searchError: t('歌曲搜索暂时没有响应，请稍后再试。') })
     }
   },
   openHit: async (hit, fresh = false) => {

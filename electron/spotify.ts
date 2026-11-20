@@ -4,6 +4,7 @@ import { shell } from 'electron'
 import type { TokenSession } from './store'
 import { SessionStore } from './store'
 import type { SpotifyTransitionProfile } from '../src/types'
+import { t } from '../src/lib/i18n'
 
 const REDIRECT_URI = 'http://127.0.0.1:43821/callback'
 const SCOPES = 'user-read-currently-playing user-read-playback-state user-modify-playback-state'
@@ -53,7 +54,7 @@ export function queueTrackFromWebItem(item: any): PlaybackSnapshot['track'] {
 }
 
 export class SpotifyRateLimitError extends Error {
-  constructor(public retryAfterMs: number) { super('Spotify 请求过于频繁，已自动降低刷新频率') }
+  constructor(public retryAfterMs: number) { super(t('Spotify 请求过于频繁，已自动降低刷新频率')) }
 }
 
 export class SpotifyService {
@@ -65,7 +66,7 @@ export class SpotifyService {
   isConnected() { return Boolean(this.session) }
 
   async login(clientId: string): Promise<void> {
-    if (!clientId.trim()) throw new Error('请输入 Spotify Client ID')
+    if (!clientId.trim()) throw new Error(t('请输入 Spotify Client ID'))
     const verifier = randomBytes(64).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
     const state = randomBytes(18).toString('hex')
@@ -81,20 +82,20 @@ export class SpotifyService {
         if (callback.pathname !== '/callback') return
         if (callback.searchParams.get('state') !== state) {
           res.end('Invalid OAuth state. You can close this window.')
-          server.close(); reject(new Error('Spotify 授权状态校验失败')); return
+          server.close(); reject(new Error(t('Spotify 授权状态校验失败'))); return
         }
         const authCode = callback.searchParams.get('code')
         if (!authCode) {
           res.end('Authorization cancelled. You can close this window.')
-          server.close(); reject(new Error('Spotify 授权已取消')); return
+          server.close(); reject(new Error(t('Spotify 授权已取消'))); return
         }
         res.setHeader('content-type', 'text/html; charset=utf-8')
-        res.end('<body style="background:#0b0b0d;color:#fff;font:16px system-ui;display:grid;place-items:center;height:100vh"><div><h2>已连接 Syllable</h2><p>现在可以关闭此页面。</p></div></body>')
+        res.end(`<body style="background:#0b0b0d;color:#fff;font:16px system-ui;display:grid;place-items:center;height:100vh"><div><h2>${t('已连接 Syllable')}</h2><p>${t('现在可以关闭此页面。')}</p></div></body>`)
         server.close(); resolve(authCode)
       })
       server.on('error', reject)
       server.listen(43821, '127.0.0.1', () => void shell.openExternal(url.toString()))
-      setTimeout(() => { server.close(); reject(new Error('Spotify 授权超时，请重试')) }, 120_000)
+      setTimeout(() => { server.close(); reject(new Error(t('Spotify 授权超时，请重试'))) }, 120_000)
     })
 
     const response = await fetch('https://accounts.spotify.com/api/token', {
@@ -104,7 +105,7 @@ export class SpotifyService {
         redirect_uri: REDIRECT_URI, code_verifier: verifier
       })
     })
-    if (!response.ok) throw new Error(`Spotify 令牌交换失败 (${response.status})`)
+    if (!response.ok) throw new Error(t('Spotify 令牌交换失败 ({status})', { status: response.status }))
     const token = await response.json() as { access_token: string; refresh_token: string; expires_in: number }
     this.session = { accessToken: token.access_token, refreshToken: token.refresh_token, expiresAt: Date.now() + token.expires_in * 1000, clientId: clientId.trim() }
     await this.store.set(this.session)
@@ -113,12 +114,12 @@ export class SpotifyService {
   async logout() { this.session = null; await this.store.set(null) }
 
   private async refresh(signal?: AbortSignal) {
-    if (!this.session) throw new Error('Spotify 尚未连接')
+    if (!this.session) throw new Error(t('Spotify 尚未连接'))
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: this.session.clientId, grant_type: 'refresh_token', refresh_token: this.session.refreshToken }), signal
     })
-    if (!response.ok) throw new Error('Spotify 登录已过期，请重新连接')
+    if (!response.ok) throw new Error(t('Spotify 登录已过期，请重新连接'))
     const token = await response.json() as { access_token: string; refresh_token?: string; expires_in: number }
     this.session = { ...this.session, accessToken: token.access_token, refreshToken: token.refresh_token ?? this.session.refreshToken, expiresAt: Date.now() + token.expires_in * 1000 }
     await this.store.set(this.session)
@@ -127,7 +128,7 @@ export class SpotifyService {
   async getPlayback(): Promise<PlaybackSnapshot | null> {
     if (!this.session) return null
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new Error('Spotify 播放状态请求超时，稍后重试')), 8000)
+    const timer = setTimeout(() => controller.abort(new Error(t('Spotify 播放状态请求超时，稍后重试'))), 8000)
     try { return await this.readPlayback(controller.signal) }
     finally { clearTimeout(timer) }
   }
@@ -152,7 +153,7 @@ export class SpotifyService {
       const retryAfterMs = Math.max(2500, Number(response.headers.get('retry-after') ?? 5) * 1000)
       throw new SpotifyRateLimitError(retryAfterMs)
     }
-    if (!response.ok) throw new Error(`Spotify 播放状态获取失败 (${response.status})`)
+    if (!response.ok) throw new Error(t('Spotify 播放状态获取失败 ({status})', { status: response.status }))
     const receivedAt = Date.now()
     const data = await response.json() as any
     signal.throwIfAborted()
@@ -174,7 +175,7 @@ export class SpotifyService {
   async getQueue(acceptLanguage?: string): Promise<{ current: PlaybackSnapshot['track']; next: PlaybackSnapshot['track'] } | null> {
     if (!this.session) return null
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new Error('Spotify 队列请求超时')), 6000)
+    const timer = setTimeout(() => controller.abort(new Error(t('Spotify 队列请求超时'))), 6000)
     try {
       if (Date.now() > this.session.expiresAt - 60_000) await this.refresh(controller.signal)
       const request = () => fetch('https://api.spotify.com/v1/me/player/queue', {
@@ -196,9 +197,9 @@ export class SpotifyService {
   }
 
   private async playerMutation(path: string, method: 'PUT' | 'POST') {
-    if (!this.session) throw new Error('Spotify 尚未连接')
+    if (!this.session) throw new Error(t('Spotify 尚未连接'))
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new Error('Spotify 控制请求超时，请先确认播放状态')), 5000)
+    const timer = setTimeout(() => controller.abort(new Error(t('Spotify 控制请求超时，请先确认播放状态'))), 5000)
     const send = () => {
       // A slow refresh must not dispatch an old skip after its deadline.
       controller.signal.throwIfAborted()
@@ -228,17 +229,17 @@ export class SpotifyService {
     } as const
     const target = map[command]
     const response = await this.playerMutation(target.path, target.method)
-    if (response.status === 403) throw new Error('当前 Spotify 帐号或设备不允许远程控制')
-    if (response.status === 404) throw new Error('没有可控制的 Spotify 活动设备')
-    if (!response.ok) throw new Error(`Spotify 控制失败 (${response.status})`)
+    if (response.status === 403) throw new Error(t('当前 Spotify 帐号或设备不允许远程控制'))
+    if (response.status === 404) throw new Error(t('没有可控制的 Spotify 活动设备'))
+    if (!response.ok) throw new Error(t('Spotify 控制失败 ({status})', { status: response.status }))
   }
 
   async seek(positionMs: number): Promise<void> {
     const position = Math.max(0, Math.round(positionMs))
     const response = await this.playerMutation(`seek?position_ms=${position}`, 'PUT')
-    if (response.status === 403) throw new Error('当前 Spotify 帐号或设备不允许跳转')
-    if (response.status === 404) throw new Error('没有可控制的 Spotify 活动设备')
-    if (!response.ok) throw new Error(`Spotify 跳转失败 (${response.status})`)
+    if (response.status === 403) throw new Error(t('当前 Spotify 帐号或设备不允许跳转'))
+    if (response.status === 404) throw new Error(t('没有可控制的 Spotify 活动设备'))
+    if (!response.ok) throw new Error(t('Spotify 跳转失败 ({status})', { status: response.status }))
   }
 }
 

@@ -5,10 +5,11 @@ import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offse
 import { decodeLyricFile, importLyricFiles, importMessage } from '../lib/lyrics-import'
 import { currentListenDecision, listeningTrackId, relistenCurrentSong, subscribeListening } from '../lib/listen-controller'
 import { listenStatus } from '../lib/listen-status'
+import { t, tk } from '../lib/i18n'
 
 const languageOptions = [
-  { code: 'ja', label: '日本語' }, { code: 'romaji', label: 'Romaji' },
-  { code: 'zh-Hans', label: '中文' }, { code: 'en', label: 'English' }
+  { code: 'ja', label: tk('日本語') }, { code: 'romaji', label: 'Romaji' },
+  { code: 'zh-Hans', label: tk('中文') }, { code: 'en', label: 'English' }
 ]
 
 function Switch({ value, onChange, label, disabled = false }: { value: boolean; onChange(value: boolean): void; label: string; disabled?: boolean }) {
@@ -91,10 +92,10 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
     void window.syllable.overlay.setSize(width, height)
   }
   const connect = async () => {
-    setConnecting(true); setMessage('正在浏览器中等待授权…')
+    setConnecting(true); setMessage(t('正在浏览器中等待授权…'))
     try {
       await window.syllable.auth.login(clientId); setConnected(true); setDemoMode(false)
-      setPlayback(await window.syllable.playback.current()); setMessage('已连接 Spotify')
+      setPlayback(await window.syllable.playback.current()); setMessage(t('已连接 Spotify'))
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setConnecting(false) }
   }
@@ -111,25 +112,25 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
     setMessage(importMessage(result))
   }
 
-  const tabs: Array<{ id: PanelTab; label: string }> = [{ id: 'lyrics', label: '歌词' }, { id: 'timing', label: '同步' }, { id: 'overlay', label: '悬浮窗' }, { id: 'connect', label: '连接' }]
+  const tabs: Array<{ id: PanelTab; label: string }> = [{ id: 'lyrics', label: t('歌词') }, { id: 'timing', label: t('同步') }, { id: 'overlay', label: t('悬浮窗') }, { id: 'connect', label: t('连接') }]
   return <aside className="settings-panel">
-    <div className="panel-heading"><div><span>NOW PLAYING</span><h2>显示与同步</h2></div>{onCollapse && <button className="panel-collapse" title="收起设置面板，歌词区更宽" aria-label="收起设置面板" onClick={onCollapse}><PanelRightClose size={18} /></button>}</div>
-    <div className="panel-tabs" role="tablist" aria-label="设置分类">{tabs.map(item => <button key={item.id} role="tab" id={`panel-tab-${item.id}`} aria-selected={tab === item.id} aria-controls="panel-body" onClick={() => selectTab(item.id)}>{item.label}</button>)}</div>
+    <div className="panel-heading"><div><span>NOW PLAYING</span><h2>{t('显示与同步')}</h2></div>{onCollapse && <button className="panel-collapse" title={t('收起设置面板，歌词区更宽')} aria-label={t('收起设置面板')} onClick={onCollapse}><PanelRightClose size={18} /></button>}</div>
+    <div className="panel-tabs" role="tablist" aria-label={t('设置分类')}>{tabs.map(item => <button key={item.id} role="tab" id={`panel-tab-${item.id}`} aria-selected={tab === item.id} aria-controls="panel-body" onClick={() => selectTab(item.id)}>{item.label}</button>)}</div>
     <div className="panel-body" id="panel-body" role="tabpanel" aria-labelledby={`panel-tab-${tab}`}>
       {tab === 'lyrics' && <>
         <section>
-          <label className="setting-label">歌词语言 <small>可多选</small></label>
+          <label className="setting-label">{t('歌词语言')} <small>{t('可多选')}</small></label>
           <div className="language-grid">{languageOptions.map(item => {
             const selected = settings.enabledLanguages.includes(item.code)
-            return <button className={selected ? 'selected' : ''} onClick={() => toggleLanguage(item.code)} key={item.code}><i />{item.label}{selected && <Check size={14} />}</button>
+            return <button className={selected ? 'selected' : ''} onClick={() => toggleLanguage(item.code)} key={item.code}><i />{t(item.label)}{selected && <Check size={14} />}</button>
           })}</div>
-          <label className="switch-row"><div><strong>日文罗马音</strong><span>有人工版本时优先显示</span></div><Switch label="日文罗马音" value={settings.romanization} onChange={romanization => patchSettings({ romanization })} /></label>
+          <label className="switch-row"><div><strong>{t('日文罗马音')}</strong><span>{t('有人工版本时优先显示')}</span></div><Switch label={t('日文罗马音')} value={settings.romanization} onChange={romanization => patchSettings({ romanization })} /></label>
         </section>
         <section>
-          <label className="setting-label">歌词字号 <small>{settings.fontSize}px</small></label>
-          <Range min={34} max={88} value={settings.fontSize} onChange={fontSize => patchSettings({ fontSize })} label="歌词字号" />
-          <label className="setting-label top-gap">主窗口歌词对齐</label>
-          <div className="segmented"><button className={settings.mainAlignment !== 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'left' })}>靠左</button><button className={settings.mainAlignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'center' })}>居中</button></div>
+          <label className="setting-label">{t('歌词字号')} <small>{settings.fontSize}px</small></label>
+          <Range min={34} max={88} value={settings.fontSize} onChange={fontSize => patchSettings({ fontSize })} label={t('歌词字号')} />
+          <label className="setting-label top-gap">{t('主窗口歌词对齐')}</label>
+          <div className="segmented"><button className={settings.mainAlignment !== 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'left' })}>{t('靠左')}</button><button className={settings.mainAlignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ mainAlignment: 'center' })}>{t('居中')}</button></div>
         </section>
         <section>
           <input ref={inputRef} hidden multiple type="file" accept=".lrc,.txt" onChange={event => {
@@ -138,21 +139,21 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
             event.target.value = ''
             void importFiles(files)
           }} />
-          <button className="wide-button" onClick={() => inputRef.current?.click()}><FileUp size={16} />导入多语言 LRC</button>
-          <p className="setting-hint">也可以直接把 LRC 文件拖进窗口；文件名带语言后缀（如 song.zh.lrc）会自动归到对应语言。</p>
+          <button className="wide-button" onClick={() => inputRef.current?.click()}><FileUp size={16} />{t('导入多语言 LRC')}</button>
+          <p className="setting-hint">{t('也可以直接把 LRC 文件拖进窗口；文件名带语言后缀（如 song.zh.lrc）会自动归到对应语言。')}</p>
           {message && <div className="inline-message">{message}</div>}
         </section>
       </>}
       {tab === 'timing' && <>
         <section>
-          <label className="setting-label">逐曲同步校准 <small>{offsetMs > 0 ? '+' : ''}{offsetMs} ms{listened ? ' · 听音自动' : ''}</small></label>
-          <Range min={-30000} max={30000} step={50} value={offsetMs} onChange={changeOffset} label="逐曲同步校准" />
-          <div className="range-labels"><span>歌词提前</span><button onClick={() => changeOffset(0)}><RotateCcw size={12} />本曲归零</button><span>歌词延后</span></div>
-          <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 1000)}>−1 秒</button><button onClick={() => changeOffset(offsetMs - 250)}>−250</button><button onClick={() => changeOffset(offsetMs + 250)}>+250</button><button onClick={() => changeOffset(offsetMs + 1000)}>+1 秒</button></div>
-          <p className="setting-hint">只改这首歌的歌词时间，不影响 Spotify 播放进度；歌词出现得太早就往「延后」调。</p>
+          <label className="setting-label">{t('逐曲同步校准')} <small>{offsetMs > 0 ? '+' : ''}{offsetMs} ms{listened ? ` · ${t('听音自动')}` : ''}</small></label>
+          <Range min={-30000} max={30000} step={50} value={offsetMs} onChange={changeOffset} label={t('逐曲同步校准')} />
+          <div className="range-labels"><span>{t('歌词提前')}</span><button onClick={() => changeOffset(0)}><RotateCcw size={12} />{t('本曲归零')}</button><span>{t('歌词延后')}</span></div>
+          <div className="size-presets timing-presets"><button onClick={() => changeOffset(offsetMs - 1000)}>{t('−1 秒')}</button><button onClick={() => changeOffset(offsetMs - 250)}>−250</button><button onClick={() => changeOffset(offsetMs + 250)}>+250</button><button onClick={() => changeOffset(offsetMs + 1000)}>{t('+1 秒')}</button></div>
+          <p className="setting-hint">{t('只改这首歌的歌词时间，不影响 Spotify 播放进度；歌词出现得太早就往「延后」调。')}</p>
         </section>
         <section>
-          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>听音自动校准</strong><span>播放日语、中文、英文歌曲时听几段声音，自动把歌词整体提前或延后</span></div><Switch label="听音自动校准" value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
+          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>{t('听音自动校准')}</strong><span>{t('播放日语、中文、英文歌曲时听几段声音，自动把歌词整体提前或延后')}</span></div><Switch label={t('听音自动校准')} value={settings.listenOffset !== false} onChange={listenOffset => patchSettings({ listenOffset })} /></label>
           <div className="listen-status">
             <p role="status">{listening.text}</p>
             <button className="wide-button" disabled={!listening.canRun} onClick={() => { relistenCurrentSong() }}><RefreshCw size={15} />{listening.action}</button>
@@ -161,60 +162,60 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
       </>}
       {tab === 'overlay' && <>
         <section>
-          <div className="section-heading"><div><strong>窗口大小与位置</strong><span>窗口边缘也可直接拖动缩放</span></div><Maximize2 size={15} /></div>
-          <label className="setting-label top-gap">宽度 <small>{settings.overlayWidth}px</small></label>
-          <Range min={480} max={2400} step={20} value={settings.overlayWidth} onChange={width => resizeOverlay(width, settings.overlayHeight)} label="悬浮窗宽度" />
-          <label className="setting-label top-gap">高度 <small>{settings.overlayHeight}px</small></label>
-          <Range min={140} max={1200} step={10} value={settings.overlayHeight} onChange={height => resizeOverlay(settings.overlayWidth, height)} label="悬浮窗高度" />
-          <div className="size-presets"><button onClick={() => resizeOverlay(720, 190)}>紧凑</button><button onClick={() => resizeOverlay(920, 230)}>标准</button><button onClick={() => resizeOverlay(1280, 280)}>宽屏</button></div>
-          <label className="setting-label top-gap">快速位置 <small>当前显示器</small></label>
-          <div className="size-presets position-presets"><button onClick={() => void window.syllable.overlay.setPosition('top')}>顶部</button><button onClick={() => void window.syllable.overlay.setPosition('center')}>居中</button><button onClick={() => void window.syllable.overlay.setPosition('bottom')}>底部</button></div>
-          <button className="wide-button subtle" onClick={() => void window.syllable.overlay.resetPosition()}><Move size={15} />恢复默认位置</button>
+          <div className="section-heading"><div><strong>{t('窗口大小与位置')}</strong><span>{t('窗口边缘也可直接拖动缩放')}</span></div><Maximize2 size={15} /></div>
+          <label className="setting-label top-gap">{t('宽度')} <small>{settings.overlayWidth}px</small></label>
+          <Range min={480} max={2400} step={20} value={settings.overlayWidth} onChange={width => resizeOverlay(width, settings.overlayHeight)} label={t('悬浮窗宽度')} />
+          <label className="setting-label top-gap">{t('高度')} <small>{settings.overlayHeight}px</small></label>
+          <Range min={140} max={1200} step={10} value={settings.overlayHeight} onChange={height => resizeOverlay(settings.overlayWidth, height)} label={t('悬浮窗高度')} />
+          <div className="size-presets"><button onClick={() => resizeOverlay(720, 190)}>{t('紧凑')}</button><button onClick={() => resizeOverlay(920, 230)}>{t('标准')}</button><button onClick={() => resizeOverlay(1280, 280)}>{t('宽屏')}</button></div>
+          <label className="setting-label top-gap">{t('快速位置')} <small>{t('当前显示器')}</small></label>
+          <div className="size-presets position-presets"><button onClick={() => void window.syllable.overlay.setPosition('top')}>{t('顶部')}</button><button onClick={() => void window.syllable.overlay.setPosition('center')}>{t('居中')}</button><button onClick={() => void window.syllable.overlay.setPosition('bottom')}>{t('底部')}</button></div>
+          <button className="wide-button subtle" onClick={() => void window.syllable.overlay.resetPosition()}><Move size={15} />{t('恢复默认位置')}</button>
         </section>
         <section>
-          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>显示背景</strong><span>关闭后只保留歌词文字</span></div><Switch label="显示悬浮窗背景" value={settings.backgroundEnabled} onChange={backgroundEnabled => patchSettings({ backgroundEnabled })} /></label>
-          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>背景不透明度 <small>{settings.backgroundOpacity}%</small></label>
-          <Range disabled={!settings.backgroundEnabled} min={10} max={100} value={settings.backgroundOpacity} onChange={backgroundOpacity => patchSettings({ backgroundOpacity })} label="背景不透明度" />
-          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>背景模糊 <small>{settings.blur}px</small></label>
-          <Range disabled={!settings.backgroundEnabled} min={0} max={36} value={settings.blur} onChange={blur => patchSettings({ blur })} label="背景模糊" />
-          <label className="setting-label top-gap">圆角 <small>{settings.cornerRadius}px</small></label>
-          <Range min={0} max={32} value={settings.cornerRadius} onChange={cornerRadius => patchSettings({ cornerRadius })} label="圆角" />
+          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>{t('显示背景')}</strong><span>{t('关闭后只保留歌词文字')}</span></div><Switch label={t('显示悬浮窗背景')} value={settings.backgroundEnabled} onChange={backgroundEnabled => patchSettings({ backgroundEnabled })} /></label>
+          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>{t('背景不透明度')} <small>{settings.backgroundOpacity}%</small></label>
+          <Range disabled={!settings.backgroundEnabled} min={10} max={100} value={settings.backgroundOpacity} onChange={backgroundOpacity => patchSettings({ backgroundOpacity })} label={t('背景不透明度')} />
+          <label className={`setting-label top-gap ${!settings.backgroundEnabled ? 'disabled-label' : ''}`}>{t('背景模糊')} <small>{settings.blur}px</small></label>
+          <Range disabled={!settings.backgroundEnabled} min={0} max={36} value={settings.blur} onChange={blur => patchSettings({ blur })} label={t('背景模糊')} />
+          <label className="setting-label top-gap">{t('圆角')} <small>{settings.cornerRadius}px</small></label>
+          <Range min={0} max={32} value={settings.cornerRadius} onChange={cornerRadius => patchSettings({ cornerRadius })} label={t('圆角')} />
         </section>
         <section>
-          <label className="setting-label">文字效果</label>
-          <div className="segmented three"><button className={settings.textEffect === 'none' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'none' })}>纯文字</button><button className={settings.textEffect === 'shadow' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'shadow' })}>柔和阴影</button><button className={settings.textEffect === 'outline' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'outline' })}>清晰描边</button></div>
-          <label className="setting-label top-gap">文字颜色</label>
-          <div className="segmented three"><button className={settings.textColor === 'white' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'white' })}>纯白</button><button className={settings.textColor === 'green' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'green' })}>Spotify 绿</button><button className={settings.textColor === 'warm' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'warm' })}>暖白</button></div>
-          <label className="setting-label top-gap">文字对齐</label>
-          <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>左对齐</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>居中</button></div>
-          <label className="setting-label top-gap">文字不透明度 <small>{settings.textOpacity}%</small></label>
-          <Range min={45} max={100} value={settings.textOpacity} onChange={textOpacity => patchSettings({ textOpacity })} label="文字不透明度" />
-          <p className="setting-hint">100% 是完全不透明，数值越小文字越淡。</p>
-          <label className="setting-label top-gap">文字字重 <small>{settings.fontWeight}</small></label>
-          <Range min={500} max={850} step={50} value={settings.fontWeight} onChange={fontWeight => patchSettings({ fontWeight })} label="文字字重" />
-          <label className="setting-label top-gap">歌词行距 <small>{settings.lineHeight}%</small></label>
-          <Range min={100} max={160} step={2} value={settings.lineHeight} onChange={lineHeight => patchSettings({ lineHeight })} label="歌词行距" />
-          <label className="switch-row"><div><strong>显示下一句</strong><span>在当前歌词下面用较小的字预告下一句；窗口放不下时自动隐藏</span></div><Switch label="显示下一句" value={settings.overlayNextLine === true} onChange={overlayNextLine => patchSettings({ overlayNextLine })} /></label>
-          <label className="switch-row"><div><strong>暂停时隐藏</strong><span>锁定的悬浮窗在暂停 10 秒后淡出，继续播放时自动出现</span></div><Switch label="暂停时隐藏悬浮窗" value={settings.overlayHideWhenPaused === true} onChange={overlayHideWhenPaused => patchSettings({ overlayHideWhenPaused })} /></label>
+          <label className="setting-label">{t('文字效果')}</label>
+          <div className="segmented three"><button className={settings.textEffect === 'none' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'none' })}>{t('纯文字')}</button><button className={settings.textEffect === 'shadow' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'shadow' })}>{t('柔和阴影')}</button><button className={settings.textEffect === 'outline' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'outline' })}>{t('清晰描边')}</button></div>
+          <label className="setting-label top-gap">{t('文字颜色')}</label>
+          <div className="segmented three"><button className={settings.textColor === 'white' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'white' })}>{t('纯白')}</button><button className={settings.textColor === 'green' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'green' })}>{t('Spotify 绿')}</button><button className={settings.textColor === 'warm' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'warm' })}>{t('暖白')}</button></div>
+          <label className="setting-label top-gap">{t('文字对齐')}</label>
+          <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>{t('左对齐')}</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>{t('居中')}</button></div>
+          <label className="setting-label top-gap">{t('文字不透明度')} <small>{settings.textOpacity}%</small></label>
+          <Range min={45} max={100} value={settings.textOpacity} onChange={textOpacity => patchSettings({ textOpacity })} label={t('文字不透明度')} />
+          <p className="setting-hint">{t('100% 是完全不透明，数值越小文字越淡。')}</p>
+          <label className="setting-label top-gap">{t('文字字重')} <small>{settings.fontWeight}</small></label>
+          <Range min={500} max={850} step={50} value={settings.fontWeight} onChange={fontWeight => patchSettings({ fontWeight })} label={t('文字字重')} />
+          <label className="setting-label top-gap">{t('歌词行距')} <small>{settings.lineHeight}%</small></label>
+          <Range min={100} max={160} step={2} value={settings.lineHeight} onChange={lineHeight => patchSettings({ lineHeight })} label={t('歌词行距')} />
+          <label className="switch-row"><div><strong>{t('显示下一句')}</strong><span>{t('在当前歌词下面用较小的字预告下一句；窗口放不下时自动隐藏')}</span></div><Switch label={t('显示下一句')} value={settings.overlayNextLine === true} onChange={overlayNextLine => patchSettings({ overlayNextLine })} /></label>
+          <label className="switch-row"><div><strong>{t('暂停时隐藏')}</strong><span>{t('锁定的悬浮窗在暂停 10 秒后淡出，继续播放时自动出现')}</span></div><Switch label={t('暂停时隐藏悬浮窗')} value={settings.overlayHideWhenPaused === true} onChange={overlayHideWhenPaused => patchSettings({ overlayHideWhenPaused })} /></label>
         </section>
         <section>
-          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>锁定悬浮窗</strong><span>{settings.positionLocked ? '已锁定：歌词不挡鼠标，点击会穿透到下面的窗口；鼠标在歌词上停一下会出现控制条' : '未锁定：拖动歌词移动、拖边缘缩放、Ctrl+滚轮调字号、双击打开客户端'}</span></div><Switch label="锁定悬浮窗位置" value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
+          <label className="switch-row" style={{ marginTop: 0 }}><div><strong>{t('锁定悬浮窗')}</strong><span>{settings.positionLocked ? t('已锁定：歌词不挡鼠标，点击会穿透到下面的窗口；鼠标在歌词上停一下会出现控制条') : t('未锁定：拖动歌词移动、拖边缘缩放、Ctrl+滚轮调字号、双击打开客户端')}</span></div><Switch label={t('锁定悬浮窗位置')} value={settings.positionLocked} onChange={positionLocked => { patchSettings({ positionLocked, clickThrough: positionLocked }); void window.syllable.overlay.setMovable(!positionLocked) }} /></label>
         </section>
         <section>
-          <label className="setting-label">快捷键</label>
-          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>L</kbd><span>显示 / 隐藏</span></div>
-          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>M</kbd><span>锁定 / 解锁</span></div>
-          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>U</kbd><span>解锁并显示控制栏</span></div>
+          <label className="setting-label">{t('快捷键')}</label>
+          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>L</kbd><span>{t('显示 / 隐藏')}</span></div>
+          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>M</kbd><span>{t('锁定 / 解锁')}</span></div>
+          <div className="hotkey-hint"><kbd>Ctrl</kbd><b>+</b><kbd>Alt</kbd><b>+</b><kbd>U</kbd><span>{t('解锁并显示控制栏')}</span></div>
         </section>
       </>}
       {tab === 'connect' && <section>
         <div className="connect-card">
-          <div className="connect-title"><span className={localConnected || (connected && !demoMode) ? 'status-dot online' : 'status-dot'} /><strong>{localConnected ? 'Spotify 桌面端已同步' : connected && !demoMode ? 'Spotify Web API 已连接' : '尚未检测到 Spotify'}</strong></div>
-          {localConnected && <div className="native-connected"><Check size={14} />Windows 媒体会话连接正常</div>}
-          {connected && !demoMode ? <button className="wide-button" onClick={async () => { await window.syllable.auth.logout(); setConnected(false); useAppStore.getState().startDemo() }}>断开 Web API</button> : <>
-            <div className="client-input"><LockKeyhole size={14} /><input value={clientId} onChange={event => setClientId(event.target.value)} placeholder="可选：Spotify Client ID" /></div>
-            <button disabled={!clientId || connecting} className="wide-button spotify" onClick={() => void connect()}><Link2 size={16} />{connecting ? '等待授权…' : '连接 Spotify Web API'}</button>
-            <p>连接 Web API 后可以提前准备下一首歌的歌词；只用本机 Spotify 播放时不需要。</p>
+          <div className="connect-title"><span className={localConnected || (connected && !demoMode) ? 'status-dot online' : 'status-dot'} /><strong>{localConnected ? t('Spotify 桌面端已同步') : connected && !demoMode ? t('Spotify Web API 已连接') : t('尚未检测到 Spotify')}</strong></div>
+          {localConnected && <div className="native-connected"><Check size={14} />{t('Windows 媒体会话连接正常')}</div>}
+          {connected && !demoMode ? <button className="wide-button" onClick={async () => { await window.syllable.auth.logout(); setConnected(false); useAppStore.getState().startDemo() }}>{t('断开 Web API')}</button> : <>
+            <div className="client-input"><LockKeyhole size={14} /><input value={clientId} onChange={event => setClientId(event.target.value)} placeholder={t('可选：Spotify Client ID')} /></div>
+            <button disabled={!clientId || connecting} className="wide-button spotify" onClick={() => void connect()}><Link2 size={16} />{connecting ? t('等待授权…') : t('连接 Spotify Web API')}</button>
+            <p>{t('连接 Web API 后可以提前准备下一首歌的歌词；只用本机 Spotify 播放时不需要。')}</p>
             <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard <ExternalLink size={12} /></a>
           </>}
           {message && <div className="inline-message">{message}</div>}
@@ -222,7 +223,7 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
       </section>}
     </div>
     <div className="panel-footer">
-      <button className="wide-button primary" onClick={toggleOverlay}>{settings.overlayVisible ? <EyeOff size={17} /> : <Eye size={17} />}{settings.overlayVisible ? '隐藏桌面歌词' : '显示桌面歌词'}</button>
+      <button className="wide-button primary" onClick={toggleOverlay}>{settings.overlayVisible ? <EyeOff size={17} /> : <Eye size={17} />}{settings.overlayVisible ? t('隐藏桌面歌词') : t('显示桌面歌词')}</button>
     </div>
   </aside>
 })

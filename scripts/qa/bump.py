@@ -10,11 +10,12 @@ for name in ['package.json', 'package-lock.json']:
     if name == 'package-lock.json':
         data['packages']['']['version'] = new
     open(p, 'w', encoding='utf-8', newline='\n').write(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
-p = f'{root}/README.md'
-s = open(p, encoding='utf-8').read()
-a = f'当前源码与部署版本为 {old}'
-assert a in s, 'README version line'
-open(p, 'w', encoding='utf-8', newline='\n').write(s.replace(a, f'当前源码与部署版本为 {new}'))
+# The version line of both READMEs.
+for name, line in [('README.md', '当前版本：'), ('README.en.md', 'Current version: ')]:
+    p = f'{root}/{name}'
+    s = open(p, encoding='utf-8').read()
+    assert line + old in s, name + ' version line'
+    open(p, 'w', encoding='utf-8', newline='\n').write(s.replace(line + old, line + new))
 if len(sys.argv) > 4:
     p = f'{root}/scripts/verify-package.cjs'
     s = open(p, encoding='utf-8').read()

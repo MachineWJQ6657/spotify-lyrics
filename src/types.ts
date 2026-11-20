@@ -121,6 +121,8 @@ export interface LyricsCandidate {
 }
 
 export interface AppSettings {
+  /** Interface language: follow the system (default), Chinese or English. */
+  language?: 'auto' | 'zh' | 'en'
   /** Remember the one-time system-output capture opt-in across tracks and launches. */
   automaticAudioSync?: boolean
   /** Diagnostic CTC backend never publishes a playback/lyric clock anchor. */

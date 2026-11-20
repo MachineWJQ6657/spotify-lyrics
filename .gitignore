@@ -30,3 +30,11 @@ qa-*.png
 *.key
 *.pfx
 *.dmp
+
+# Working notes and previews that stay on this computer
+/CONTINUATION.md
+/TODO.md
+/ACCEPTANCE.md
+/docs/history/
+/docs/preview.png
+/docs/overlay-preview.png

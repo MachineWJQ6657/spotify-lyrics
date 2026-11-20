@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
 import { applyFuriganaReadings, romanizeJapaneseWords } from './japanese-romaji'
+import { t } from '../src/lib/i18n'
 
 const nodeRequire = createRequire(import.meta.url)
 export interface JapaneseWord {
@@ -20,7 +21,7 @@ let blockedWorker: Worker | null = null
 const queuedRejectors = new Set<(error: Error) => void>()
 
 function abortError() {
-  const error = new Error('日文分析已取消')
+  const error = new Error('日文分析已取消') // i18n-ignore: kept in Chinese: lyric-offset-session matches /已取消/ to tell a cancellation from a failure
   error.name = 'AbortError'
   return error
 }
@@ -30,19 +31,19 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
   const signal = options?.signal
   if (signal?.aborted) return Promise.reject(abortError())
   if (!Array.isArray(lines) || lines.some(line => typeof line !== 'string')) {
-    return Promise.reject(new Error('日文分析输入格式无效'))
+    return Promise.reject(new Error(t('日文分析输入格式无效')))
   }
   if (lines.length > 400 || lines.some(line => line.length > 500)
     || lines.reduce((length, line) => length + line.length, 0) > 16_000) {
-    return Promise.reject(new Error('日文分析输入过大（最多 400 行、16000 字，每行 500 字）'))
+    return Promise.reject(new Error(t('日文分析输入过大（最多 400 行、16000 字，每行 500 字）')))
   }
   if (!lines.length) return Promise.resolve([] as unknown as JobOutput[M])
-  if (blockedWorker) return Promise.reject(new Error('上一次日文分析尚未确认退出，暂不启动新字典'))
+  if (blockedWorker) return Promise.reject(new Error(t('上一次日文分析尚未确认退出，暂不启动新字典')))
   // Cancellable requests have independent ownership, even with identical input.
   const key = `${mode}:${JSON.stringify(lines)}${signal ? `:${++sequence}` : ''}`
   const existing = jobs.get(key)
   if (existing) return existing as Promise<JobOutput[M]>
-  if (jobs.size >= 8) return Promise.reject(new Error('罗马音分析任务较多，请稍后重试'))
+  if (jobs.size >= 8) return Promise.reject(new Error(t('罗马音分析任务较多，请稍后重试')))
 
   const input = [...lines]
   let resolveTask!: (output: JobOutput[M]) => void
@@ -129,7 +130,7 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
       // Reject callers within a bounded cleanup budget, but do not release the
       // physical queue until exit is confirmed. Reject queued work too so a
       // broken dictionary cannot strand callers or stack expanded dictionaries.
-      const error = new Error('日文分析字典未能在 2 秒内确认退出，已暂停新分析')
+      const error = new Error(t('日文分析字典未能在 2 秒内确认退出，已暂停新分析'))
       blockedWorker = worker
       worker.unref()
       settle(error)
@@ -148,13 +149,13 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
       catch { stopFailed() }
     }
     finishActive = finish
-    const timer = setTimeout(() => finish(undefined, new Error('日文分析超时')), 20_000)
+    const timer = setTimeout(() => finish(undefined, new Error(t('日文分析超时'))), 20_000)
     worker.once('message', (message: { output?: JobOutput[M]; error?: string } | null) => {
       if (message && typeof message === 'object' && Array.isArray(message.output)) finish(message.output)
-      else finish(undefined, new Error(message?.error || '日文分析失败'))
+      else finish(undefined, new Error(message?.error || t('日文分析失败')))
     })
     worker.once('error', error => finish(undefined, error))
-    worker.once('exit', () => { confirmExit(); finish(undefined, new Error('日文分析进程提前退出')) })
+    worker.once('exit', () => { confirmExit(); finish(undefined, new Error(t('日文分析进程提前退出'))) })
   }).catch(fail)
   jobs.set(key, task)
   void task.finally(() => {

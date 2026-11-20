@@ -1,4 +1,5 @@
 import type { LyricLine, LyricsDocument, PlaybackSnapshot } from '../types'
+import { t } from './i18n'
 
 /**
  * What the desktop overlay shows when there is no lyric line to sing:
@@ -19,7 +20,7 @@ export function overlayContent(playback: PlaybackSnapshot | null, document: Lyri
   const track = playback?.track
   if (!track?.name) return { kind: 'idle' }
   const artist = track.artist?.trim() ?? ''
-  const subtitle = document?.instrumental ? (artist ? `${artist} · 纯音乐` : '纯音乐') : artist
+  const subtitle = document?.instrumental ? (artist ? t('{artist} · 纯音乐', { artist }) : t('纯音乐')) : artist
   return { kind: 'title', title: track.name.trim(), subtitle }
 }
 

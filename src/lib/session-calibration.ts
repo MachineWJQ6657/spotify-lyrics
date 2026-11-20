@@ -1,6 +1,7 @@
 import type { LyricsDocument, LyricTrack, PlaybackSnapshot, SessionCalibration } from '../types'
 import { activeAcousticAnchor, calibratedPosition, lyricPlaybackPosition, TransportClock } from './clock'
 import { lyricTimingKey } from './lyric-timing-key'
+import { t } from './i18n'
 
 const keys = new WeakMap<LyricTrack, string>()
 const timingKeys = new WeakMap<LyricTrack, string>()
@@ -23,15 +24,15 @@ export function currentSessionCalibration(value: SessionCalibration | null | und
 }
 
 export function createSessionCalibration(playback: PlaybackSnapshot | null, document: LyricsDocument | null, originalTrackId: string, lineIndex: number, now = Date.now()): SessionCalibration {
-  if (!playback?.isPlaying || !playback.track || document?.trackId !== playback.track.id || document.untimedOriginal) throw new Error('请在当前歌曲播放时校准')
+  if (!playback?.isPlaying || !playback.track || document?.trackId !== playback.track.id || document.untimedOriginal) throw new Error(t('请在当前歌曲播放时校准'))
   if (!Number.isFinite(now) || !Number.isFinite(playback.observedAtMs) || !Number.isFinite(playback.positionMs)
-    || now - playback.observedAtMs > 6500 || now < playback.observedAtMs - 200) throw new Error('播放采样已过期，请稍候重试')
+    || now - playback.observedAtMs > 6500 || now < playback.observedAtMs - 200) throw new Error(t('播放采样已过期，请稍候重试'))
   const original = document.tracks.find(track => track.kind === 'original' && track.id === originalTrackId)
   const line = Number.isInteger(lineIndex) ? original?.lines[lineIndex] : undefined
-  if (!line?.text.trim() || !Number.isFinite(line.startMs)) throw new Error('请选择当前原文中的一句')
+  if (!line?.text.trim() || !Number.isFinite(line.startMs)) throw new Error(t('请选择当前原文中的一句'))
   const clock = new TransportClock(); clock.update(playback)
   const offsetMs = Math.round(clock.position(now) - line.startMs)
-  if (Math.abs(offsetMs) > 120000) throw new Error('相差超过两分钟，请确认选择的是当前段落')
+  if (Math.abs(offsetMs) > 120000) throw new Error(t('相差超过两分钟，请确认选择的是当前段落'))
   return { trackId: document.trackId, originalKey: originalTimingKey(document), offsetMs, createdAtMs: now }
 }
 

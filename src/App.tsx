@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useState, useSyncExternalStore, type DragEvent } from 'react'
 import './app.css'
-import { sourceLabel } from './lib/source-label'
+import { localizeLabel, sourceLabel } from './lib/source-label'
+import { t, tk } from './lib/i18n'
 import { Languages, Maximize2, Minimize2, PanelRightOpen, PencilLine, Radio, Search, Sparkles } from 'lucide-react'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar, type AppView } from './components/Sidebar'
@@ -30,7 +31,7 @@ import { hasUnseenNews, markNewsSeen, readSeenVersion } from './lib/changelog'
 import { version as appVersion } from '../package.json'
 import type { LyricLine, LyricsDocument } from './types'
 
-const VIEW_TITLES: Record<AppView, string> = { now: '正在播放', browse: '查歌词', library: '歌词资料库', sources: '歌词源', settings: '偏好设置', help: '帮助与诊断' }
+const VIEW_TITLES: Record<AppView, string> = { now: tk('正在播放'), browse: tk('查歌词'), library: tk('歌词资料库'), sources: tk('歌词源'), settings: tk('偏好设置'), help: tk('帮助与诊断') }
 const PANEL_KEY = 'syllable-ui-panel-collapsed'
 const readPanelCollapsed = () => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } }
 const FOCUS_KEY = 'syllable-ui-focus'
@@ -129,19 +130,20 @@ export function App() {
   // The badge names the provider on screen ("网易云音乐"); imported or edited lyrics keep their own label.
   const shownSource = (activeLyrics?.tracks.find(track => track.kind === 'original') ?? activeLyrics?.tracks[0])?.source
   const shownProvider = LYRICS_SOURCES.find(item => item.id === lyricsSourceIdOf(shownSource))?.label
-  const sourceText = shownProvider ?? sourceLabel(shownSource ?? (activeLyrics?.instrumental ? '纯音乐' : activeLyrics?.lookupFailed ? '歌词源暂时不可用' : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? '未找到歌词' : '正在搜索歌词…'))
+  // sourceLabel() answers in the interface language; tk() only marks the texts it is given.
+  const sourceText = shownProvider ? localizeLabel(shownProvider) : sourceLabel(shownSource ?? (activeLyrics?.instrumental ? tk('纯音乐') : activeLyrics?.lookupFailed ? tk('歌词源暂时不可用') : activeLyrics?.providerRevision !== undefined && !activeLyrics.untimedOriginal ? tk('未找到歌词') : tk('正在搜索歌词…')))
 
   const importDroppedLyrics = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     // A dropped file belongs to the playing song. On the search page another
     // song is on screen, and the file would silently go to the wrong one.
     if (view === 'browse') {
-      setDropMessage('歌词文件是导入给正在播放的歌的：请拖到「正在播放」页')
+      setDropMessage(t('歌词文件是导入给正在播放的歌的：请拖到「正在播放」页'))
       window.setTimeout(() => setDropMessage(''), 4000)
       return
     }
     const files = [...event.dataTransfer.files].filter(file => /\.(?:lrc|txt)$/i.test(file.name))
-    if (!files.length) { setDropMessage('只支持 LRC 或 TXT 歌词文件'); return }
+    if (!files.length) { setDropMessage(t('只支持 LRC 或 TXT 歌词文件')); return }
     const texts = await Promise.all(files.map(async file => ({ name: file.name, text: decodeLyricFile(await file.arrayBuffer()) })))
     const state = useAppStore.getState()
     const result = importLyricFiles(state.lyrics, state.playback?.track ?? undefined, texts)
@@ -170,7 +172,7 @@ export function App() {
 
   return <div className="app-shell" onDragOver={event => event.preventDefault()} onDrop={event => void importDroppedLyrics(event)} style={{ '--lyric-size': `${settings.fontSize}px` } as React.CSSProperties}>
     <Backdrop cover={playback?.track?.coverUrl || undefined} />
-    <Titlebar title={VIEW_TITLES[view]} />
+    <Titlebar title={t(VIEW_TITLES[view])} />
     <div className={`body-grid ${panelCollapsed ? 'panel-collapsed' : ''} ${focusActive ? 'focus-mode' : ''}`}>
       <Sidebar active={view} onChange={setView} news={news} />
       <main className="main-content">
@@ -179,12 +181,12 @@ export function App() {
           <div className="now-track-heading">
             <div className="header-cover">{playback?.track?.coverUrl ? <img src={playback.track.coverUrl} /> : <BrandMark size={40} title="Syllable" />}</div>
             <div>
-            <span className={`eyebrow ${demoMode ? 'demo' : ''}`} title={demoMode ? '演示模式，尚未同步 Spotify' : localConnected ? '已连接本机 Spotify 媒体会话' : '已连接 Spotify Web API'}><Radio size={12} /><span>{demoMode ? '演示模式 · 未连接' : localConnected ? 'Spotify 桌面端' : 'Spotify Web API'}</span></span>
-            <h1 {...titlePresentation}>{playback?.track?.name ?? '等待 Spotify 播放'}</h1>
-            <p><span {...artistPresentation}>{playback?.track?.artist ?? '连接 Spotify 后自动开始'}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
+            <span className={`eyebrow ${demoMode ? 'demo' : ''}`} title={demoMode ? t('演示模式，尚未同步 Spotify') : localConnected ? t('已连接本机 Spotify 媒体会话') : t('已连接 Spotify Web API')}><Radio size={12} /><span>{demoMode ? t('演示模式 · 未连接') : localConnected ? t('Spotify 桌面端') : 'Spotify Web API'}</span></span>
+            <h1 {...titlePresentation}>{playback?.track?.name ?? t('等待 Spotify 播放')}</h1>
+            <p><span {...artistPresentation}>{playback?.track?.artist ?? t('连接 Spotify 后自动开始')}</span>{(showAlbum || !playback?.track) && <><i /><span {...albumPresentation}>{playback?.track?.album ?? 'Syllable'}</span></>}</p>
             </div>
           </div>
-          <div className="source-badges">{demoMode && <span className="not-connected">打开 Spotify 桌面端并播放歌曲</span>}{(demoMode || !playback?.track) && <button className="header-browse" title="不用播放，搜索一首歌看歌词" onClick={() => setView('browse')}><Search size={13} />查歌词</button>}{mixLabel && <span title="这首歌带有 Spotify 自定义转场"><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => track.label).join(' · ')}><Languages size={13} />{trackCount} 条轨道</span>}<button className="header-focus" aria-pressed={focusActive} aria-label="专注模式" title={focusActive ? '退出专注模式（Esc 或 F11）' : '专注模式：只显示歌词（F11）'} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title="搜索歌词、编辑与逐行校时" onClick={openEditor}><PencilLine size={14} />编辑</button></div>
+          <div className="source-badges">{demoMode && <span className="not-connected">{t('打开 Spotify 桌面端并播放歌曲')}</span>}{(demoMode || !playback?.track) && <button className="header-browse" title={t('不用播放，搜索一首歌看歌词')} onClick={() => setView('browse')}><Search size={13} />{t('查歌词')}</button>}{mixLabel && <span title={t('这首歌带有 Spotify 自定义转场')}><Sparkles size={13} />{mixLabel}</span>}<SourceMenu document={activeLyrics} label={sourceText} disabled={demoMode || !playback?.track} onSelect={setLyricsSource} onSearch={openEditor} />{trackCount > 0 && <span className="track-count" title={activeLyrics?.tracks.map(track => localizeLabel(track.label)).join(' · ')}><Languages size={13} />{t('{count} 条轨道', { count: trackCount })}</span>}<button className="header-focus" aria-pressed={focusActive} aria-label={t('专注模式')} title={focusActive ? t('退出专注模式（Esc 或 F11）') : t('专注模式：只显示歌词（F11）')} onClick={toggleFocus}>{focusActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button><button className="header-edit" title={t('搜索歌词、编辑与逐行校时')} onClick={openEditor}><PencilLine size={14} />{t('编辑')}</button></div>
         </div>
         <div className={`lyric-card ${settings.mainAlignment === 'center' ? 'lyrics-centered' : ''}`}>
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>
@@ -193,7 +195,7 @@ export function App() {
         </div>
         </>}
       </main>
-      {panelCollapsed ? <aside className="settings-rail"><button title="展开设置面板" aria-label="展开设置面板" onClick={togglePanel}><PanelRightOpen size={18} /></button></aside> : <SettingsPanel onCollapse={togglePanel} />}
+      {panelCollapsed ? <aside className="settings-rail"><button title={t('展开设置面板')} aria-label={t('展开设置面板')} onClick={togglePanel}><PanelRightOpen size={18} /></button></aside> : <SettingsPanel onCollapse={togglePanel} />}
     </div>
     <ClockedPlayerBar playback={playback} demoMode={demoMode} />
     {editorOpen && <ClockedLyricsEditor playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} />}

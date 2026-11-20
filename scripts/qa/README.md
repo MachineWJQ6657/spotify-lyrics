@@ -185,7 +185,7 @@ landed on that row, 30 of 31 line changes scrolled smoothly.
 6. `bash scripts/qa/smoke.sh candidate-<n>`
 7. `powershell -File scripts\qa\deploy.ps1 -Candidate candidate-<n> -Old <old> -New <new> -Recycle <older backup>`
 8. `python scripts/qa/docs.py . <old> <new> <oldChecks> <newChecks> <todo.md> <cont.md> "<previous CONTINUATION heading>"`
-   prepends the notes to `TODO.md` and `CONTINUATION.md`.
+   prepends the notes to `TODO.md` and `CONTINUATION.md` (working notes kept on this computer; git ignores them).
 9. Commit and push (the pre-push guard refuses profiles, recordings, models and release output).
 
 Patches whose text contains backslashes are written as files, never through a

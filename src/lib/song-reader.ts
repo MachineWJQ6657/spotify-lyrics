@@ -29,7 +29,7 @@ export const hitTrack = (hit: SongHit): TrackInfo =>
   ({ id: `browse:${hit.key}`, name: hit.name, artist: hit.artist, album: hit.album, coverUrl: '', durationMs: hit.durationMs })
 
 const originalLabel = (language: string) =>
-  language === 'ja' ? '日本語' : language === 'ko' ? '한국어' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original'
+  language === 'ja' ? '日本語' : language === 'ko' ? '한국어' : language === 'zh-Hans' ? '中文原文' : language === 'en' ? 'English' : 'Original' // i18n-ignore: track labels stored in the document (shown through localizeLabel)
 
 /**
  * The lyrics to read for a found song: the lookup's answer (the same original,

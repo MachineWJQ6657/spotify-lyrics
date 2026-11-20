@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from './lyrics-provider'
+import { t } from '../src/lib/i18n'
 
 /**
  * Finding a song by what the user types, without anything playing: the two
@@ -137,6 +138,6 @@ export async function searchSongs(text: unknown, signal?: AbortSignal): Promise<
   if (!query) return { hits: [], failed: [] }
   const [lrclib, netease] = await Promise.allSettled([searchLrcLib(query, signal), searchNetease(query, signal)])
   const failed: SongCatalogue[] = [...(lrclib.status === 'rejected' ? ['lrclib' as const] : []), ...(netease.status === 'rejected' ? ['netease' as const] : [])]
-  if (failed.length === 2) throw new Error('歌曲搜索暂时不可用')
+  if (failed.length === 2) throw new Error(t('歌曲搜索暂时不可用'))
   return { hits: mergeSongHits(query, lrclib.status === 'fulfilled' ? lrclib.value : [], netease.status === 'fulfilled' ? netease.value : []), failed }
 }

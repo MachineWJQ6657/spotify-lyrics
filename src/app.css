@@ -758,3 +758,8 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .lyrics-stage-shell.reading .lyric-secondary.romanization { font-size: clamp(12px, calc(var(--lyric-size) * .27), 15px); }
 .lyrics-stage-shell.reading.has-find .lyric-group:not(.find-match):not(.find-current) { opacity: .42; }
 .lyrics-stage-shell.reading .lyric-group.find-match, .lyrics-stage-shell.reading .lyric-group.find-current { opacity: 1; }
+
+/* ---------- Interface language ---------- */
+.status-grid .language-select { height: 32px; padding: 0 10px; border: 1px solid var(--sy-stroke); border-radius: 999px; background: var(--sy-surface-2); color: var(--sy-text); font-size: 12px; outline: 0; }
+.status-grid .language-select:hover, .status-grid .language-select:focus-visible { border-color: var(--sy-stroke-strong); }
+.status-grid .language-select option { background: #1b1d1c; color: #f2f4f3; }

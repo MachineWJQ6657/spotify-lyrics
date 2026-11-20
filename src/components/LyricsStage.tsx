@@ -7,6 +7,7 @@ import { lyricScrollTarget } from '../lib/lyrics-scroll'
 import { glideScroll } from '../lib/glide-scroll'
 import { findLineMatches, nearestMatch, stepMatch } from '../lib/find-lyrics'
 import { rowText, songText } from '../lib/copy-lyrics'
+import { t } from '../lib/i18n'
 
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
   onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
@@ -36,7 +37,7 @@ const LineGroup = memo(function LineGroup({ line, language, index, active, past,
   const baseClass = language === 'ja' ? 'japanese-grid' : language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
   const seekable = Boolean(onSeek && !onHeard)
   return <div data-line-index={index} className={`lyric-group ${active ? 'active' : ''} ${past ? 'past' : ''} ${seekable ? 'seekable' : ''} ${found ? `find-${found}` : ''}`}
-    title={seekable && seekLabel ? `从 ${seekLabel} 播放这一句` : undefined}
+    title={seekable && seekLabel ? t('从 {time} 播放这一句', { time: seekLabel }) : undefined}
     onContextMenu={onMenu ? event => { event.preventDefault(); onMenu(index, event.clientX, event.clientY) } : undefined}
     onClick={seekable ? () => {
       // Selecting text with the mouse also ends in a click; that is not a seek.
@@ -49,7 +50,7 @@ const LineGroup = memo(function LineGroup({ line, language, index, active, past,
       return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`lyric-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling.text}</div>
     })}
     {seekable && seekLabel && <span className="lyric-seek-hint" aria-hidden="true"><Play size={10} fill="currentColor" />{seekLabel}</span>}
-    {onHeard && <button className="lyric-heard-button" aria-label={`将第 ${index + 1} 行设为现在开始`} onClick={() => onHeard(index)}>这句现在开始</button>}
+    {onHeard && <button className="lyric-heard-button" aria-label={t('将第 {line} 行设为现在开始', { line: index + 1 })} onClick={() => onHeard(index)}>{t('这句现在开始')}</button>}
   </div>
 })
 
@@ -177,7 +178,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     const write = window.syllable.app?.copyText
       ? window.syllable.app.copyText(text).then(ok => ok ? undefined : navigator.clipboard.writeText(text))
       : navigator.clipboard.writeText(text)
-    void write.then(() => show(done), () => show('复制失败'))
+    void write.then(() => show(done), () => show(t('复制失败')))
   }, [])
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
   useEffect(() => setMenu(null), [document?.trackId])
@@ -270,10 +271,10 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     return () => { window.document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
   }, [following])
 
-  if (!document) return <div className="empty-lyrics"><span className="spinner" /><p>正在寻找最合适的歌词…</p></div>
+  if (!document) return <div className="empty-lyrics"><span className="spinner" /><p>{t('正在寻找最合适的歌词…')}</p></div>
   if (document.untimedOriginal) return <div className={`lyrics-stage-shell ${reading ? 'reading' : ''}`}>
-    <div className="lyrics-viewport untimed-lyrics" tabIndex={0} aria-label="原文歌词，暂无可信时间轴，可上下滚动查看">
-      {!reading && <div className="info-note"><strong>已取得原文，暂无可信时间轴</strong><p>{document.textReference?.status === 'conflict' ? '已排除与 Spotify 原文冲突的同步歌词。' : '下方是歌词原文，不随播放滚动。'}</p>{onRetry && <button onClick={onRetry}>重新匹配时间轴</button>}</div>}
+    <div className="lyrics-viewport untimed-lyrics" tabIndex={0} aria-label={t('原文歌词，暂无可信时间轴，可上下滚动查看')}>
+      {!reading && <div className="info-note"><strong>{t('已取得原文，暂无可信时间轴')}</strong><p>{document.textReference?.status === 'conflict' ? t('已排除与 Spotify 原文冲突的同步歌词。') : t('下方是歌词原文，不随播放滚动。')}</p>{onRetry && <button onClick={onRetry}>{t('重新匹配时间轴')}</button>}</div>}
       <div className="lyrics-list" style={{ paddingTop: 24, paddingBottom: 80 }}>
         {document.untimedOriginal.text.split(/\r?\n/).filter(Boolean).map((text, index) => <div className="lyric-group" key={index}>
           <div lang={document.untimedOriginal!.language} className={`lyric-primary ${document.untimedOriginal!.language === 'ja' ? 'japanese-grid' : document.untimedOriginal!.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'}`}>{text}</div>
@@ -281,24 +282,24 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
       </div>
     </div>
   </div>
-  if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>纯音乐</h3><p>歌词源确认这首歌没有歌词。</p>{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />不是纯音乐？手动搜索</button>}</div>
-  if (!base?.lines.length && reading) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>这首歌没有可显示的歌词</h3><p>保存下来的只有制作名单或空白行。</p></div>
-  if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>暂时没有同步歌词</h3><p>可重新尝试三源匹配、换个关键词手动搜索，或把 LRC 文件拖进窗口。</p><div className="empty-actions">{onRetry && <button onClick={onRetry}><RefreshCw size={14} />重新匹配歌词</button>}{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />手动搜索</button>}</div></div>
+  if (!base?.lines.length && document?.instrumental) return <div className="empty-lyrics instrumental"><Music2 size={24} /><h3>{t('纯音乐')}</h3><p>{t('歌词源确认这首歌没有歌词。')}</p>{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />{t('不是纯音乐？手动搜索')}</button>}</div>
+  if (!base?.lines.length && reading) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>{t('这首歌没有可显示的歌词')}</h3><p>{t('保存下来的只有制作名单或空白行。')}</p></div>
+  if (!base?.lines.length) return <div className="empty-lyrics"><AlertCircle size={24} /><h3>{t('暂时没有同步歌词')}</h3><p>{t('可重新尝试三源匹配、换个关键词手动搜索，或把 LRC 文件拖进窗口。')}</p><div className="empty-actions">{onRetry && <button onClick={onRetry}><RefreshCw size={14} />{t('重新匹配歌词')}</button>}{onSearch && <button className="quiet" onClick={onSearch}><Search size={14} />{t('手动搜索')}</button>}</div></div>
 
   return <div className={`lyrics-stage-shell ${calibrating ? 'is-calibrating' : ''} ${reading ? 'reading' : ''} ${reading && find?.query.trim() && matches.length ? 'has-find' : ''}`}>
     {base.kind === 'original' && (onHeardLine || calibrationLabel) && <div className="lyrics-calibration-bar">
       <div className="lyrics-calibration-actions">
-        <button disabled={!onHeardLine} aria-pressed={calibrating} onClick={() => { setCalibrating(!calibrating); setFollowing(false); setCalibrationError('') }}>{calibrating ? '取消选句' : '跟歌声校准'}</button>
-        {calibrationLabel && <><span>{calibrationLabel}</span><button onClick={onClearCalibration}>撤销本次</button></>}
+        <button disabled={!onHeardLine} aria-pressed={calibrating} onClick={() => { setCalibrating(!calibrating); setFollowing(false); setCalibrationError('') }}>{calibrating ? t('取消选句') : t('跟歌声校准')}</button>
+        {calibrationLabel && <><span>{calibrationLabel}</span><button onClick={onClearCalibration}>{t('撤销本次')}</button></>}
       </div>
-      {calibrating && <p>滚动找到正在听的段落，在一句刚开始唱时点“这句现在开始”。只改歌词，不跳转歌曲；暂停、跳转或换歌后清除。</p>}
+      {calibrating && <p>{t('滚动找到正在听的段落，在一句刚开始唱时点“这句现在开始”。只改歌词，不跳转歌曲；暂停、跳转或换歌后清除。')}</p>}
       {calibrationError && <p role="alert">{calibrationError}</p>}
     </div>}
     <div
       ref={viewportRef}
       className="lyrics-viewport"
       tabIndex={0}
-      aria-label="同步歌词，可上下滚动查看"
+      aria-label={t('同步歌词，可上下滚动查看')}
       onWheelCapture={() => { stopGlide(); setFollowing(false) }}
       onPointerDown={event => {
         // A right-click opens the row menu; it is not scrolling away. It used
@@ -322,7 +323,7 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
     </div>
     {find ? <div className="lyrics-find" role="search">
       <Search size={14} aria-hidden="true" />
-      <input ref={findInput} autoFocus value={find.query} placeholder="在歌词中查找" aria-label="在歌词中查找" spellCheck={false}
+      <input ref={findInput} autoFocus value={find.query} placeholder={t('在歌词中查找')} aria-label={t('在歌词中查找')} spellCheck={false}
         onChange={event => { const query = event.target.value; setFind({ query, cursor: nearestMatch(findLineMatches(rowTexts, query), active) }) }}
         onKeyDown={event => {
           // Enter that confirms an IME candidate is not "next match".
@@ -333,28 +334,28 @@ export function LyricsStage({ document, positionMs, enabled, romanization, onRet
           if (event.ctrlKey && currentMatch >= 0 && onSeekLine) seekLine(currentMatch)
           else if (matches.length) setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, event.shiftKey ? -1 : 1) })
         }} />
-      <span className="lyrics-find-count" role="status">{!find.query.trim() ? '' : matches.length ? `${findCursor + 1} / ${matches.length}` : '没有找到'}</span>
-      <button title="上一处（Shift+Enter）" aria-label="上一处" disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, -1) })}><ChevronUp size={15} /></button>
-      <button title="下一处（Enter）" aria-label="下一处" disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, 1) })}><ChevronDown size={15} /></button>
-      <button title="关闭（Esc）" aria-label="关闭查找" onClick={() => setFind(null)}><X size={15} /></button>
-    </div> : searchable && <button className="lyrics-find-open" title="在歌词中查找（Ctrl+F）" aria-label="在歌词中查找" onClick={openFind}><Search size={14} /></button>}
-    {menu && createPortal(<div ref={menuRef} className="lyric-menu no-drag" role="menu" aria-label="歌词操作"
+      <span className="lyrics-find-count" role="status">{!find.query.trim() ? '' : matches.length ? `${findCursor + 1} / ${matches.length}` : t('没有找到')}</span>
+      <button title={t('上一处（Shift+Enter）')} aria-label={t('上一处')} disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, -1) })}><ChevronUp size={15} /></button>
+      <button title={t('下一处（Enter）')} aria-label={t('下一处')} disabled={matches.length < 2} onClick={() => setFind({ query: find.query, cursor: stepMatch(findCursor, matches.length, 1) })}><ChevronDown size={15} /></button>
+      <button title={t('关闭（Esc）')} aria-label={t('关闭查找')} onClick={() => setFind(null)}><X size={15} /></button>
+    </div> : searchable && <button className="lyrics-find-open" title={t('在歌词中查找（Ctrl+F）')} aria-label={t('在歌词中查找')} onClick={openFind}><Search size={14} /></button>}
+    {menu && createPortal(<div ref={menuRef} className="lyric-menu no-drag" role="menu" aria-label={t('歌词操作')}
       style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 268)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 250)) }}>
-      {menu.selection && <button type="button" role="menuitem" onClick={() => copyText(menu.selection, '已复制选中的文字')}><Copy size={14} />复制选中的文字</button>}
-      <button type="button" role="menuitem" disabled={!rowText(rowTexts[menu.index] ?? [])} onClick={() => copyText(rowText(rowTexts[menu.index] ?? []), '已复制这一句')}><Copy size={14} />复制这一句</button>
-      <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, false), '已复制整首歌词')}><Copy size={14} />复制整首歌词</button>
-      {rowTexts.some(texts => texts.slice(1).some(text => text.trim())) && <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, true), '已复制整首歌词')}><Copy size={14} />复制整首歌词（含罗马音和翻译）</button>}
+      {menu.selection && <button type="button" role="menuitem" onClick={() => copyText(menu.selection, t('已复制选中的文字'))}><Copy size={14} />{t('复制选中的文字')}</button>}
+      <button type="button" role="menuitem" disabled={!rowText(rowTexts[menu.index] ?? [])} onClick={() => copyText(rowText(rowTexts[menu.index] ?? []), t('已复制这一句'))}><Copy size={14} />{t('复制这一句')}</button>
+      <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, false), t('已复制整首歌词'))}><Copy size={14} />{t('复制整首歌词')}</button>
+      {rowTexts.some(texts => texts.slice(1).some(text => text.trim())) && <button type="button" role="menuitem" onClick={() => copyText(songText(rowTexts, true), t('已复制整首歌词'))}><Copy size={14} />{t('复制整首歌词（含罗马音和翻译）')}</button>}
       <i role="separator" />
-      {onSeekLine && base.lines[menu.index] && <button type="button" role="menuitem" onClick={() => { const index = menu.index; setMenu(null); seekLine(index) }}><Play size={14} />从这一句播放{seekLabel ? `（${seekLabel(base.lines[menu.index])}）` : ''}</button>}
-      <button type="button" role="menuitem" onClick={() => { setMenu(null); openFind() }}><Search size={14} />在歌词中查找<kbd>Ctrl+F</kbd></button>
+      {onSeekLine && base.lines[menu.index] && <button type="button" role="menuitem" onClick={() => { const index = menu.index; setMenu(null); seekLine(index) }}><Play size={14} />{seekLabel ? t('从这一句播放（{time}）', { time: seekLabel(base.lines[menu.index]) }) : t('从这一句播放')}</button>}
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); openFind() }}><Search size={14} />{t('在歌词中查找')}<kbd>Ctrl+F</kbd></button>
     </div>, window.document.body)}
     {toast && <div className="lyrics-toast" role="status">{toast}</div>}
-    {!following && !reading && <button className="lyrics-follow-button" title="同步到正在播放的歌词" onClick={() => {
+    {!following && !reading && <button className="lyrics-follow-button" title={t('同步到正在播放的歌词')} onClick={() => {
       // Explicit recovery must not depend on requestAnimationFrame: Chromium
       // can suspend rAF in a minimized/background desktop window, leaving an
       // early-song target at scrollTop=0 permanently stranded below it.
       setFollowing(true)
       centerActive('auto')
-    }}><LocateFixed size={15} />回到当前歌词</button>}
+    }}><LocateFixed size={15} />{t('回到当前歌词')}</button>}
   </div>
 }

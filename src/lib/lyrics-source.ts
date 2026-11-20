@@ -1,10 +1,11 @@
 import type { LyricsDocument, LyricsSourceId } from '../types'
+import { tk } from './i18n'
 
 /** Providers offered in the source menu, in the order they are listed. */
 export const LYRICS_SOURCES: ReadonlyArray<{ id: LyricsSourceId; label: string; prefix: string }> = [
   { id: 'lrclib', label: 'LRCLIB', prefix: 'LRCLIB' },
-  { id: 'netease', label: '网易云音乐', prefix: '网易云音乐' },
-  { id: 'kugou', label: '酷狗音乐', prefix: '酷狗音乐' },
+  { id: 'netease', label: tk('网易云音乐'), prefix: '网易云音乐' }, // i18n-ignore: prefix matches the stored source label
+  { id: 'kugou', label: tk('酷狗音乐'), prefix: '酷狗音乐' }, // i18n-ignore: prefix matches the stored source label
   { id: 'spotify', label: 'Spotify', prefix: 'Spotify' }
 ]
 
@@ -75,7 +76,7 @@ export function automaticSourceOf(document: LyricsDocument | null | undefined): 
   if (!original) return undefined
   const userOwned = document.userEditedTrackIds?.includes(original.id)
     || (original.id.startsWith('local-') && !original.id.startsWith(`${document.trackId}-`))
-    || original.source.includes('手动选择')
+    || original.source.includes('手动选择') // i18n-ignore: matches the stored source label
   return userOwned ? undefined : lyricsSourceIdOf(original.source)
 }
 

@@ -2,6 +2,7 @@ import { useAppStore } from '../store/useAppStore'
 import type { AcousticMatch } from '../../electron/audio-sync/fingerprint'
 import { originalTimingKey } from './session-calibration'
 import { CaptureTimeline } from './capture-timeline'
+import { currentLanguage, t, tk } from './i18n'
 
 export interface AcousticUiState {
   mode: 'reference' | 'vocal' | 'phoneme'; referenceName: string; trackId: string; running: boolean; busy: boolean
@@ -10,7 +11,7 @@ export interface AcousticUiState {
   // Summary only; never retain audio, transcript or lyric text in UI history.
   lastResult?: { message: string; elapsedMs: number; decision: 'locked' | 'confirming' | 'rejected' }
 }
-let state: AcousticUiState = { mode: 'vocal', automatic: false, referenceName: '', trackId: '', running: false, busy: false, message: '未启用。开启后自动跟随歌曲校准声音。' }
+let state: AcousticUiState = { mode: 'vocal', automatic: false, referenceName: '', trackId: '', running: false, busy: false, message: tk('未启用。开启后自动跟随歌曲校准声音。') }
 const listeners = new Set<() => void>()
 let worker: Worker | null = null
 let sequence = 0
@@ -27,21 +28,21 @@ let requestPending: { id: number; resolve(value: unknown): void; reject(error: E
 const update = (patch: Partial<AcousticUiState>) => { state = { ...state, ...patch }; listeners.forEach(listener => listener()) }
 
 function work(type: 'reference' | 'query', pcm: Float32Array, sampleRate: number) {
-  if (requestPending) return Promise.reject(new Error('音频分析仍在进行'))
+  if (requestPending) return Promise.reject(new Error(t('音频分析仍在进行')))
   if (!worker) {
     worker = new Worker(new URL('./acoustic-worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = event => {
       if (!requestPending || event.data.id !== requestPending.id) return
       const pending = requestPending; requestPending = null
       window.clearTimeout(pending.timer)
-      if (event.data.error) pending.reject(new Error(event.data.error))
+      if (event.data.error) pending.reject(new Error(t(event.data.error)))
       else pending.resolve(event.data.value)
     }
-    worker.onerror = () => { const pending = requestPending; destroyWorker(); pending?.reject(new Error('音频分析进程异常')) }
+    worker.onerror = () => { const pending = requestPending; destroyWorker(); pending?.reject(new Error(t('音频分析进程异常'))) }
   }
   const id = ++sequence
   return new Promise<unknown>((resolve, reject) => {
-    const timer = window.setTimeout(() => { destroyWorker(); reject(new Error('音频分析超时，请缩短参考文件')) }, 15000)
+    const timer = window.setTimeout(() => { destroyWorker(); reject(new Error(t('音频分析超时，请缩短参考文件'))) }, 15000)
     requestPending = { id, resolve, reject, timer }
     worker!.postMessage({ id, type, pcm, sampleRate }, [pcm.buffer])
   })
@@ -49,7 +50,7 @@ function work(type: 'reference' | 'query', pcm: Float32Array, sampleRate: number
 
 function destroyWorker() {
   worker?.terminate(); worker = null
-  if (requestPending) { window.clearTimeout(requestPending.timer); requestPending.reject(new Error('音频分析已取消')); requestPending = null }
+  if (requestPending) { window.clearTimeout(requestPending.timer); requestPending.reject(new Error(t('音频分析已取消'))); requestPending = null }
 }
 
 function cancelAutomaticTimer() {
@@ -69,20 +70,20 @@ async function reconcileAutomatic() {
   if (!state.automatic || automaticBlocked || capturing || state.busy) return
   const store = useAppStore.getState()
   if (!store.playback?.isPlaying || !store.playback.track || store.demoMode) {
-    update({ message: '自动声音同步已开启，等待 Spotify 播放。' }); return
+    update({ message: t('自动声音同步已开启，等待 Spotify 播放。') }); return
   }
   const document = store.lyrics
   const original = document?.tracks.find(track => track.kind === 'original')
   if (document?.trackId !== store.playback.track.id || document.untimedOriginal || !original || original.lines.length < 4) {
-    update({ message: '自动声音同步已开启，等待当前歌曲的原文时间轴。' }); return
+    update({ message: t('自动声音同步已开启，等待当前歌曲的原文时间轴。') }); return
   }
   if (state.mode === 'phoneme' && original.language !== 'ja') {
-    update({ message: '音素校验已开启，等待有日语原文时间轴的歌曲；此模式不接管歌词时钟。' }); return
+    update({ message: t('音素校验已开启，等待有日语原文时间轴的歌曲；此模式不接管歌词时钟。') }); return
   }
   await start(state.mode === 'phoneme' ? 'phoneme' : 'vocal')
 }
 
-async function stopCapture(message = '已停止音频校准，恢复媒体时间轴。') {
+async function stopCapture(message = t('已停止音频校准，恢复媒体时间轴。')) {
   cancelAutomaticTimer()
   const token = ++generation
   capturing = false
@@ -121,14 +122,14 @@ async function loadReference(file: File) {
   await stop()
   destroyWorker()
   const owner = useAppStore.getState().playback?.track
-  if (!owner) throw new Error('请先在 Spotify 播放歌曲')
-  if (file.size > 60 * 1024 * 1024) throw new Error('实验版参考文件不能超过 60 MB')
+  if (!owner) throw new Error(t('请先在 Spotify 播放歌曲'))
+  if (file.size > 60 * 1024 * 1024) throw new Error(t('实验版参考文件不能超过 60 MB'))
   const token = ++generation
-  update({ busy: true, referenceName: '', trackId: owner.id, lastResult: undefined, message: '正在本地解码并提取音频特征…' })
+  update({ busy: true, referenceName: '', trackId: owner.id, lastResult: undefined, message: t('正在本地解码并提取音频特征…') })
   const decoder = new AudioContext({ sampleRate: 8000 })
   try {
     const audio = await decoder.decodeAudioData(await file.arrayBuffer())
-    if (audio.duration < 12 || audio.duration > 600) throw new Error('参考音频应为 12 秒至 10 分钟的完整同版本歌曲')
+    if (audio.duration < 12 || audio.duration > 600) throw new Error(t('参考音频应为 12 秒至 10 分钟的完整同版本歌曲'))
     if (token !== generation) return
     const mono = new Float32Array(audio.length)
     for (let channel = 0; channel < audio.numberOfChannels; channel++) {
@@ -138,7 +139,7 @@ async function loadReference(file: File) {
     await work('reference', mono, audio.sampleRate)
     if (token !== generation) return
     if (useAppStore.getState().playback?.track?.id !== owner.id) { destroyWorker(); return }
-    update({ referenceName: file.name, busy: false, message: `已绑定「${owner.name}」，换歌后清除。` })
+    update({ referenceName: file.name, busy: false, message: t('已绑定「{song}」，换歌后清除。', { song: owner.name }) })
   } catch (error) {
     if (token === generation) { destroyWorker(); update({ busy: false, referenceName: '', message: error instanceof Error ? error.message : String(error) }) }
   } finally { await decoder.close() }
@@ -147,17 +148,17 @@ async function loadReference(file: File) {
 async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
   if (state.running || state.busy) return
   const store = useAppStore.getState(), playback = store.playback
-  if (!playback?.track || !playback.isPlaying) throw new Error('请先播放歌曲')
+  if (!playback?.track || !playback.isPlaying) throw new Error(t('请先播放歌曲'))
   const original = store.lyrics?.trackId === playback.track.id ? store.lyrics.tracks.find(track => track.kind === 'original') : undefined
-  if (mode === 'reference' && (!worker || !state.referenceName || playback.track.id !== state.trackId)) throw new Error('请导入当前歌曲的参考音频')
-  if (mode !== 'reference' && (!original || original.lines.length < 4)) throw new Error('请等待当前歌曲的原文歌词加载完成')
-  if (mode === 'phoneme' && original?.language !== 'ja') throw new Error('音素校验目前仅支持日语原文')
+  if (mode === 'reference' && (!worker || !state.referenceName || playback.track.id !== state.trackId)) throw new Error(t('请导入当前歌曲的参考音频'))
+  if (mode !== 'reference' && (!original || original.lines.length < 4)) throw new Error(t('请等待当前歌曲的原文歌词加载完成'))
+  if (mode === 'phoneme' && original?.language !== 'ja') throw new Error(t('音素校验目前仅支持日语原文'))
   const token = ++generation
   capturing = true
-  update({ mode, trackId: playback.track.id, busy: true, message: '正在连接系统输出音频…', score: undefined, rate: undefined, lastResult: undefined })
+  update({ mode, trackId: playback.track.id, busy: true, message: t('正在连接系统输出音频…'), score: undefined, rate: undefined, lastResult: undefined })
   try {
-    if (mode === 'vocal' && !(await window.syllable.audioSync.engineStatus()).ready) throw new Error('请先配置本地人声识别引擎')
-    if (mode === 'phoneme' && !(await window.syllable.audioSync.phonemeStatus()).available) throw new Error('请先配置本地日语音素模型和独立运行环境')
+    if (mode === 'vocal' && !(await window.syllable.audioSync.engineStatus()).ready) throw Object.assign(new Error(t('请先配置本地人声识别引擎')), { setup: true })
+    if (mode === 'phoneme' && !(await window.syllable.audioSync.phonemeStatus()).available) throw Object.assign(new Error(t('请先配置本地日语音素模型和独立运行环境')), { setup: true })
     if (token !== generation) return
     await window.syllable.audioSync.prepare(mode)
     if (token !== generation) return
@@ -166,8 +167,8 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
     if (token !== generation) { captured.getTracks().forEach(track => track.stop()); return }
     stream = captured
     captured.getVideoTracks().forEach(track => track.stop())
-    if (!captured.getAudioTracks().length) throw new Error('系统没有返回输出音频')
-    captured.getAudioTracks()[0].onended = () => { if (token === generation) void recoverCapture('声音连接已断开，正在自动重新连接…', 2000) }
+    if (!captured.getAudioTracks().length) throw new Error(t('系统没有返回输出音频'))
+    captured.getAudioTracks()[0].onended = () => { if (token === generation) void recoverCapture(t('声音连接已断开，正在自动重新连接…'), 2000) }
     const audio = new AudioContext({ sampleRate: mode === 'reference' ? 8000 : 16000 })
     context = audio
     await audio.audioWorklet.addModule(new URL('audio-sync-worklet.js', document.baseURI).href)
@@ -185,7 +186,7 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
       resetting = true; captureEpoch++
       captureTimeline.reset()
       processor?.port.postMessage({ type: 'reset' })
-      update({ busy: true, score: undefined, rate: undefined, message: '声音采集中断，已撤销旧校准；正在重新收集连续声音…' })
+      update({ busy: true, score: undefined, rate: undefined, message: t('声音采集中断，已撤销旧校准；正在重新收集连续声音…') })
       try {
         await window.syllable.audioSync.clear()
         if (token !== generation) return
@@ -195,7 +196,7 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
         processor?.port.postMessage({ type: 'reset' })
         update({ busy: false })
       } catch (error) {
-        if (token === generation) { retryNotBefore = Date.now() + 30_000; await recoverCapture(`声音采集恢复失败，将稍后自动重试：${error instanceof Error ? error.message : String(error)}`) }
+        if (token === generation) { retryNotBefore = Date.now() + 30_000; await recoverCapture(t('声音采集恢复失败，将稍后自动重试：{error}', { error: error instanceof Error ? error.message : String(error) })) }
       } finally { resetting = false }
     }
     captured.getAudioTracks()[0].onmute = () => { void resetCapture() }
@@ -207,7 +208,7 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
       // backend leaves capturing=true forever and prevents automatic recovery.
       // Rebuild the stream/context, with backoff to avoid a device-error loop.
       retryNotBefore = Date.now() + 5000
-      void recoverCapture('声音设备已挂起，正在自动重新连接；旧校准已撤销。', 5000)
+      void recoverCapture(t('声音设备已挂起，正在自动重新连接；旧校准已撤销。'), 5000)
     }
     processor.port.onmessage = async event => {
       if (token !== generation) return
@@ -230,8 +231,8 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
       const observedTrack = useAppStore.getState().playback?.track?.id
       if (observedTrack !== state.trackId) return
       processing = true
-      update({ busy: true, message: mode === 'phoneme' ? '正在本地校验歌声音素和整首原文（不接管时钟）…'
-        : mode === 'vocal' ? '正在本地识别人声并搜索整首原文…' : '正在对齐最近 12 秒声音…' })
+      update({ busy: true, message: mode === 'phoneme' ? t('正在本地校验歌声音素和整首原文（不接管时钟）…')
+        : mode === 'vocal' ? t('正在本地识别人声并搜索整首原文…') : t('正在对齐最近 12 秒声音…') })
       try {
         if (mode === 'phoneme') {
           const result = await window.syllable.audioSync.phoneme({ trackId: observedTrack, capturedAtMs, captureDurationMs,
@@ -240,11 +241,11 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
           if (token !== generation || epoch !== captureEpoch) return
           if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input', 'overlapping-capture'].includes(result.reason)) {
             if (result.reason === 'invalid-input') retryNotBefore = Date.now() + 30_000
-            await recoverCapture('音素校验状态已变化，正在重新收集声音。'); return
+            await recoverCapture(t('音素校验状态已变化，正在重新收集声音。')); return
           }
-          const message = `音素校验：${result.candidates} 个候选、${result.groups} 组声音线索，计算 ${(result.elapsedMs / 1000).toFixed(1)} 秒。`
-            + (result.reason === 'work-budget' ? '整首搜索超过预算，本段弃权。' : result.hypothesisReason === 'internal-competitor'
-              ? '存在句中词等竞争解释。' : result.hypothesisDecision === 'resolved' ? '多段位置假设一致，但尚未通过声学起点校验。' : '继续累计并排除重复段落。')
+          const message = t('音素校验：{candidates} 个候选、{groups} 组声音线索，计算 {seconds} 秒。', { candidates: result.candidates, groups: result.groups, seconds: (result.elapsedMs / 1000).toFixed(1) })
+            + (currentLanguage() === 'en' ? ' ' : '') + (result.reason === 'work-budget' ? t('整首搜索超过预算，本段弃权。') : result.hypothesisReason === 'internal-competitor'
+              ? t('存在句中词等竞争解释。') : result.hypothesisDecision === 'resolved' ? t('多段位置假设一致，但尚未通过声学起点校验。') : t('继续累计并排除重复段落。'))
           update({ busy: false, score: undefined, rate: undefined, message,
             lastResult: { message, elapsedMs: result.elapsedMs, decision: result.reason === 'hypotheses' ? 'confirming' : 'rejected' } })
           return
@@ -255,23 +256,23 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
             language: original!.language === 'ja' ? 'ja' : original!.language === 'en' ? 'en' : original!.language.startsWith('zh') ? 'zh' : 'auto',
             lines: original!.lines.map(line => ({ text: line.text, startMs: line.startMs })) })
           if (token !== generation || epoch !== captureEpoch) return
-          const reasons: Record<string, string> = { 'insufficient-words': '未识别到足够可靠的歌词行首', ambiguous: '重复段落无法唯一定位',
-            'inconsistent-timing': '识别文字与歌词时间关系不一致', matched: '证据已过期或不连续', inactive: '播放或校准状态已改变',
-            'lyrics-changed': '原文已更新', cancelled: '识别已取消', busy: '上一段识别尚未释放', 'invalid-input': '录音参数无效' }
+          const reasons: Record<string, string> = { 'insufficient-words': t('未识别到足够可靠的歌词行首'), ambiguous: t('重复段落无法唯一定位'),
+            'inconsistent-timing': t('识别文字与歌词时间关系不一致'), matched: t('证据已过期或不连续'), inactive: t('播放或校准状态已改变'),
+            'lyrics-changed': t('原文已更新'), cancelled: t('识别已取消'), busy: t('上一段识别尚未释放'), 'invalid-input': t('录音参数无效') }
           if (['inactive', 'lyrics-changed', 'cancelled', 'invalid-input'].includes(result.reason)) {
             if (result.reason === 'invalid-input') retryNotBefore = Date.now() + 30_000
-            await recoverCapture(`正在重新定位：${reasons[result.reason]}`); return
+            await recoverCapture(t('正在重新定位：{reason}', { reason: reasons[result.reason] })); return
           }
           const message = result.calibration?.state === 'holding'
-            ? '这段声音不足以重新定位，暂时沿用最近确认的歌词时钟；到期或出现矛盾证据即撤销。'
+            ? t('这段声音不足以重新定位，暂时沿用最近确认的歌词时钟；到期或出现矛盾证据即撤销。')
             : result.decision === 'locked'
-            ? `已由人声接管歌词时钟（匹配 ${result.linesMatched} 行，识别耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；已补偿计算耗时）。`
-            : result.decision === 'confirming' ? `已定位 ${result.linesMatched} 行，正在累计多段声音以确认位置和速度。`
-            : `暂不校正：${result.reason === 'matched' && result.clockReason === 'inconsistent-timing'
-              ? '可靠词点与歌词源的时间间隔不一致'
+            ? t('已由人声接管歌词时钟（匹配 {lines} 行，识别耗时 {seconds} 秒；已补偿计算耗时）。', { lines: result.linesMatched, seconds: (result.elapsedMs / 1000).toFixed(1) })
+            : result.decision === 'confirming' ? t('已定位 {lines} 行，正在累计多段声音以确认位置和速度。', { lines: result.linesMatched })
+            : t('暂不校正：{reason}。继续采样。', { reason: result.reason === 'matched' && result.clockReason === 'inconsistent-timing'
+              ? t('可靠词点与歌词源的时间间隔不一致')
               : result.reason === 'matched' && result.clockReason === 'expired'
-                ? '声音证据已经过期，需要重新确认'
-                : reasons[result.reason] ?? result.reason}。继续采样。`
+                ? t('声音证据已经过期，需要重新确认')
+                : reasons[result.reason] ?? result.reason })
           update({ busy: false, score: result.score, rate: result.calibration ? result.rate : undefined, message,
             lastResult: { message, elapsedMs: result.elapsedMs, decision: result.decision } })
           return
@@ -280,24 +281,24 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
         if (token !== generation || epoch !== captureEpoch) return
         const decision = await window.syllable.audioSync.observation({ ...result, trackId: observedTrack, capturedAtMs, captureDurationMs })
         if (token !== generation || epoch !== captureEpoch) return
-        const reasons = { silence: '声音太弱', 'too-short': '音频长度不足', 'low-score': '声音与参照不够相似', ambiguous: '多个段落相似', 'unconfirmed-end': '最近声音已无法确认，可能正在转场或跳转', matched: '本次证据未通过时钟检查' }
+        const reasons = { silence: t('声音太弱'), 'too-short': t('音频长度不足'), 'low-score': t('声音与参照不够相似'), ambiguous: t('多个段落相似'), 'unconfirmed-end': t('最近声音已无法确认，可能正在转场或跳转'), matched: t('本次证据未通过时钟检查') }
         update({ busy: false, score: result.score, rate: result.rate, message: decision === 'locked'
-          ? '声音对齐已接管歌词；每 12 秒复核，匹配失败或校准过期则恢复媒体时钟。'
-          : decision === 'confirming' ? '已找到位置，等待第二段声音确认（约 12 秒）。'
-          : `暂不校正：${reasons[result.reason]}。继续采样。` })
+          ? t('声音对齐已接管歌词；每 12 秒复核，匹配失败或校准过期则恢复媒体时钟。')
+          : decision === 'confirming' ? t('已找到位置，等待第二段声音确认（约 12 秒）。')
+          : t('暂不校正：{reason}。继续采样。', { reason: reasons[result.reason] }) })
       } catch (error) { if (token === generation && epoch === captureEpoch) {
         retryNotBefore = Date.now() + 30_000
-        await recoverCapture(`声音分析暂时失败，稍后自动重试：${error instanceof Error ? error.message : String(error)}`)
+        await recoverCapture(t('声音分析暂时失败，稍后自动重试：{error}', { error: error instanceof Error ? error.message : String(error) }))
       } }
       finally { processing = false }
     }
     update({ running: true, busy: false, message: mode === 'phoneme'
-      ? '正在连续校验日语歌声。'
+      ? t('正在连续校验日语歌声。')
       : mode === 'vocal'
-      ? '正在自动识别人声，累计至少三段独立声音确认歌词位置和速度。'
-      : '正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。' })
+      ? t('正在自动识别人声，累计至少三段独立声音确认歌词位置和速度。')
+      : t('正在本地分析系统声音。首次锁定至少需要两段 12 秒录音。') })
   } catch (error) { if (token === generation) {
-    automaticBlocked = error instanceof Error && (error.name === 'NotAllowedError' || error.message.includes('配置本地'))
+    automaticBlocked = error instanceof Error && (error.name === 'NotAllowedError' || error.message.includes('配置本地') || error.message.includes(t('请先配置本地识别引擎')) || 'setup' in error) // i18n-ignore: matches the Chinese setup errors of the local engines
     retryNotBefore = Date.now() + 30_000
     await recoverCapture(error instanceof Error ? error.message : String(error))
   } }
@@ -314,7 +315,7 @@ function connect() {
       const mode = next.settings?.audioSyncBackend === 'phoneme-diagnostic' ? 'phoneme' : 'vocal'
       if (mode !== state.mode) {
         update({ mode, automatic: next.settings?.automaticAudioSync === true, lastResult: undefined })
-        void recoverCapture('声音校验后端已改变，旧分析已撤销。'); return
+        void recoverCapture(t('声音校验后端已改变，旧分析已撤销。')); return
       }
     }
     if (next.settings?.automaticAudioSync !== previous.settings?.automaticAudioSync) {
@@ -327,17 +328,17 @@ function connect() {
     }
     if (next.playback?.track?.id !== previous.playback?.track?.id) {
       if (state.trackId) {
-        void recoverCapture(state.automatic ? '歌曲已切换，正在自动定位新歌…' : '歌曲已切换，参考音频已清除。')
+        void recoverCapture(state.automatic ? t('歌曲已切换，正在自动定位新歌…') : t('歌曲已切换，参考音频已清除。'))
         destroyWorker(); update({ referenceName: '', trackId: '', lastResult: undefined })
       }
     } else if (capturing) {
       if (state.mode !== 'reference' && next.lyrics !== previous.lyrics) {
-        if (originalTimingKey(next.lyrics) !== originalTimingKey(previous.lyrics)) { void recoverCapture('原文歌词已更新，正在自动重新定位…'); return }
+        if (originalTimingKey(next.lyrics) !== originalTimingKey(previous.lyrics)) { void recoverCapture(t('原文歌词已更新，正在自动重新定位…')); return }
       }
       const current = next.playback, prior = previous.playback
-      if (!current?.isPlaying) void recoverCapture(state.automatic ? '已暂停声音采集，恢复播放后自动定位。' : '播放已暂停，音频校准已停止。')
+      if (!current?.isPlaying) void recoverCapture(state.automatic ? t('已暂停声音采集，恢复播放后自动定位。') : t('播放已暂停，音频校准已停止。'))
       else if (prior && Math.abs(current.positionMs - prior.positionMs - Math.max(0, current.observedAtMs - prior.observedAtMs)) > 2000) {
-        void recoverCapture('播放位置已改变，正在自动重新定位…')
+        void recoverCapture(t('播放位置已改变，正在自动重新定位…'))
       }
     }
     scheduleAutomatic()

@@ -1,5 +1,6 @@
 import type { LyricTrack, LyricsDocument, TrackInfo } from '../types'
 import { detectLyricsLanguage, languageFromFilename, makeTrack } from './lyrics'
+import { t } from './i18n'
 
 const HIRAGANA = /[ぁ-ん]/g
 const COMMON_HAN = /[的一是了我不人在他有这个上们来到时大地为子中你说生国年着就那和要她出也得里后自以会]/g
@@ -67,7 +68,7 @@ export function importLyricFiles(current: LyricsDocument | null, track: TrackInf
     } else if (code === 'custom' && needsOriginal) {
       const detected = detectLyricsLanguage(file.text)
       code = detected
-      label = detected === 'ja' ? '日本語' : detected === 'zh-Hans' ? '中文原文' : detected === 'en' ? 'English' : 'Original'
+      label = detected === 'ja' ? '日本語' : detected === 'zh-Hans' ? '中文原文' : detected === 'en' ? 'English' : 'Original' // i18n-ignore: track labels stored in the document
       kind = 'original'
     }
     const made = makeTrack(`local-${now}-${index}`, code, label, kind, file.text, file.name)
@@ -92,7 +93,7 @@ export function importLyricFiles(current: LyricsDocument | null, track: TrackInf
 
 /** What to tell the user after an import. */
 export function importMessage(result: LyricImport): string {
-  if (!result.document) return '没有导入：文件里没有带时间轴的歌词（需要 [分:秒] 开头的 LRC）'
-  const skipped = result.skipped.length ? `，${result.skipped.length} 个文件没有时间轴，未导入` : ''
-  return `已导入 ${result.imported.length} 条歌词轨道${skipped}`
+  if (!result.document) return t('没有导入：文件里没有带时间轴的歌词（需要 [分:秒] 开头的 LRC）')
+  const skipped = result.skipped.length ? t('，{count} 个文件没有时间轴，未导入', { count: result.skipped.length }) : ''
+  return t('已导入 {count} 条歌词轨道', { count: result.imported.length }) + skipped
 }

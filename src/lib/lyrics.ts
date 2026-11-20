@@ -57,7 +57,7 @@ export function parseLrc(source: string): LyricLine[] {
 /** Separates rows shown as one (an ideographic space, as between split translation phrases). */
 const JOINED_ROWS = '　'
 
-export function makeTrack(id: string, language: string, label: string, kind: LyricTrack['kind'], source: string, origin = '本地'): LyricTrack {
+export function makeTrack(id: string, language: string, label: string, kind: LyricTrack['kind'], source: string, origin = '本地'): LyricTrack { // i18n-ignore: stored source label, localized where shown
   return { id, language, label, kind, lines: parseLrc(source), source: origin }
 }
 
@@ -185,11 +185,11 @@ export function detectLyricsLanguage(text: string) {
 
 export function languageFromFilename(name: string): { code: string; label: string; kind: LyricTrack['kind'] } {
   const normalized = name.toLowerCase()
-  if (/\.(zh|zho|cn|chs|zh-hans)\./.test(normalized)) return { code: 'zh-Hans', label: '中文', kind: 'translation' }
+  if (/\.(zh|zho|cn|chs|zh-hans)\./.test(normalized)) return { code: 'zh-Hans', label: '中文', kind: 'translation' } // i18n-ignore: stored track label, localized where shown
   if (/\.(en|eng)\./.test(normalized)) return { code: 'en', label: 'English', kind: 'translation' }
   if (/\.(romaji|roma|rōmaji)\./.test(normalized)) return { code: 'romaji', label: 'Romaji', kind: 'romanization' }
-  if (/\.(ja|jpn|jp)\./.test(normalized)) return { code: 'ja', label: '日本語', kind: 'original' }
-  return { code: 'custom', label: '自定义', kind: 'translation' }
+  if (/\.(ja|jpn|jp)\./.test(normalized)) return { code: 'ja', label: '日本語', kind: 'original' } // i18n-ignore: stored track label, localized where shown
+  return { code: 'custom', label: '自定义', kind: 'translation' } // i18n-ignore: stored track label, localized where shown
 }
 
 export function serializeLrc(track: LyricTrack) {

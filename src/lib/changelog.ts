@@ -1,3 +1,6 @@
+import { currentLanguage } from './i18n'
+import { CHANGELOG_EN } from '../i18n/en/changelog'
+
 /**
  * What changed for the user, newest first, shown on the help page. One entry
  * per release with something visible; internal work stays in CONTINUATION.md.
@@ -5,6 +8,10 @@
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.79', date: '2026-11-20', items: [
+    '界面可以切换成英文：在「偏好设置」页的「界面语言 · Language」里选择中文、English 或跟随系统；主窗口、桌面歌词、托盘菜单和提示信息都会跟着切换',
+    '系统语言不是中文时，默认显示英文界面'
+  ] },
   { version: '0.4.78', date: '2026-11-20', items: [
     '新增「查歌词」页：不用播放也能看歌词。输入歌名或艺人搜索，点开就是和播放时一样的歌词，带翻译和罗马音；右键可以复制，Ctrl+F 可以在歌词里查找',
     '歌词资料库里的歌可以直接点开阅读（每首歌右边的「查看歌词」按钮，或在「查歌词」页里输入歌名）',
@@ -111,6 +118,12 @@ export function compareVersions(left: string, right: string): number {
     if (difference) return difference
   }
   return 0
+}
+
+/** The items of an entry in the interface language; the Chinese items when no English version with the same count exists. */
+export function localizedItems(entry: ChangelogEntry): string[] {
+  const english = currentLanguage() === 'en' ? CHANGELOG_EN[entry.version] : undefined
+  return english && english.length === entry.items.length ? english : entry.items
 }
 
 /** Entries for releases up to the running version (a newer entry may exist while a release is being prepared). */

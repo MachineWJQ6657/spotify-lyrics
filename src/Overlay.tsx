@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react'
 import { finishPointerDrag } from './lib/pointer-drag'
+import { currentLanguage, t } from './lib/i18n'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { usePosition } from './hooks/usePosition'
 import { useAppStore } from './store/useAppStore'
@@ -242,7 +243,7 @@ export function Overlay() {
     <div className="overlay-surface">
       <div ref={lyricsRef} className="overlay-lyrics" onPointerDown={beginDrag} onPointerMove={continueDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
         onWheel={adjustFontSize} onDoubleClick={() => { if (!settings.positionLocked) void window.syllable.window.show() }}
-        title={settings.positionLocked ? undefined : '拖动移动 · 拖边缘缩放 · Ctrl+滚轮调字号 · 双击打开客户端'}>
+        title={settings.positionLocked ? undefined : t('拖动移动 · 拖边缘缩放 · Ctrl+滚轮调字号 · 双击打开客户端')}>
         <div ref={contentRef} className="overlay-line-content" key={`${layoutRevision}-${playback?.track?.id ?? 'none'}-${line?.startMs ?? -1}-${content.kind}`}>
           {content.kind === 'title' ? <>
             <div lang={titlePresentation!.lang} className={`overlay-primary title-card ${titlePresentation!.className}`}>{content.title}</div>
@@ -252,7 +253,7 @@ export function Overlay() {
             const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
             return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling?.text}</div>
           })}
-          {activeLyrics?.untimedOriginal && <div className="overlay-secondary chinese-text" lang="zh-CN">暂无可信时间轴 · 原文可在客户端查看</div>}
+          {activeLyrics?.untimedOriginal && <div className={`overlay-secondary ${currentLanguage() === 'en' ? 'latin-text' : 'chinese-text'}`} lang={currentLanguage() === 'en' ? 'en' : 'zh-CN'}>{t('暂无可信时间轴 · 原文可在客户端查看')}</div>}
         </div>
         {upcoming && <div ref={nextRef} lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary next-line ${baseClass}`}>{upcoming.text}</div>}
       </div>

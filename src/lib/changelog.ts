@@ -8,6 +8,9 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.81', date: '2026-11-22', items: [
+    '听音校准测出 1.5 秒以上的偏移时，先照常使用，下一次播放这首歌时再测一次：两次一致才长期保留，不一致就以新的为准。这样某一次播放本身出了偏差（比如播放中途切换 Spotify 的淡入淡出）时，错误的偏移不会一直留着'
+  ] },
   { version: '0.4.80', date: '2026-11-22', items: [
     '开着 Spotify 的淡入淡出时歌词匹配不再受影响：Spotify 会把每首歌的时长报短（淡入淡出几秒就短几秒），以前会因此匹配到别的版本，同一首歌播到几秒时还会重新匹配一次，开关淡入淡出或直接点播后已有的校准也可能对不上；现在始终按歌曲的真实时长匹配',
     '帮助页会显示检测到的淡入淡出秒数'

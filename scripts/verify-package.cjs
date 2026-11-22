@@ -149,6 +149,8 @@ const checks = {
   englishInterface: renderer.includes('界面语言 · Language') && renderer.includes('Lyrics library') && renderer.includes('Find lyrics') && main.includes('app:set-language') && main.includes('Open Syllable') && main.includes('function applyTrayMenu('),
   // 0.4.80, Spotify crossfade shortens the reported length: the service keeps the recording's own length when it sees the drop, the window restores it from the saved lyric file or what was learned, lyric matching reads it first
   crossfadeLength: native.includes('crossfade: reported length') && native.includes('function fadeTrimOfDrop(') && native.includes('enteredAtEnd') && renderer.includes('function releaseDurationOf(') && renderer.includes('function withReleaseDuration(') && renderer.includes('syllable-fade-trim'),
+  // 0.4.81, a listened offset of 1.5 s or more is confirmed on another play before it is kept for good
+  listenConfirmation: renderer.includes('function awaitsConfirmation(') && renderer.includes('function confirmedBy(') && renderer.includes('measuredInPlay') && renderer.includes('confirmable'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

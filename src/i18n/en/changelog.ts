@@ -1,5 +1,8 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.81': [
+    'When listening calibration measures an offset of 1.5 s or more, it is used at once and measured again the next time the song plays: it is kept for good only when both agree, otherwise the newer one replaces it. An offset from a play that was itself off (for example after switching Spotify crossfade in the middle of a song) no longer stays'
+  ],
   '0.4.80': [
     'Lyric matching is no longer thrown off by Spotify crossfade: Spotify reports every song shorter by the crossfade time, which could match another edit of the song, re-match it a few seconds into a play, and leave a saved calibration not applying after the setting changed or a song was picked directly; lyrics are now always matched by the real length of the recording',
     'The help page shows the crossfade time that was detected'

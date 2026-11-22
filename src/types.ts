@@ -62,6 +62,8 @@ export interface ListenedOffset {
   spreadMs?: number
   lines: number
   measuredAt: number
+  /** A large offset that a second play measured the same (src/lib/listen-confirmation.ts). */
+  confirmed?: boolean
 }
 
 export interface TrackInfo {

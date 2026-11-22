@@ -1,8 +1,9 @@
 import { useAppStore } from '../store/useAppStore'
-import type { LyricsDocument, PlaybackSnapshot } from '../types'
+import type { ListenedOffset, LyricsDocument, PlaybackSnapshot } from '../types'
 import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
 import { displayLyricsOffset, isConclusiveListen, listenLines, listenTimingKey } from './listened-offset'
+import { awaitsConfirmation, confirmedBy } from './listen-confirmation'
 import { automaticSourceOf, nextSourceToTry, sourcesVetted } from './lyrics-source'
 import { currentSessionCalibration } from './session-calibration'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
@@ -30,7 +31,9 @@ const attempts = new Map<string, number>()
 /** Why the current song should (not) be listened to. Pure; exported for tests. */
 export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics: LyricsDocument | null; enabled: boolean; demoMode: boolean; manualActive: boolean
   /** A lookup for another lyrics source is running: the timeline on screen is about to be replaced. */
-  switching?: boolean }):
+  switching?: boolean
+  /** The saved result was not measured during this play, so a large offset may be checked now. */
+  confirmable?: boolean }):
   { target: ListenTarget } | { reason: string } {
   const { playback, lyrics } = input
   if (!input.enabled) return { reason: 'disabled' }
@@ -47,7 +50,9 @@ export function listenTarget(input: { playback: PlaybackSnapshot | null; lyrics:
   if (lines.length < 8 || lines.length > 400) return { reason: 'too-few-lines' }
   const timingKey = listenTimingKey(original)
   if (!timingKey) return { reason: 'invalid-lines' }
-  if (lyrics.listenedOffset?.timingKey === timingKey && isConclusiveListen(lyrics.listenedOffset)) return { reason: 'already-measured' }
+  if (lyrics.listenedOffset?.timingKey === timingKey && isConclusiveListen(lyrics.listenedOffset)
+    // A large offset is listened to once more on another play before it is trusted for good.
+    && !(input.confirmable && awaitsConfirmation(lyrics.listenedOffset))) return { reason: 'already-measured' }
   // This provider's timeline was already found inconsistent for the song (a
   // lookup may have rebuilt it with a different timing key): do not listen again.
   const shownSource = automaticSourceOf(lyrics)
@@ -85,11 +90,16 @@ export function subscribeListening(listener: () => void) {
 let available: boolean | null = null
 let unsubscribe: (() => void) | null = null
 
+/** Plays are counted so that a result is never confirmed by the play that produced it. */
+let playSerial = 0
+const measuredInPlay = new Map<string, number>()
+
 function currentInput() {
   const store = useAppStore.getState()
   const acoustic = acousticController.snapshot()
   return { playback: store.playback, lyrics: store.lyrics, enabled: store.settings?.listenOffset !== false, demoMode: store.demoMode,
     manualActive: acoustic.running || acoustic.automatic || acoustic.busy,
+    confirmable: Boolean(store.lyrics && measuredInPlay.get(store.lyrics.trackId) !== playSerial),
     // The pending document of a source switch has no provider revision until its lookup answers.
     switching: store.sourceSwitchToken !== null && store.sourceSwitchToken === store.lyricsRetryToken
       && store.sourceSwitchTrackId === store.lyrics?.trackId && store.lyrics?.providerRevision === undefined }
@@ -204,9 +214,14 @@ async function begin(target: ListenTarget) {
         if (stopped) return
         if (result.state === 'inconsistent') failed()
         if (result.state === 'decided' || result.state === 'inconsistent') {
-          useAppStore.getState().setListenedOffset(target.trackId, {
+          const store = useAppStore.getState()
+          const previous = store.lyrics?.trackId === target.trackId ? store.lyrics.listenedOffset : undefined
+          const listened: ListenedOffset = {
             timingKey: target.timingKey, state: result.state, offsetMs: result.state === 'decided' ? result.offsetMs ?? 0 : 0,
-            measuredDeltaMs: result.measuredDeltaMs, spreadMs: result.spreadMs, lines: result.lines, measuredAt: Date.now() })
+            measuredDeltaMs: result.measuredDeltaMs, spreadMs: result.spreadMs, lines: result.lines, measuredAt: Date.now() }
+          store.setListenedOffset(target.trackId, confirmedBy(previous, listened) ? { ...listened, confirmed: true } : listened)
+          measuredInPlay.set(target.trackId, playSerial)
+          if (measuredInPlay.size > 200) measuredInPlay.delete(measuredInPlay.keys().next().value!)
           await stop()
           afterVerdict(target.trackId, result.state)
           return
@@ -411,6 +426,7 @@ export function connectListener() {
     queueMicrotask(() => { scheduled = false; void reconcile() })
   }
   const offStore = useAppStore.subscribe((next, previous) => {
+    if (next.playback?.track?.id !== previous.playback?.track?.id) playSerial += 1
     if (next.playback?.track?.id !== previous.playback?.track?.id || next.playback?.isPlaying !== previous.playback?.isPlaying
       || next.lyrics !== previous.lyrics || next.settings?.listenOffset !== previous.settings?.listenOffset || next.demoMode !== previous.demoMode) schedule()
   })

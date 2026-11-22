@@ -120,6 +120,27 @@ Run it after any change to `local-spotify.ts`, `native-clock.ts` or the gate
 functions; it is the only check of that code that needs no live playback, and
 it does not replace one.
 
+## Spotify crossfade
+
+```bash
+bash scripts/qa/launch-test-instance.sh
+node scripts/qa/fade-watch.mjs            # read-only, 60 s; needs the Web API token of the live check
+```
+
+With "crossfade songs" on, Spotify reports each song to the media session
+shorter by the crossfade time: a picked song drops about five seconds in
+(Lemon 256 116 -> 249 116 ms with a 7 s crossfade), a song reached by the
+previous one running out is short from its first sample, and the hand-over
+happens that many seconds before the recording ends. Positions are not
+shifted. `fade-watch.mjs` prints the Web API's length next to the media
+session's ("short by 7000") while the user listens; it never touches the
+player. The app keeps lyric matching on the recording's own length
+(`src/lib/fade-trim.ts`, `LocalSpotifyService`); its log line is
+`crossfade: reported length ... shortened by ...`, and a lookup shows the two
+lengths as `spotifyDuration=` / `sourceDuration=`. Changing the crossfade
+setting in the middle of a song can leave Spotify's position seconds ahead of
+its audio for the rest of that song (seen once: +4.2 s).
+
 ## Performance
 
 ```bash

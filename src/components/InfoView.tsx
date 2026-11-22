@@ -10,6 +10,7 @@ import { referenceLabel } from '../lib/source-label'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { currentSessionCalibration } from '../lib/session-calibration'
 import { t, tc } from '../lib/i18n'
+import { fadeMemory } from '../lib/fade-trim'
 
 
 /** Measured delta > 0: the file runs ahead of the singing (shown too early). */
@@ -102,6 +103,7 @@ export function InfoView({ mode, openEditor }: { mode: 'settings' | 'help'; open
       <button className="diagnostics-export" onClick={() => void exportDiagnostics()} disabled={exporting}><Download size={14} />{exporting ? t('正在保存…') : t('导出同步诊断')}</button>
       {exportStatus && <p role="status">{exportStatus}</p>}
     </div>
+    {fadeMemory().on && fadeMemory().trimMs > 0 && <div className="info-note">{t('Spotify 开着 {seconds} 秒淡入淡出：它报告的歌曲时长短 {seconds} 秒，歌词仍按歌曲的真实时长匹配。', { seconds: fadeMemory().trimMs / 1000 })}</div>}
     {playback?.transition && <div className="info-note">{t('已识别 Spotify 自定义转场：音乐 cue {cue} ms，重叠 {overlap}。', { cue: playback.transition.cuePointMs, overlap: playback.transition.overlapMs == null ? t('未知') : `${playback.transition.overlapMs} ms` })}</div>}
     {recentErrors && <div className="info-note error-log-card">
       <strong>{recentErrors.length ? t('最近的程序错误') : t('没有记录到程序错误')}</strong>

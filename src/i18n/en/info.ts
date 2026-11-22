@@ -1,5 +1,6 @@
 /** English for the texts of this area; keys are the Chinese source texts (see src/lib/i18n.ts). */
 export const INFO: Record<string, string> = {
+  'Spotify 开着 {seconds} 秒淡入淡出：它报告的歌曲时长短 {seconds} 秒，歌词仍按歌曲的真实时长匹配。': 'Spotify has a {seconds} s crossfade on: it reports each song {seconds} s shorter; lyrics are still matched by the real length.',
   // Preferences overview (InfoView)
   '听音自动校准（原歌词比演唱早 {ms} ms）': 'Automatic listening calibration (lyrics file {ms} ms ahead of the singing)',
   '听音自动校准（原歌词比演唱晚 {ms} ms）': 'Automatic listening calibration (lyrics file {ms} ms behind the singing)',

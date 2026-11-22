@@ -8,6 +8,10 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.80', date: '2026-11-22', items: [
+    '开着 Spotify 的淡入淡出时歌词匹配不再受影响：Spotify 会把每首歌的时长报短（淡入淡出几秒就短几秒），以前会因此匹配到别的版本，同一首歌播到几秒时还会重新匹配一次，开关淡入淡出或直接点播后已有的校准也可能对不上；现在始终按歌曲的真实时长匹配',
+    '帮助页会显示检测到的淡入淡出秒数'
+  ] },
   { version: '0.4.79', date: '2026-11-20', items: [
     '界面可以切换成英文：在「偏好设置」页的「界面语言 · Language」里选择中文、English 或跟随系统；主窗口、桌面歌词、托盘菜单和提示信息都会跟着切换',
     '系统语言不是中文时，默认显示英文界面'

@@ -8,6 +8,7 @@ import { resolveSpotifyTransitionProfile } from './spotify-transition'
 import { nativeClockPosition, observeNativeClock } from './native-clock'
 import { guardNativeBoundary } from './native-boundary'
 import { t } from '../src/lib/i18n'
+import { fadeTrimOfDrop } from '../src/lib/fade-trim'
 
 type Command = 'play' | 'pause' | 'next' | 'previous'
 
@@ -260,6 +261,18 @@ export class LocalSpotifyService {
   private transitionLastCheckedAt = 0
   private transitionResolutionStartedAt = 0
   private durationChangeCandidate: DurationChangeCandidate | null = null
+  /** The crossfade time the playing song's reported length dropped by (src/lib/fade-trim.ts). */
+  private fadeTrimMs = 0
+  /** The playing song's own length when its reported length dropped during this play; 0 otherwise. */
+  private releaseDurationMs = 0
+  /**
+   * When a playing song was last seen within 2.5 s of the end of its reported
+   * length. A hand-over follows within moments; a repeat, a seek back or a
+   * queue that stops there leaves it stale.
+   */
+  private nearEndAtMs = 0
+  /** The playing song began when the previous one ran out, not because the user picked it. */
+  private enteredAtEnd = false
 
   start(listener: (snapshot: PlaybackSnapshot | null) => void, statusListener?: (message: string) => void) {
     if (process.platform !== 'win32') return false
@@ -292,8 +305,10 @@ export class LocalSpotifyService {
         coverUrl: this.coverUrl,
         durationMs: this.state.durationMs,
         spotifyId: this.spotifyTrackUri.split(':').at(-1) || undefined,
-        sourceDurationMs: this.transitionProfile?.sourceDurationMs
+        sourceDurationMs: this.transitionProfile?.sourceDurationMs ?? (this.releaseDurationMs || undefined)
       },
+      fadeTrimMs: this.releaseDurationMs ? this.fadeTrimMs || undefined : undefined,
+      enteredAtEnd: this.enteredAtEnd || undefined,
       positionMs,
       observedAtMs: Date.now(),
       isPlaying: this.state.statusName === 'PLAYING',
@@ -720,6 +735,7 @@ export class LocalSpotifyService {
       let allowShorterDuration = false
       if (previous && incoming && localTrackIdentity(previous) === incomingIdentity) {
         const reportedDurationMs = incoming.durationMs
+        const pendingChange = this.durationChangeCandidate
         const gated = gateSameTrackDurationChange(
           incomingIdentity,
           previous.durationMs,
@@ -731,6 +747,19 @@ export class LocalSpotifyService {
         )
         this.durationChangeCandidate = gated.candidate
         allowShorterDuration = gated.allowShorterDuration
+        // Crossfade: a few seconds into a song Spotify shortens its reported
+        // length by the crossfade time. The song did not get shorter: keep its
+        // own length for lyric matching. A change first reported in the song's
+        // first 2.5 s is the queue boundary's mix-up, not this.
+        if (gated.allowShorterDuration && !transitionDurationAuthoritative && pendingChange?.trackIdentity === incomingIdentity
+          && pendingChange.reportedPositionMs >= 2500) {
+          const trimMs = fadeTrimOfDrop(previous.durationMs, reportedDurationMs)
+          if (trimMs) {
+            this.fadeTrimMs = trimMs
+            this.releaseDurationMs = previous.durationMs
+            this.statusListener?.(`crossfade: reported length ${previous.durationMs}ms -> ${reportedDurationMs}ms (shortened by ${trimMs}ms); lyrics keep ${previous.durationMs}ms`)
+          }
+        }
         if (gated.durationMs !== reportedDurationMs) {
           const heldPositionMs = previous.statusName === 'PLAYING'
             ? Math.min(previous.durationMs || Number.MAX_SAFE_INTEGER, previous.positionMs + Math.max(0, incoming.sampledAtMs - previous.sampledAtMs))
@@ -754,6 +783,14 @@ export class LocalSpotifyService {
       const next = stabilizeLocalState(previous, incoming, allowShorterDuration)
       const sameTrack = Boolean(next && previous && localTrackIdentity(next) === localTrackIdentity(previous))
       if (!sameTrack) {
+        // An empty session between two songs is not a song: the mark waits for the next one.
+        if (next?.title) {
+          const projectedMs = previous?.statusName === 'PLAYING' ? previous.positionMs + Math.max(0, Date.now() - previous.sampledAtMs) : 0
+          this.enteredAtEnd = (this.nearEndAtMs > 0 && Date.now() - this.nearEndAtMs <= 3500)
+            || Boolean(previous?.title && previous.durationMs > 0 && projectedMs >= previous.durationMs - 2500)
+          this.nearEndAtMs = 0
+        }
+        this.releaseDurationMs = 0
         this.transitionProfile = null
         this.spotifyTrackUri = ''
         this.transitionTrackIdentity = ''
@@ -762,6 +799,7 @@ export class LocalSpotifyService {
         this.durationChangeCandidate = null
       }
       this.state = next
+      if (next && next.statusName === 'PLAYING' && next.durationMs > 0 && next.positionMs >= next.durationMs - 2500) this.nearEndAtMs = Date.now()
       // Keep transition discovery alive while paused. Spotify can publish SMTC
       // before replacing context_player_state_restore; returning early for an
       // unchanged paused sample used to prevent every subsequent retry.

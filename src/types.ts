@@ -91,6 +91,10 @@ export interface SpotifyTransitionProfile {
   speedAutomation: SpotifyTransitionSpeedPoint[]
 }
 export interface PlaybackSnapshot {
+  /** Local playback: the crossfade time Spotify shortens reported lengths by, once seen (src/lib/fade-trim.ts). */
+  fadeTrimMs?: number
+  /** Local playback: this song began when the previous one ran out. */
+  enteredAtEnd?: boolean
   acousticAnchor?: AcousticAnchor
   track: TrackInfo | null; positionMs: number; observedAtMs: number; isPlaying: boolean; deviceName?: string; sampleId?: number; playbackSource?: 'web' | 'local' | 'demo'; clockDriftMs?: number; transition?: SpotifyTransitionProfile; transitionResolved?: boolean; error?: string
 }

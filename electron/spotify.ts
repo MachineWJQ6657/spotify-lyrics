@@ -30,6 +30,10 @@ export interface PlaybackSnapshot {
   clockDriftMs?: number
   transition?: SpotifyTransitionProfile
   transitionResolved?: boolean
+  /** Local playback: the crossfade time Spotify shortens reported lengths by, once seen (src/lib/fade-trim.ts). */
+  fadeTrimMs?: number
+  /** Local playback: this song began when the previous one ran out. */
+  enteredAtEnd?: boolean
 }
 
 function webItemTrack(item: any): NonNullable<PlaybackSnapshot['track']> {

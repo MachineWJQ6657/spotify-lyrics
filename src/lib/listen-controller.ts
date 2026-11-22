@@ -2,7 +2,7 @@ import { useAppStore } from '../store/useAppStore'
 import type { LyricsDocument, PlaybackSnapshot } from '../types'
 import { acousticController } from './acoustic-controller'
 import { CaptureTimeline } from './capture-timeline'
-import { isConclusiveListen, listenLines, listenTimingKey } from './listened-offset'
+import { displayLyricsOffset, isConclusiveListen, listenLines, listenTimingKey } from './listened-offset'
 import { automaticSourceOf, nextSourceToTry, sourcesVetted } from './lyrics-source'
 import { currentSessionCalibration } from './session-calibration'
 import type { ListenResult } from '../../electron/audio-sync/lyric-offset-session'
@@ -396,7 +396,12 @@ export function connectListener() {
         useAppStore.setState({ playback: { ...playback, positionMs, isPlaying, observedAtMs: Date.now(), acousticAnchor: undefined } })
         return true
       },
-      lineStarts: () => useAppStore.getState().lyrics?.tracks.find(track => track.kind === 'original')?.lines.map(line => line.startMs) ?? []
+      // The clock positions at which each line becomes the sung one: its start plus the song's offset.
+      lineStarts: () => {
+        const store = useAppStore.getState()
+        const offsetMs = displayLyricsOffset(store.lyrics, 0, store.settings.listenOffset !== false)
+        return store.lyrics?.tracks.find(track => track.kind === 'original')?.lines.map(line => line.startMs + offsetMs) ?? []
+      }
     }
   }
   let scheduled = false

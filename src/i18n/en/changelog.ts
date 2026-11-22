@@ -1,5 +1,9 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.80': [
+    'Lyric matching is no longer thrown off by Spotify crossfade: Spotify reports every song shorter by the crossfade time, which could match another edit of the song, re-match it a few seconds into a play, and leave a saved calibration not applying after the setting changed or a song was picked directly; lyrics are now always matched by the real length of the recording',
+    'The help page shows the crossfade time that was detected'
+  ],
   '0.4.79': [
     'The interface is available in English: choose Chinese, English or Follow the system under "Language" on the Preferences page; the main window, desktop lyrics, tray menu and messages all follow',
     'On a system whose language is not Chinese, the interface starts in English'

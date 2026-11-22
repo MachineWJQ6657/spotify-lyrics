@@ -8,6 +8,7 @@ import { createDemoPlayback, demoDocument } from '../data/demo'
 import { retimeLines } from '../lib/lyrics'
 import { listenTimingKey } from '../lib/listened-offset'
 import { isUserOwnedTrack } from '../lib/user-tracks'
+import { matchedLengthOf, withReleaseDuration } from '../lib/fade-trim'
 
 /**
  * A user's edit of the original keeps the listening result that belonged to
@@ -246,7 +247,9 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   setConnected: connected => set(state => state.connected === connected ? state : { connected }),
   setLocalConnected: localConnected => set(state => state.localConnected === localConnected ? state : { localConnected }),
   setDemoMode: demoMode => set(state => state.demoMode === demoMode ? state : { demoMode }),
-  setPlayback: playback => set(state => {
+  setPlayback: reported => set(state => {
+    // Lyric matching goes by the recording's own length, which Spotify's crossfade hides (src/lib/fade-trim.ts).
+    const playback = withReleaseDuration(reported, reported?.track ? matchedLengthOf(state.library[reported.track.id]) : undefined, !isAuxiliaryWindow)
     if (playback && state.playback && playback.observedAtMs < state.playback.observedAtMs && playback.track?.id === state.playback.track?.id) return state
     const sessionCalibration = continuesCalibration(state.playback, playback) ? state.sessionCalibration : null
     if (playback?.track && state.playback?.track?.id === playback.track.id) {

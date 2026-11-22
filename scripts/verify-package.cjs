@@ -147,6 +147,8 @@ const checks = {
   lyricSearchPage: main.includes('function mergeSongHits(') && main.includes('lyrics:find-songs') && renderer.includes('browse-page') && renderer.includes('findSongs') && renderer.includes('browse-reader-header') && rendererCss.includes('.lyrics-stage-shell.reading'),
   // 0.4.79, the English interface: texts go through t() with the English entries bundled in every window and the main process; the language control is bilingual; the tray menu follows the language
   englishInterface: renderer.includes('界面语言 · Language') && renderer.includes('Lyrics library') && renderer.includes('Find lyrics') && main.includes('app:set-language') && main.includes('Open Syllable') && main.includes('function applyTrayMenu('),
+  // 0.4.80, Spotify crossfade shortens the reported length: the service keeps the recording's own length when it sees the drop, the window restores it from the saved lyric file or what was learned, lyric matching reads it first
+  crossfadeLength: native.includes('crossfade: reported length') && native.includes('function fadeTrimOfDrop(') && native.includes('enteredAtEnd') && renderer.includes('function releaseDurationOf(') && renderer.includes('function withReleaseDuration(') && renderer.includes('syllable-fade-trim'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

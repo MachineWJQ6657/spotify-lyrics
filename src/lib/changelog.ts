@@ -8,6 +8,9 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.83', date: '2026-11-24', items: [
+    '查找和匹配歌词改到单独的线程里进行。以前每首新歌匹配歌词时，程序会有 0.1–0.2 秒顾不上别的事（更新播放状态、响应悬浮窗上的鼠标都要等它）；现在主程序不再因此停顿。'
+  ] },
   { version: '0.4.82', date: '2026-11-24', items: [
     '修复 Syllable 开着时（包括在后台）鼠标偶尔卡顿的问题：桌面歌词以前会在系统里装一个全局鼠标钩子，整台电脑的鼠标移动都要等 Syllable 处理，它一忙（比如换歌匹配歌词时）鼠标就跟着顿一下；现在不再使用这个钩子',
     '换歌时程序自己的两处短暂停顿也去掉了：以前每首歌开始听音校准时都要向系统查询一次屏幕列表（约 0.5 秒），现在显示器不变就只查一次；匹配歌词时同一份歌词也不再反复解析。'

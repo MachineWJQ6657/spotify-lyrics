@@ -16,6 +16,15 @@ node scripts/qa/cdp.mjs eval "=#/overlay" "document.querySelector('.overlay-prim
 bash scripts/qa/quit-test-instance.sh        # graceful quit, reports leftovers and error.log
 ```
 
+**With a single display nothing is shown.** `--syllable-secondary-test` refuses
+to start when the computer has one display (exit code 3), and the launcher and
+`smoke.sh` then start the instance with `--syllable-hidden-test` instead: the
+pages load and answer over CDP, but no window, tray icon or global shortcut
+exists. In that mode the lookup, the search page (`verify-browse.mjs`), the
+view sweep and the main-thread tools work; the lyric list does not follow the
+clock (`verify-lyric-list.mjs` fails), the overlay is never shown, and the
+`--syllable-qa-view=overlay-*` views cannot run.
+
 `cdp.mjs` also has `hover`, `click`, `key`, `wheel`, `dblclick` and `sized`
 (a screenshot at another viewport size). A page is named by a URL suffix
 (`=index.html`, `=#/overlay`). In Git Bash, set `MSYS_NO_PATHCONV=1` when an

@@ -12,7 +12,12 @@ const read = entry => asar.extractFile(archive, entry.replace(/^[\\/]/, '')).toS
 const packaged = JSON.parse(asar.extractFile(archive, 'package.json'))
 const mainEntry = entries.find(entry => entry.replace(/\\/g, '/') === '/out/main/main.js')
 if (!mainEntry) throw new Error('Packaged main entry is missing')
-const main = read(mainEntry)
+// Since 0.4.83 the lyric lookup is a chunk of its own, loaded by the main process and by the lyric worker thread.
+const lyricsProviderChunks = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]lyrics-provider-.*\.js$/.test(entry))
+const lyricsWorkerEntry = entries.find(entry => entry.replace(/\\/g, '/') === '/out/main/lyrics-worker.js')
+const lyricsWorker = lyricsWorkerEntry ? read(lyricsWorkerEntry) : ''
+const mainOnly = read(mainEntry)
+const main = [mainOnly, ...lyricsProviderChunks.map(read)].join('\n')
 const native = entries.filter(entry => /[\\/]main[\\/]chunks[\\/]local-spotify-.*\.js$/.test(entry)).map(read).join('\n')
 const renderer = entries.filter(entry => /[\\/]renderer[\\/].*\.js$/.test(entry)).map(read).join('\n')
 const rendererCss = entries.filter(entry => /[\\/]renderer[\\/].*\.css$/.test(entry)).map(read).join('\n')
@@ -157,6 +162,10 @@ const checks = {
   captureScreenKept: main.includes('if (captureScreenSource) {') && main.includes('audio-sync:capture-failed') && main.includes('captureScreenSource = null'),
   // 0.4.82, a lookup parses each lyric text once
   parsedRowsKept: main.includes('const known = parsedRows.get(value)') && main.includes('Object.freeze(row)'),
+  // 0.4.83, lyric lookups run in a worker thread: the worker entry is packaged and loads the provider chunk; the main entry starts it and no longer holds the lookup itself
+  lyricsWorkerThread: lyricsProviderChunks.length === 1 && lyricsWorker.includes('fetchLyrics(...call.args)') && /chunks\/lyrics-provider-/.test(lyricsWorker)
+    && mainOnly.includes('new Worker(new URL("./lyrics-worker.js", import.meta.url))') && !mainOnly.includes('async function fetchLyrics(')
+    && mainOnly.includes('lyrics worker lost') && mainOnly.includes('const closeLyrics = stopLyricsWorker()'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

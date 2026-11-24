@@ -4,7 +4,8 @@ import path from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SpotifyRateLimitError, SpotifyService } from './spotify'
-import { fetchLyrics, isLyricsSourceId, searchLyrics, timedLyricsStats } from './lyrics-provider'
+import { isLyricsSourceId, timedLyricsStats } from './lyrics-provider'
+import { fetchLyrics, lyricsThread, onLyricsWorkerReport, searchLyrics, stopLyricsWorker } from './lyrics-client'
 import { romanizeLines, analyzeJapaneseLines } from './romanizer'
 import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
@@ -147,10 +148,17 @@ const LOGIN_ITEM_ARGS = ['--syllable-autostart']
 const liveAudioQa = qaView === 'audio-sync-live' || qaView === 'audio-phoneme-live'
 // Offscreen audio-panel checks must not interrupt the user's active desktop.
 // This mode requires explicit QA capture arguments and an isolated profile.
-const headlessAudioQa = process.argv.includes('--syllable-qa-headless') && Boolean(qaCapturePath)
+/**
+ * A test instance with no window on any screen, for checks while the computer
+ * has a single display: the pages load and run, nothing is ever shown, and
+ * there is no tray icon and no global shortcut. Needs an isolated profile.
+ */
+const hiddenTestInstance = process.argv.includes('--syllable-hidden-test') && process.argv.some(value => value.startsWith('--user-data-dir='))
+const headlessAudioQa = hiddenTestInstance || (process.argv.includes('--syllable-qa-headless') && Boolean(qaCapturePath)
   && (qaView === 'audio-sync' || liveAudioQa || qaView === 'performance')
-  && process.argv.some(value => value.startsWith('--user-data-dir='))
+  && process.argv.some(value => value.startsWith('--user-data-dir=')))
 const qaLog = (message: string) => { if (qaLogPath) void appendFile(qaLogPath, `${new Date().toISOString()} ${message}\n`, 'utf8') }
+onLyricsWorkerReport(message => { qaLog(message); console.warn(message) })
 // Main-process errors go to <userData>/error.log instead of Electron's modal
 // "A JavaScript error occurred" dialog: a timer that throws (for example on a
 // window destroyed during quit) must not interrupt the desktop, and a crash
@@ -1796,7 +1804,15 @@ else app.on('second-instance', (_event, argv) => {
 })
 
 if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
-  qaLog(`startup secondary-test=${secondaryMonitorQa}; displays=${JSON.stringify(screen.getAllDisplays().map(display => ({ id: display.id, primary: display.id === screen.getPrimaryDisplay().id, workArea: display.workArea, scaleFactor: display.scaleFactor })))}`)
+  qaLog(`startup secondary-test=${secondaryMonitorQa}; hidden=${hiddenTestInstance}; displays=${JSON.stringify(screen.getAllDisplays().map(display => ({ id: display.id, primary: display.id === screen.getPrimaryDisplay().id, workArea: display.workArea, scaleFactor: display.scaleFactor })))}`)
+  // A test instance never opens on the user's only screen. With one display it
+  // does not start; `--syllable-hidden-test` runs it without any window instead.
+  if (secondaryMonitorQa && !headlessAudioQa && screen.getAllDisplays().length < 2) {
+    console.error('--syllable-secondary-test needs a second display; use --syllable-hidden-test')
+    qaLog('startup refused: --syllable-secondary-test needs a second display')
+    setTimeout(() => app.exit(3), 150)
+    return
+  }
   ipcMain.handle('auth:status', () => ({ connected: spotify.isConnected(), localConnected: localSpotify?.hasTrack() ?? false }))
   ipcMain.handle('auth:login', async (_event, clientId: string) => { await spotify.login(clientId); return { connected: true } })
   ipcMain.handle('auth:logout', async () => { playbackRefreshes.invalidate(); await spotify.logout(); playbackRefreshes.invalidate(); lastPlayback = localSpotify?.current() ?? null; broadcast(lastPlayback); playbackDiagnostics.clear(); return { connected: false } })
@@ -1920,7 +1936,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     const lyricsDurationMs = track?.sourceDurationMs ?? track?.durationMs
     const stats = timedLyricsStats(result?.syncedLyrics, lyricsDurationMs)
     const durationRatio = result?.matchedDurationMs && lyricsDurationMs ? result.matchedDurationMs / lyricsDurationMs : 1
-    qaLog(`lyrics: ${result?.source ?? 'not found'}; preferred=${preferredSource ?? 'auto'}${result?.preferredSourceUnavailable ? ' (unavailable)' : ''}; available=${result?.availableSources?.map(item => `${item.id}:${item.lines}${item.agrees === false ? '(differs)' : ''}`).join(',') ?? 'unknown'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
+    qaLog(`lyrics: ${result?.source ?? 'not found'}; thread=${prefetched ? 'prefetch' : lyricsThread() ?? 'none'}; preferred=${preferredSource ?? 'auto'}${result?.preferredSourceUnavailable ? ' (unavailable)' : ''}; available=${result?.availableSources?.map(item => `${item.id}:${item.lines}${item.agrees === false ? '(differs)' : ''}`).join(',') ?? 'unknown'}; elapsed=${Date.now() - lyricsFetchStartedAt}ms; confidence=${result?.confidence ?? 0}; transient=${Boolean(result?.transient)}; spotifyDuration=${track?.durationMs ?? 0}; sourceDuration=${lyricsDurationMs ?? 0}; matchedDuration=${result?.matchedDurationMs ?? 0}; durationRatio=${durationRatio.toFixed(4)}; lines=${stats.lineCount}; last=${stats.lastMs}; extras=${result?.additionalTracks?.map(item => `${item.language}:${item.source}`).join(',') ?? 'none'}`)
     return result
   })
   ipcMain.handle('lyrics:search', (_event, query) => searchLyrics(query))
@@ -2246,6 +2262,7 @@ app.on('before-quit', event => {
   vocalSync.clear()
   phonemeSession.clear()
   const closeCtc = localCtc.close()
+  const closeLyrics = stopLyricsWorker()
   const closeNative = localSpotify?.close() ?? Promise.resolve()
   globalShortcut.unregisterAll()
   stopOverlayMouseTracking(); stopOverlayControlsVisibilityTracking()
@@ -2271,7 +2288,8 @@ app.on('before-quit', event => {
   void Promise.race([Promise.all([
     save.catch(error => console.error('Final overlay bounds save failed:', error)),
     closeNative.catch(error => console.error('Native media shutdown failed:', error)),
-    closeCtc.catch(error => console.error('Local phoneme shutdown failed:', error))
+    closeCtc.catch(error => console.error('Local phoneme shutdown failed:', error)),
+    closeLyrics
   ]), budget]).finally(() => {
     quitFlushed = true
     if (qaCapturePath) app.exit(typeof process.exitCode === 'number' ? process.exitCode : Number(process.exitCode) || 0)

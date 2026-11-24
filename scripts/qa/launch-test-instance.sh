@@ -15,6 +15,9 @@ ROOT="$(pwd -W 2>/dev/null || pwd)"
 [ -f out/main/main.js ] && [ -f out/renderer/index.html ] || { echo "no build in out/: run npm run build first"; exit 1; }
 mkdir -p .qa-test-profile .qa-scratch
 export MSYS_NO_PATHCONV=1
+# With a single display nothing may be shown: the instance then runs without any window.
+DISPLAYS=$(powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count" | tr -d '\r')
+if [ "${DISPLAYS:-1}" -ge 2 ]; then MODE=--syllable-secondary-test; else MODE=--syllable-hidden-test; echo "one display: starting without any window ($MODE)"; fi
 nohup ./node_modules/electron/dist/electron.exe . "--user-data-dir=$ROOT/.qa-test-profile" --remote-debugging-port=9333 \
-  --disable-features=CalculateNativeWinOcclusion --disable-renderer-backgrounding --syllable-secondary-test \
+  --disable-features=CalculateNativeWinOcclusion --disable-renderer-backgrounding $MODE \
   "--syllable-qa-log=$ROOT/.qa-scratch/test-instance.log" "$@" > "$ROOT/.qa-scratch/test-instance.out" 2>&1 &

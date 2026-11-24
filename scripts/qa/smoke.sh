@@ -10,13 +10,16 @@ cd "$(dirname "$0")/../.." || exit 1
 ROOT="$(pwd -W 2>/dev/null || pwd)"
 [ -n "$1" ] || { echo "usage: smoke.sh <candidate directory under release/>"; exit 1; }
 export MSYS_NO_PATHCONV=1
+# With a single display nothing may be shown: the instance then runs without any window.
+DISPLAYS=$(powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count" | tr -d '\r')
+if [ "${DISPLAYS:-1}" -ge 2 ]; then MODE=--syllable-secondary-test; else MODE=--syllable-hidden-test; echo "one display: starting without any window ($MODE)"; fi
 EXE="./release/$1/win-unpacked/Syllable.exe"
 [ -f "$EXE" ] || { echo "missing $EXE"; exit 1; }
 P="$ROOT/.qa-smoke-profile"
 mkdir -p .qa-scratch .qa-test-profile
 rm -rf "$P"; cp -r "$ROOT/.qa-test-profile" "$P"; rm -f "$P/lockfile" "$P/error.log" "$P/main-window.json"
 : > "$ROOT/.qa-scratch/smoke.log"
-(nohup $EXE "--user-data-dir=$P" --remote-debugging-port=9333 --disable-features=CalculateNativeWinOcclusion --syllable-secondary-test "--syllable-qa-log=$ROOT/.qa-scratch/smoke.log" > "$ROOT/.qa-scratch/smoke.out" 2>&1 &)
+(nohup $EXE "--user-data-dir=$P" --remote-debugging-port=9333 --disable-features=CalculateNativeWinOcclusion $MODE "--syllable-qa-log=$ROOT/.qa-scratch/smoke.log" > "$ROOT/.qa-scratch/smoke.out" 2>&1 &)
 sleep 12
 node scripts/qa/cdp.mjs eval "=index.html" "JSON.stringify({ v: document.querySelector('.version')?.textContent, screenX, badge: document.querySelector('.source-badge em')?.textContent, groups: document.querySelectorAll('.lyric-group').length })"
 node scripts/qa/ui-sweep.mjs 2>&1 | tail -1

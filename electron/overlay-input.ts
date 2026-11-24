@@ -19,8 +19,10 @@ export interface OverlayInputState {
 }
 
 export const OVERLAY_INPUT_NEAR_POLL_MS = 24
-export const OVERLAY_INPUT_FAR_POLL_MS = 200
-export const OVERLAY_INPUT_NEAR_MARGIN = 64
+// The cursor is sampled, not hooked (see applyOverlayMouseIgnore in main.ts). Far from the
+// lyrics a sample every 60 ms is enough to notice it coming: 200 px take a fast hand longer.
+export const OVERLAY_INPUT_FAR_POLL_MS = 60
+export const OVERLAY_INPUT_NEAR_MARGIN = 200
 export const OVERLAY_INPUT_RESIZE_EDGE = 8
 export const OVERLAY_INPUT_PADDING_X = 10
 export const OVERLAY_INPUT_PADDING_Y = 8
@@ -47,8 +49,8 @@ function rect(value: OverlayInputRect) {
 /**
  * Input-only policy: never turn text geometry into a native window paint clip.
  *
- * Forwarded mouse movement can update this policy immediately. Polling is only a
- * bounded fallback, including when Chromium does not receive forwarded events.
+ * The caller samples the cursor every `pollMs` and applies this policy; mouse
+ * movement is not forwarded to an input-transparent window.
  * During an acquired pointer/native resize gesture the caller must retain input
  * until release rather than re-evaluating the moving pointer against old text.
  */

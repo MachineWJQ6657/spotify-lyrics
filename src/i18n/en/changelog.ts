@@ -1,5 +1,9 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.82': [
+    'Fixed the mouse cursor stuttering now and then while Syllable was running, even in the background: desktop lyrics used to install a system-wide mouse hook, so every mouse movement on the computer waited for Syllable, and whenever it was busy (for example matching lyrics at a song change) the cursor hitched; the hook is no longer used',
+    'Two short pauses of the app itself at a song change are gone as well: listening calibration used to ask Windows for the list of screens at every song (about 0.5 s) and now asks once until the displays change, and the same lyric text is no longer parsed over and over while candidates are compared.'
+  ],
   '0.4.81': [
     'When listening calibration measures an offset of 1.5 s or more, it is used at once and measured again the next time the song plays: it is kept for good only when both agree, otherwise the newer one replaces it. An offset from a play that was itself off (for example after switching Spotify crossfade in the middle of a song) no longer stays'
   ],

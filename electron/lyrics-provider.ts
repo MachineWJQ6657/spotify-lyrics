@@ -69,14 +69,34 @@ function timestampMs(timestamp: string) {
 }
 
 export interface TimedLyricsRow {
-  timeMs: number
-  text: string
-  normalizedText: string
+  readonly timeMs: number
+  readonly text: string
+  readonly normalizedText: string
 }
+
+/**
+ * One lookup parses the same few lyric texts dozens of times while it compares
+ * candidates (about 100 ms of one busy stretch of the main process, measured
+ * at a song change). The parsed rows of the most recent texts are kept; each
+ * call gets its own array of the shared, frozen rows.
+ */
+const PARSED_ROWS_LIMIT = 64
+const parsedRows = new Map<string, readonly TimedLyricsRow[]>()
 
 /** Expand every timestamp on a physical LRC row into its own logical row. */
 export function parseTimedRows(value: string | null | undefined): TimedLyricsRow[] {
-  return (value?.split(/\r?\n/) ?? []).flatMap(raw => {
+  if (!value) return []
+  const known = parsedRows.get(value)
+  if (known) return known.slice()
+  const rows = parseTimedRowsOf(value)
+  for (const row of rows) Object.freeze(row)
+  parsedRows.set(value, rows)
+  if (parsedRows.size > PARSED_ROWS_LIMIT) parsedRows.delete(parsedRows.keys().next().value!)
+  return rows.slice()
+}
+
+function parseTimedRowsOf(value: string): TimedLyricsRow[] {
+  return value.split(/\r?\n/).flatMap(raw => {
     const timestamps = raw.match(LRC_TIMESTAMP) ?? []
     const text = raw.replace(LRC_TIMESTAMP, '').trim()
     if (!timestamps.length || !text || isLyricCredit(text)) return []

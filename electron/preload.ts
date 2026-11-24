@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('syllable', {
     phoneme: (value: unknown) => ipcRenderer.invoke('audio-sync:phoneme', value),
     listen: (value: unknown) => ipcRenderer.invoke('audio-sync:listen', value),
     clear: (mode?: string) => ipcRenderer.invoke('audio-sync:clear', mode),
+    captureFailed: () => ipcRenderer.send('audio-sync:capture-failed'),
     observation: (value: unknown) => ipcRenderer.invoke('audio-sync:observation', value)
   },
   auth: {

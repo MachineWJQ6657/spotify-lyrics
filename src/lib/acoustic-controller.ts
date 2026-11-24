@@ -164,6 +164,8 @@ async function start(mode: 'reference' | 'vocal' | 'phoneme' = 'reference') {
     if (token !== generation) return
     useAppStore.getState().clearSessionCalibration?.()
     const captured = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 16, height: 16, frameRate: 1 } })
+      // The main process keeps the screen it named for the capture; a refusal makes it ask again.
+      .catch(error => { window.syllable.audioSync.captureFailed?.(); throw error })
     if (token !== generation) { captured.getTracks().forEach(track => track.stop()); return }
     stream = captured
     captured.getVideoTracks().forEach(track => track.stop())

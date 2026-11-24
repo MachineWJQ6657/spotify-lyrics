@@ -11,6 +11,8 @@ interface SyllableApi {
     listen(value: import('./lib/vocal-sync-types').VocalCapture): Promise<import('../electron/audio-sync/lyric-offset-session').ListenResult>
     /** With a mode, clears only while that mode is the active one. */
     clear(mode?: 'listen'): Promise<boolean>
+    /** The system-audio capture was refused: the main process forgets the screen it kept for it. */
+    captureFailed(): void
     observation(value: import('../electron/audio-sync/acoustic-clock').AcousticObservation): Promise<'locked' | 'confirming' | 'rejected'>
   }
   auth: { status(): Promise<{ connected: boolean; localConnected?: boolean }>; login(clientId: string): Promise<{ connected: boolean }>; logout(): Promise<{ connected: boolean }> }

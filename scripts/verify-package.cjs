@@ -151,6 +151,12 @@ const checks = {
   crossfadeLength: native.includes('crossfade: reported length') && native.includes('function fadeTrimOfDrop(') && native.includes('enteredAtEnd') && renderer.includes('function releaseDurationOf(') && renderer.includes('function withReleaseDuration(') && renderer.includes('syllable-fade-trim'),
   // 0.4.81, a listened offset of 1.5 s or more is confirmed on another play before it is kept for good
   listenConfirmation: renderer.includes('function awaitsConfirmation(') && renderer.includes('function confirmedBy(') && renderer.includes('measuredInPlay') && renderer.includes('confirmable'),
+  // 0.4.82, no system-wide low-level mouse hook: the overlay never forwards mouse movement; hover over input-transparent lyrics comes from cursor sampling
+  noMouseHook: !main.includes('forward: true') && main.includes('overlayWindow.setIgnoreMouseEvents(value)') && main.includes('function refreshTransparentHoverTracking('),
+  // 0.4.82, the screen named for a system-audio capture is kept between songs (asking Windows for it blocked the main thread for about half a second each time)
+  captureScreenKept: main.includes('if (captureScreenSource) {') && main.includes('audio-sync:capture-failed') && main.includes('captureScreenSource = null'),
+  // 0.4.82, a lookup parses each lyric text once
+  parsedRowsKept: main.includes('const known = parsedRows.get(value)') && main.includes('Object.freeze(row)'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),
@@ -197,7 +203,7 @@ const checks = {
   secondaryContrast: /-webkit-text-stroke:\s*1\.5px #121212/.test(rendererCss) && rendererCss.includes('.no-background.effect-none .overlay-secondary'),
   overlayStartupBarrier: main.includes('overlayRendererReady, overlaySettingsReady') && main.includes('overlay:restore') && renderer.includes('receivedSettings'),
   overlayFirstPaintBarrier: main.includes('overlayFirstPaintReady') && main.includes('function waitForFirstPaint(') && main.includes('function paintRecovery(') && main.includes('function waitForLoad(') && main.includes('reloading renderer once'),
-  lockedFullWindowPassthrough: main.includes('setIgnoreMouseEvents(value, { forward: true })') && main.includes('overlay:movable-changed'),
+  lockedFullWindowPassthrough: main.includes('overlayWindow.setIgnoreMouseEvents(value)') && !main.includes('forward: true') && main.includes('overlay:movable-changed'),
   finalBoundsFlush: main.includes('Final overlay bounds save failed:') && main.includes('session.flushStorageData()'),
   lockedOverlayRecovery: main.includes('function recoverOverlayControls()') && main.includes('function sampleTransparentHover(') && main.includes('CommandOrControl+Alt+U') && renderer.includes('解锁并显示控制栏'),
 }

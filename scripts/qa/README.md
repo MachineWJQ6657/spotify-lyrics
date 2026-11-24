@@ -150,6 +150,7 @@ node scripts/qa/page-metrics.mjs 20        # renderer work per window (they shar
 node scripts/qa/trace-frames.mjs 10        # frames drawn, grouped into bursts
 node scripts/qa/page-profile.mjs index.html 15
 node scripts/qa/main-profile.mjs 15        # main process JS; launch with --inspect=9339
+node scripts/qa/main-stalls.mjs 60 25      # each stretch the main thread was busy 25 ms or longer, and in what
 ```
 
 `perf.ps1` prints the CPU of each process of one instance (percent of one

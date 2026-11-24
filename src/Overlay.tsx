@@ -113,7 +113,8 @@ export function Overlay() {
       window.syllable.overlay.pointerMoved()
       frame = requestAnimationFrame(publish)
     }
-    // Electron forwards mousemove while the native window ignores clicks.
+    // Arrives only while the window takes input; while it lets input through,
+    // the main process samples the cursor instead (no movement is forwarded).
     // The main process reads the real cursor; no renderer coordinates are trusted.
     window.addEventListener('mousemove', move, { passive: true })
     window.addEventListener('mouseleave', move, { passive: true })

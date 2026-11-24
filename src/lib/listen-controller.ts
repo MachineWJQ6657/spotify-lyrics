@@ -182,6 +182,8 @@ async function begin(target: ListenTarget) {
   if (!prepared || stopped) { await stop(); return }
   try {
     const captured = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 16, height: 16, frameRate: 1 } })
+      // The main process keeps the screen it named for the capture; a refusal makes it ask again.
+      .catch(error => { window.syllable.audioSync.captureFailed?.(); throw error })
     stream = captured
     captured.getVideoTracks().forEach(track => track.stop())
     if (stopped || !captured.getAudioTracks().length) { await stop(); return }

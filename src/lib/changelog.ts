@@ -8,6 +8,10 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.82', date: '2026-11-24', items: [
+    '修复 Syllable 开着时（包括在后台）鼠标偶尔卡顿的问题：桌面歌词以前会在系统里装一个全局鼠标钩子，整台电脑的鼠标移动都要等 Syllable 处理，它一忙（比如换歌匹配歌词时）鼠标就跟着顿一下；现在不再使用这个钩子',
+    '换歌时程序自己的两处短暂停顿也去掉了：以前每首歌开始听音校准时都要向系统查询一次屏幕列表（约 0.5 秒），现在显示器不变就只查一次；匹配歌词时同一份歌词也不再反复解析。'
+  ] },
   { version: '0.4.81', date: '2026-11-22', items: [
     '听音校准测出 1.5 秒以上的偏移时，先照常使用，下一次播放这首歌时再测一次：两次一致才长期保留，不一致就以新的为准。这样某一次播放本身出了偏差（比如播放中途切换 Spotify 的淡入淡出）时，错误的偏移不会一直留着'
   ] },

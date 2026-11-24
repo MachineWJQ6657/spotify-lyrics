@@ -61,6 +61,14 @@ const phonemeSession = new PhonemeSession(localCtc, matchPhonemeInWorker)
 const lyricOffsetSession = new LyricOffsetSession(localCtc, analyzeJapaneseLines, undefined, readPronunciations)
 let activeAudioMode: 'reference' | 'vocal' | 'phoneme' | 'listen' | null = null
 let audioCaptureGrantUntil = 0
+/**
+ * The screen named as the video half of a system-audio capture (the page
+ * stops that half at once; Chromium grants no capture without one). Asking
+ * Windows for the screen list blocks this thread, 458 ms measured, and
+ * listening asks at every song, so the answer is kept until the displays
+ * change or a capture fails.
+ */
+let captureScreenSource: Electron.DesktopCapturerSource | null = null
 let localSpotify: LocalSpotifyService | null = null
 let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
@@ -360,8 +368,8 @@ function refreshTransparentHoverTracking() {
   if (transparentHoverTimer) clearTimeout(transparentHoverTimer)
   transparentHoverTimer = null
   if (quitting || !isShown(overlayWindow)) return
-  // Forwarded DOM movement gives immediate entry/leave. This independent
-  // native fallback also works when Chromium misses movement after a wake.
+  // The only source of hover over input-transparent lyrics: mouse movement is
+  // not forwarded to the window (see applyOverlayMouseIgnore).
   const tick = () => {
     transparentHoverTimer = null
     if (quitting || !isShown(overlayWindow)) return
@@ -554,9 +562,14 @@ function cancelOverlayGesture() {
 function applyOverlayMouseIgnore(value: boolean) {
   if (!overlayWindow || overlayWindow.isDestroyed() || overlayMouseIgnored === value) return
   overlayMouseIgnored = value
-  // Forward movement only, never clicks/wheels: hover can reveal the separate
-  // unlock toolbar while the desktop underneath receives normal interaction.
-  overlayWindow.setIgnoreMouseEvents(value, { forward: true })
+  // Never with `forward: true`. Forwarding makes Electron install a system-wide
+  // low-level mouse hook that runs on this process's main thread: every mouse
+  // movement on the whole desktop then waits for this thread, and each time it
+  // was busy for a moment (up to 469 ms measured at a song change) the cursor
+  // stuttered in every application, also with Syllable in the background.
+  // Hover over input-transparent lyrics is found by sampling the cursor
+  // (refreshTransparentHoverTracking), which needs no hook.
+  overlayWindow.setIgnoreMouseEvents(value)
   qaLog(`overlay mouse ignored=${value}; regions=${overlayHitRegions.length}`)
 }
 
@@ -596,6 +609,7 @@ function requestOverlayLayout(reason: string) {
 }
 
 function recoverOverlayDisplay(reason: string) {
+  captureScreenSource = null
   if (quitting || !overlayWindow || overlayWindow.isDestroyed()) return
   if (!overlayBoundsRestored || !overlayNativeRestored) {
     pendingDisplayRecoveryReason = reason
@@ -627,7 +641,7 @@ function recoverOverlayDisplay(reason: string) {
         await new Promise(resolve => setTimeout(resolve, 50))
         if (revision === displayRecoveryRevision && overlayShowRequested && !quitting && overlayWindow && !overlayWindow.isDestroyed()) {
           overlayWindow.showInactive()
-          overlayWindow.setIgnoreMouseEvents(overlayMouseIgnored, { forward: true })
+          overlayWindow.setIgnoreMouseEvents(overlayMouseIgnored)
           overlayRemapPending = false
         }
       }
@@ -788,9 +802,11 @@ function createWindows() {
       callback({}); return
     }
     audioCaptureGrantUntil = 0
+    if (captureScreenSource) { callback({ video: captureScreenSource, audio: 'loopback' }); return }
     void desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
       .then(sources => {
         const source = sources.find(item => item.display_id === String(secondaryDisplay().id)) ?? sources[0]
+        captureScreenSource = source ?? null
         callback(source ? { video: source, audio: 'loopback' } : {})
       }).catch(() => callback({}))
   })
@@ -1806,6 +1822,9 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
     broadcast(lastPlayback)
     return true
   })
+  ipcMain.on('audio-sync:capture-failed', event => {
+    if (event.sender === mainWindow?.webContents) captureScreenSource = null
+  })
   ipcMain.handle('audio-sync:clear', (event, mode?: string) => {
     if (event.sender !== mainWindow?.webContents) return false
     // The automatic listener must not tear down a manual mode that replaced it.
@@ -2179,6 +2198,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   screen.on('display-added', () => recoverOverlayDisplay('display-added'))
   screen.on('display-removed', () => recoverOverlayDisplay('display-removed'))
   screen.on('display-metrics-changed', (_event, _display, metrics) => {
+    captureScreenSource = null
     if (metrics.some(metric => ['bounds', 'workArea', 'scaleFactor', 'rotation'].includes(metric))) recoverOverlayDisplay(`display-metrics:${metrics.join(',')}`)
   })
   powerMonitor.on('resume', () => recoverOverlayDisplay('resume'))

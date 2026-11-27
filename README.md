@@ -4,7 +4,7 @@
 
 Syllable 是 Windows 上的 Spotify 桌面歌词客户端：打开 Spotify 桌面端播放歌曲，它自动找到同步歌词，在主窗口和一个置顶的透明悬浮窗里逐行显示，可以同时显示原文、中文翻译和日文罗马音。
 
-当前版本：0.4.84
+当前版本：0.4.85
 
 ## 功能
 
@@ -16,6 +16,7 @@ Syllable 是 Windows 上的 Spotify 桌面歌词客户端：打开 Spotify 桌�
 - **查歌词**：不用播放也能看歌词。输入歌名或艺人搜索，或者直接打开资料库里的歌。
 - **歌词资料库**：播放过的歌的歌词和校准结果保存在本机，可以导出备份、导入恢复。
 - **编辑与导入**：搜索候选歌词、逐行改词和校时；把 LRC 文件拖进窗口即可导入。
+- **粘贴翻译**：歌曲没有某种语言的翻译时（比如 English），在浏览器里找到翻译，复制后粘贴进来，程序把它逐行对到歌词上。日语歌的英文翻译按词义对行，分行和歌词不一样也可以。
 - **界面语言**：中文或 English，在「偏好设置」里切换，默认跟随系统。
 
 ## 使用
@@ -100,4 +101,4 @@ LRCLIB / 网易云音乐 / 酷狗 ─┐                                │
 git config core.hooksPath scripts/git-hooks
 ```
 
-歌词来自 LRCLIB、网易云音乐和酷狗，版权归各自的权利人。
+歌词来自 LRCLIB、网易云音乐和酷狗，版权归各自的权利人。`src/data/ja-en-lexicon.json` 由 [JMdict](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project)（EDRDG）生成，采用 CC BY-SA 4.0 许可，说明见 [src/data/README.md](src/data/README.md)。

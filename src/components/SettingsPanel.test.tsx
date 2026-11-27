@@ -43,6 +43,25 @@ describe('settings panel', () => {
     expect(idle).not.toContain('language-note')
   })
 
+  it('offers to bring a missing translation in from a web page, and to paste one again', () => {
+    const lines = [{ startMs: 0, text: 'a' }, { startMs: 1000, text: 'b' }]
+    const song = (...extra: LyricsDocument['tracks']) => ({ trackId: 't', tracks: [{ id: 'o', language: 'ja', label: '日本語', kind: 'original', source: 's', lines }, ...extra] } as LyricsDocument)
+    const render = (document: LyricsDocument, enabled: string[], paste = true) => renderToStaticMarkup(<LanguageSwitches document={document} enabled={enabled} onToggle={() => {}} onPaste={paste ? () => {} : undefined} onSearch={() => {}} />)
+    const missing = render(song(), ['ja', 'en'])
+    expect(missing).toContain('上网查找English翻译')
+    expect(missing).toContain('粘贴翻译')
+    // Switched off, or nowhere to paste (the search page): nothing is offered.
+    expect(render(song(), ['ja'])).not.toContain('language-actions')
+    expect(render(song(), ['ja', 'en'], false)).not.toContain('language-actions')
+    // Romaji is generated, not found on a page.
+    expect(render({ trackId: 't', tracks: [{ id: 'o', language: 'en', label: 'English', kind: 'original', source: 's', lines }] } as LyricsDocument, ['romaji'])).not.toContain('language-actions')
+    const pasted = render(song({ id: 'pasted-en', language: 'en', label: 'English', kind: 'translation', source: '粘贴的翻译', lines }), ['ja', 'en'])
+    expect(pasted).toContain('重新粘贴English翻译')
+    expect(pasted).not.toContain('上网查找')
+    // A translation that came from a provider or a file is not offered for replacement here.
+    expect(render(song({ id: 'z', language: 'en', label: 'English', kind: 'translation', source: 's', lines }), ['ja', 'en'])).not.toContain('language-actions')
+  })
+
   it('fills range tracks up to the thumb', () => {
     expect(rangeFill(52, 34, 88)).toBe('33.33333333333333%')
     expect(rangeFill(0, -30000, 30000)).toBe('50%')

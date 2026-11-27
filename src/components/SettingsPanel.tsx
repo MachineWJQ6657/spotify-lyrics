@@ -1,11 +1,13 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Check, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, Move, PanelRightClose, RefreshCw, RotateCcw } from 'lucide-react'
+import { Check, ClipboardPaste, ExternalLink, Eye, EyeOff, FileUp, Link2, LockKeyhole, Maximize2, Move, PanelRightClose, RefreshCw, RotateCcw, Search } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offset'
 import { decodeLyricFile, importLyricFiles, importMessage } from '../lib/lyrics-import'
 import { currentListenDecision, listeningTrackId, relistenCurrentSong, subscribeListening } from '../lib/listen-controller'
 import { listenStatus } from '../lib/listen-status'
 import { languageAvailability } from '../lib/language-availability'
+import { PASTE_LANGUAGES, PasteTranslation, searchTranslation } from './PasteTranslation'
+import { pastedTrackId } from '../lib/pasted-translation'
 import type { LyricsDocument } from '../types'
 import { t, tk } from '../lib/i18n'
 
@@ -33,15 +35,26 @@ function Range({ value, min, max, step = 1, onChange, label, disabled = false }:
  * nothing changes there for a language the song lacks (most songs have no
  * English translation), or for the language the song is in (always shown).
  */
-export function LanguageSwitches({ document, enabled, onToggle }: { document: LyricsDocument | null; enabled: string[]; onToggle(code: string): void }) {
+export function LanguageSwitches({ document, enabled, onToggle, onPaste, onSearch }: { document: LyricsDocument | null; enabled: string[]; onToggle(code: string): void; onPaste?(code: string): void; onSearch?(code: string): void }) {
   const states = languageOptions.map(item => ({ ...item, name: t(item.label), selected: enabled.includes(item.code), state: languageAvailability(document, item.code) }))
   const missing = states.filter(item => item.selected && item.state === 'missing').map(item => item.name)
+  // A translation the song lacks can be brought in from a web page.
+  const pasteable = onPaste ? states.filter(item => item.selected && item.state === 'missing' && item.code in PASTE_LANGUAGES) : []
+  // One that was pasted can be pasted again (another page, a better translation).
+  const pasted = onPaste ? states.filter(item => item.selected && item.state === 'switchable' && document?.tracks.some(track => track.id === pastedTrackId(item.code))) : []
   return <>
     <div className="language-grid">{states.map(item =>
       <button className={`${item.selected ? 'selected' : ''} ${item.state === 'missing' || item.state === 'original' ? item.state : ''}`.trim()} aria-pressed={item.selected} key={item.code}
         title={item.state === 'missing' ? t('这首歌没有这种语言的歌词：{language}', { language: item.name }) : item.state === 'original' ? t('这首歌的原文，始终显示') : undefined}
         onClick={() => onToggle(item.code)}><i />{item.name}{item.state === 'missing' ? <em>{t('这首没有')}</em> : item.state === 'original' ? <em>{t('原文')}</em> : item.selected && <Check size={14} />}</button>)}</div>
-    {missing.length > 0 && <p className="language-note">{t('这首歌没有这些语言的歌词：{languages}。有的歌会照常显示；也可以导入对应语言的 LRC 文件，或在「编辑」里添加翻译。', { languages: missing.join(' / ') })}</p>}
+    {missing.length > 0 && <p className="language-note">{t('这首歌没有这些语言的歌词：{languages}。有的歌会照常显示；翻译可以从网页上复制后粘贴进来，也可以导入对应语言的 LRC 文件。', { languages: missing.join(' / ') })}</p>}
+    {pasteable.map(item => <div className="language-actions" key={item.code}>
+      <button onClick={() => onSearch?.(item.code)}><Search size={13} />{t('上网查找{language}翻译', { language: item.name })}</button>
+      <button onClick={() => onPaste?.(item.code)}><ClipboardPaste size={13} />{t('粘贴翻译')}</button>
+    </div>)}
+    {pasted.map(item => <div className="language-actions" key={item.code}>
+      <button onClick={() => onPaste?.(item.code)}><ClipboardPaste size={13} />{t('重新粘贴{language}翻译', { language: item.name })}</button>
+    </div>)}
   </>
 }
 
@@ -54,6 +67,7 @@ const readTab = (): PanelTab => {
 
 export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCollapse?: () => void }) {
   const [tab, setTab] = useState<PanelTab>(readTab)
+  const [pasteLanguage, setPasteLanguage] = useState<string | null>(null)
   const selectTab = (value: PanelTab) => { setTab(value); try { localStorage.setItem(TAB_KEY, value) } catch { /* view-only preference */ } }
   // The overlay's control bar can ask for its settings ("悬浮窗设置").
   useEffect(() => {
@@ -139,7 +153,9 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
       {tab === 'lyrics' && <>
         <section>
           <label className="setting-label">{t('歌词语言')} <small>{t('可多选')}</small></label>
-          <LanguageSwitches document={activeLyrics} enabled={settings.enabledLanguages} onToggle={toggleLanguage} />
+          <LanguageSwitches document={activeLyrics} enabled={settings.enabledLanguages} onToggle={toggleLanguage}
+            onPaste={setPasteLanguage} onSearch={code => searchTranslation(code, activeLyrics?.track)} />
+          {pasteLanguage && <PasteTranslation language={pasteLanguage} onClose={() => setPasteLanguage(null)} />}
           <label className="switch-row"><div><strong>{t('日文罗马音')}</strong><span>{t('有人工版本时优先显示')}</span></div><Switch label={t('日文罗马音')} value={settings.romanization} onChange={romanization => patchSettings({ romanization })} /></label>
         </section>
         <section>

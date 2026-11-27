@@ -17,7 +17,7 @@ export const STORED_LABELS = [
   tk('交错双语拆分'), tk('内嵌双语拆分'), tk('内嵌罗马音拆分'),
   tk('重复词补全'), tk('缺行补全'), tk('自动补全'), tk('主歌词'),
   // Local lyrics
-  tk('本地'), tk('本地编辑'),
+  tk('本地'), tk('本地编辑'), tk('粘贴的翻译'),
   // Whole-song states shown in place of a source
   tk('纯音乐'), tk('歌词源暂时不可用'), tk('未找到歌词'), tk('正在搜索歌词…'), tk('未选择轨道')
 ] as const

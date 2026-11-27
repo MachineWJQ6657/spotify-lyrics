@@ -4,7 +4,7 @@ English · [中文](README.md)
 
 Syllable is a desktop lyrics client for Spotify on Windows. Play a song in the Spotify desktop app and Syllable finds synced lyrics for it, showing them line by line in its main window and in a transparent, always-on-top overlay. The original, a Chinese translation and Japanese romaji can be shown together.
 
-Current version: 0.4.85
+Current version: 0.4.86
 
 ## Features
 

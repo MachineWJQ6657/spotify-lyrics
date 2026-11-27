@@ -32,7 +32,10 @@ describe('settings panel', () => {
     expect(html).toContain('<em>这首没有</em>')
     expect(html).toContain('class="language-note">这首歌没有这些语言的歌词：English。')
     // Chinese is there and switched on: an ordinary switch.
-    expect(html).toContain('<button class="selected" aria-pressed="true"><i></i>中文<svg')
+    expect(html).toContain('<button class="selected" aria-pressed="true"><i></i><span>中文</span><svg')
+    // A name is one element that stays on one line, next to what is said about it.
+    expect(html).toContain('<i></i><span>日本語</span><em>原文</em>')
+    expect(html).toContain('<i></i><span>English</span><em>这首没有</em>')
     // English switched off: still marked, but nothing is said below.
     const off = renderToStaticMarkup(<LanguageSwitches document={lyrics} enabled={['ja', 'zh-Hans']} onToggle={() => {}} />)
     expect(off).toMatch(/class="missing" aria-pressed="false"/)

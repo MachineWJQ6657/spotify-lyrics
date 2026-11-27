@@ -8,6 +8,9 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.86', date: '2026-11-27', items: [
+    '「歌词语言」的开关改成一行一个：以前两个并排，旁边的开关标着「这首没有」时会把另一个挤窄，「日本語」被挤成两行。现在语言名在左、说明在右，不再换行。'
+  ] },
   { version: '0.4.85', date: '2026-11-27', items: [
     '可以粘贴翻译了：歌曲没有某种语言的翻译时（比如 English），在「歌词语言」里打开这个语言，点「上网查找」在浏览器里找到翻译，复制后点「粘贴翻译」贴进来，程序会把它逐行放到歌词上并保存。日语歌的英文翻译按词义对行，网页上的分行和歌词不一样也能对上。',
     '按词义对行使用开放词典 JMdict（EDRDG，CC BY-SA 4.0）。'

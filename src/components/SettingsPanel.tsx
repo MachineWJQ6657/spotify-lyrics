@@ -46,7 +46,7 @@ export function LanguageSwitches({ document, enabled, onToggle, onPaste, onSearc
     <div className="language-grid">{states.map(item =>
       <button className={`${item.selected ? 'selected' : ''} ${item.state === 'missing' || item.state === 'original' ? item.state : ''}`.trim()} aria-pressed={item.selected} key={item.code}
         title={item.state === 'missing' ? t('这首歌没有这种语言的歌词：{language}', { language: item.name }) : item.state === 'original' ? t('这首歌的原文，始终显示') : undefined}
-        onClick={() => onToggle(item.code)}><i />{item.name}{item.state === 'missing' ? <em>{t('这首没有')}</em> : item.state === 'original' ? <em>{t('原文')}</em> : item.selected && <Check size={14} />}</button>)}</div>
+        onClick={() => onToggle(item.code)}><i /><span>{item.name}</span>{item.state === 'missing' ? <em>{t('这首没有')}</em> : item.state === 'original' ? <em>{t('原文')}</em> : item.selected && <Check size={14} />}</button>)}</div>
     {missing.length > 0 && <p className="language-note">{t('这首歌没有这些语言的歌词：{languages}。有的歌会照常显示；翻译可以从网页上复制后粘贴进来，也可以导入对应语言的 LRC 文件。', { languages: missing.join(' / ') })}</p>}
     {pasteable.map(item => <div className="language-actions" key={item.code}>
       <button onClick={() => onSearch?.(item.code)}><Search size={13} />{t('上网查找{language}翻译', { language: item.name })}</button>

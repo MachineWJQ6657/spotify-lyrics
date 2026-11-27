@@ -1,5 +1,8 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.86': [
+    'The switches under "Lyric languages" are now one to a row. Side by side, a switch marked "not here" took room from the one next to it and its name broke into two lines. The name is now on the left and what is said about it on the right, on one line.'
+  ],
   '0.4.85': [
     'A translation can now be pasted in: when a song has no translation in a language (English, say), switch that language on under "Lyric languages", use "Search the web" to find a translation in your browser, copy it and use "Paste a translation"; the app puts it on the lyrics line by line and saves it. An English translation of a Japanese song is matched by meaning, so it fits even when the page breaks its lines differently from the lyrics.',
     'Matching by meaning uses the open dictionary JMdict (EDRDG, CC BY-SA 4.0).'

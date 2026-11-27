@@ -297,19 +297,22 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .section-heading span { color: var(--sy-text-3); font-size: 12px; }
 .section-heading svg { flex: none; color: var(--sy-text-3); }
 
-.language-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* One language to a row: a name and what the switch does for this song fit side by side at any panel width, in either interface language.
+   (Two columns of "1fr" are not equal columns: the wider label took the room and the other name broke in two.) */
+.language-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .language-grid button {
-  height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  height: 34px; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; text-align: left;
   border: 1px solid var(--sy-stroke); border-radius: 10px; background: var(--sy-surface-1); color: var(--sy-text-2); font-size: 13px;
   transition: background-color 90ms linear, border-color 90ms linear, color 90ms linear;
 }
 .language-grid button:hover { background: var(--sy-surface-2); color: var(--sy-text); }
 .language-grid button i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--sy-text-3); }
-.language-grid button svg { margin-left: auto; color: var(--sy-accent); }
+.language-grid button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.language-grid button svg { flex: none; margin-left: auto; color: var(--sy-accent); }
 .language-grid button.selected { border-color: rgba(30, 215, 96, .45); background: var(--sy-accent-soft); color: var(--sy-text); }
 .language-grid button.selected i { background: var(--sy-accent); }
 /* What the switch can do for the song on screen: its own language is always shown; a language it lacks has nothing to show. */
-.language-grid button em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--sy-text-3); white-space: nowrap; }
+.language-grid button em { flex: none; margin-left: auto; font-style: normal; font-size: 11px; color: var(--sy-text-3); white-space: nowrap; }
 .language-grid button.original { border-color: rgba(30, 215, 96, .45); background: var(--sy-accent-soft); color: var(--sy-text); }
 .language-grid button.original i { background: var(--sy-accent); }
 .language-grid button.missing { border-style: dashed; background: transparent; color: var(--sy-text-3); }

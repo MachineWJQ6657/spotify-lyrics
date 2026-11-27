@@ -308,6 +308,15 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .language-grid button svg { margin-left: auto; color: var(--sy-accent); }
 .language-grid button.selected { border-color: rgba(30, 215, 96, .45); background: var(--sy-accent-soft); color: var(--sy-text); }
 .language-grid button.selected i { background: var(--sy-accent); }
+/* What the switch can do for the song on screen: its own language is always shown; a language it lacks has nothing to show. */
+.language-grid button em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--sy-text-3); white-space: nowrap; }
+.language-grid button.original { border-color: rgba(30, 215, 96, .45); background: var(--sy-accent-soft); color: var(--sy-text); }
+.language-grid button.original i { background: var(--sy-accent); }
+.language-grid button.missing { border-style: dashed; background: transparent; color: var(--sy-text-3); }
+.language-grid button.missing i { background: transparent; box-shadow: inset 0 0 0 1px var(--sy-text-3); }
+.language-grid button.missing.selected { border-color: rgba(30, 215, 96, .4); }
+.language-grid button.missing.selected i { box-shadow: inset 0 0 0 1px var(--sy-accent); }
+.language-note { margin: 10px 0 0; color: var(--sy-text-3); font-size: 12px; line-height: 1.5; }
 
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; }
 .switch-row > div { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }

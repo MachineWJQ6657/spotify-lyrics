@@ -8,6 +8,9 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.84', date: '2026-11-27', items: [
+    '「歌词语言」里的开关现在会说明它对当前这首歌能做什么：这首歌没有的语言标为「这首没有」（比如大多数歌没有 English 翻译，以前点了像没反应），歌曲本身的语言标为「原文」（原文始终显示）。打开了但这首歌没有的语言，会在开关下面写明。'
+  ] },
   { version: '0.4.83', date: '2026-11-24', items: [
     '查找和匹配歌词改到单独的线程里进行。以前每首新歌匹配歌词时，程序会有 0.1–0.2 秒顾不上别的事（更新播放状态、响应悬浮窗上的鼠标都要等它）；现在主程序不再因此停顿。'
   ] },

@@ -5,6 +5,8 @@ import { displayLyricsOffset, listenedLyricsOffset } from '../lib/listened-offse
 import { decodeLyricFile, importLyricFiles, importMessage } from '../lib/lyrics-import'
 import { currentListenDecision, listeningTrackId, relistenCurrentSong, subscribeListening } from '../lib/listen-controller'
 import { listenStatus } from '../lib/listen-status'
+import { languageAvailability } from '../lib/language-availability'
+import type { LyricsDocument } from '../types'
 import { t, tk } from '../lib/i18n'
 
 const languageOptions = [
@@ -24,6 +26,23 @@ export function rangeFill(value: number, min: number, max: number) {
 function Range({ value, min, max, step = 1, onChange, label, disabled = false }: { value: number; min: number; max: number; step?: number; onChange(value: number): void; label: string; disabled?: boolean }) {
   return <input type="range" aria-label={label} disabled={disabled} min={min} max={max} step={step} value={value}
     style={{ '--fill': rangeFill(value, min, max) } as React.CSSProperties} onChange={event => onChange(Number(event.target.value))} />
+}
+
+/**
+ * The language switches. Each says what it can do for the song on screen:
+ * nothing changes there for a language the song lacks (most songs have no
+ * English translation), or for the language the song is in (always shown).
+ */
+export function LanguageSwitches({ document, enabled, onToggle }: { document: LyricsDocument | null; enabled: string[]; onToggle(code: string): void }) {
+  const states = languageOptions.map(item => ({ ...item, name: t(item.label), selected: enabled.includes(item.code), state: languageAvailability(document, item.code) }))
+  const missing = states.filter(item => item.selected && item.state === 'missing').map(item => item.name)
+  return <>
+    <div className="language-grid">{states.map(item =>
+      <button className={`${item.selected ? 'selected' : ''} ${item.state === 'missing' || item.state === 'original' ? item.state : ''}`.trim()} aria-pressed={item.selected} key={item.code}
+        title={item.state === 'missing' ? t('这首歌没有这种语言的歌词：{language}', { language: item.name }) : item.state === 'original' ? t('这首歌的原文，始终显示') : undefined}
+        onClick={() => onToggle(item.code)}><i />{item.name}{item.state === 'missing' ? <em>{t('这首没有')}</em> : item.state === 'original' ? <em>{t('原文')}</em> : item.selected && <Check size={14} />}</button>)}</div>
+    {missing.length > 0 && <p className="language-note">{t('这首歌没有这些语言的歌词：{languages}。有的歌会照常显示；也可以导入对应语言的 LRC 文件，或在「编辑」里添加翻译。', { languages: missing.join(' / ') })}</p>}
+  </>
 }
 
 export type PanelTab = 'lyrics' | 'timing' | 'overlay' | 'connect'
@@ -120,10 +139,7 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
       {tab === 'lyrics' && <>
         <section>
           <label className="setting-label">{t('歌词语言')} <small>{t('可多选')}</small></label>
-          <div className="language-grid">{languageOptions.map(item => {
-            const selected = settings.enabledLanguages.includes(item.code)
-            return <button className={selected ? 'selected' : ''} onClick={() => toggleLanguage(item.code)} key={item.code}><i />{t(item.label)}{selected && <Check size={14} />}</button>
-          })}</div>
+          <LanguageSwitches document={activeLyrics} enabled={settings.enabledLanguages} onToggle={toggleLanguage} />
           <label className="switch-row"><div><strong>{t('日文罗马音')}</strong><span>{t('有人工版本时优先显示')}</span></div><Switch label={t('日文罗马音')} value={settings.romanization} onChange={romanization => patchSettings({ romanization })} /></label>
         </section>
         <section>

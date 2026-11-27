@@ -1,5 +1,8 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.84': [
+    'The switches under "Lyric languages" now say what they can do for the song on screen: a language the song lacks is marked "not here" (most songs have no English translation, so switching it on looked like nothing happened), and the language the song is in is marked "original" (it is always shown). A language that is switched on but missing in this song is named below the switches.'
+  ],
   '0.4.83': [
     'Looking up and matching lyrics now happens on a thread of its own. Matching a new song used to keep the app from anything else for 0.1–0.2 s (playback updates and the reaction of desktop lyrics to the mouse waited for it); the app no longer pauses for it.'
   ],

@@ -166,6 +166,8 @@ const checks = {
   lyricsWorkerThread: lyricsProviderChunks.length === 1 && lyricsWorker.includes('fetchLyrics(...call.args)') && /chunks\/lyrics-provider-/.test(lyricsWorker)
     && mainOnly.includes('new Worker(new URL("./lyrics-worker.js", import.meta.url))') && !mainOnly.includes('async function fetchLyrics(')
     && mainOnly.includes('lyrics worker lost') && mainOnly.includes('const closeLyrics = stopLyricsWorker()'),
+  // 0.4.84, a language switch says what it can do for the song on screen: missing languages and the song's own language are marked
+  languageSwitchStates: renderer.includes('这首没有') && renderer.includes('language-note') && rendererCss.includes('.language-grid button.missing'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

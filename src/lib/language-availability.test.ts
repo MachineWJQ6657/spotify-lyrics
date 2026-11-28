@@ -27,6 +27,14 @@ describe('what a language switch can do for a song', () => {
     expect(languageAvailability(song(track('ja', 'original'), track('en', 'translation', ['', ' '])), 'en')).toBe('missing')
   })
 
+  it('makes a kana row for a Japanese song and for no other', () => {
+    expect(languageAvailability(japanese, 'kana')).toBe('switchable')
+    expect(languageAvailability(song(track('ja', 'original')), 'kana')).toBe('switchable')
+    expect(languageAvailability(song(track('en', 'original')), 'kana')).toBe('missing')
+    expect(languageAvailability(song(track('zh-Hans', 'original')), 'kana')).toBe('missing')
+    expect(languageAvailability(null, 'kana')).toBe('unknown')
+  })
+
   it('finds an imported English translation', () => {
     expect(languageAvailability(song(track('ja', 'original'), track('en', 'translation')), 'en')).toBe('switchable')
   })

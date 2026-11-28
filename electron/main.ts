@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SpotifyRateLimitError, SpotifyService } from './spotify'
 import { isLyricsSourceId, timedLyricsStats } from './lyrics-provider'
 import { fetchLyrics, lyricsThread, onLyricsWorkerReport, searchLyrics, stopLyricsWorker } from './lyrics-client'
-import { romanizeLines, analyzeJapaneseLines } from './romanizer'
+import { romanizeLines, kanaLines, analyzeJapaneseLines } from './romanizer'
 import type { LocalSpotifyService } from './local-spotify'
 import { WindowBoundsStore, type StoredWindowBounds } from './store'
 import { enforceWindowsToolWindow, type ToolWindowStyleResult } from './windows-tool-window'
@@ -885,7 +885,7 @@ function createWindows() {
       const checks = createQaChecks(qaView === 'overlay-controls'
         ? ['hover', 'leave', 'open', 'close', 'reopen']
         : qaView === 'overlay-drag-open-guard' ? ['guarded', 'deliberate']
-        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary', 'romaji'] : [])]
+        : qaView === 'audio-sync' ? ['panel', 'off', 'controls', 'visible', ...(headlessAudioQa ? ['hidden', 'controls-hidden', 'tray-absent', 'shortcuts-absent', 'headless-close', 'dictionary', 'romaji', 'kana'] : [])]
         : liveAudioQa ? ['enabled', 'captures', 'analyses', 'stopped', ...(qaView === 'audio-phoneme-live' ? ['diagnostic-only', 'hidden'] : [])]
         : qaView === 'performance' ? ['isolated', 'hidden-clock', 'fresh-samples', 'visible-clock', 'rehidden-clock', 'restore-projection', 'hidden-surfaces']
         : qaView === 'reopen' ? ['tray', 'close', 'overlay-preserved', 'reopen', 'repeat-close']
@@ -1072,6 +1072,9 @@ function createWindows() {
           const romaji = await romanizeLines(['待って', 'なっていく', '行った', 'ずっと']) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
           checks.record('romaji', JSON.stringify(romaji) === JSON.stringify(['matte', 'natte iku', 'itta', 'zutto']))
           qaLog(`packaged romaji: ${JSON.stringify(romaji)}`)
+          const kana = await kanaLines(['待って', '思い出を届ける', '君は Love']) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
+          checks.record('kana', JSON.stringify(kana) === JSON.stringify(['まって', 'おもいでをとどける', 'きみは Love'])) // i18n-ignore: QA automation (scripts and test lyrics), not interface text
+          qaLog(`packaged kana: ${JSON.stringify(kana)}`)
         }
       }
       if (liveAudioQa) {
@@ -1742,6 +1745,8 @@ async function executeSerializedPlaybackCommand(command: 'play' | 'pause' | 'nex
 // (all providers, completeness, language, translation) and warm its romaji,
 // so the song change shows them immediately. Needs the optional Web API
 // connection for the queue; without it nothing changes.
+/** A window asked for kana rows in this session (the "kana" lyric language is on). */
+let kanaRowWanted = false
 const nextTrackPrefetcher = new NextTrackPrefetcher({
   getQueue: () => spotify.getQueue(app.getLocale() || undefined),
   fetchLyrics: async track => fetchLyrics(track, await spotify.getAccessToken().catch(() => null)),
@@ -1754,7 +1759,8 @@ const nextTrackPrefetcher = new NextTrackPrefetcher({
     // too sparse; mirror that so complete NetEase romaji costs nothing.
     const provided = (result.additionalTracks ?? []).find(track => track.kind === 'romanization')
     const providedRows = parseLrc(provided?.syncedLyrics ?? '').length
-    if (provided && providedRows >= lines.length * .96) return
+    // The kana row comes from the same analysis: with it switched on, the next song's is made ahead as well.
+    if (provided && providedRows >= lines.length * .96) { if (kanaRowWanted) await kanaLines(lines); return }
     await romanizeLines(lines)
   },
   log: message => qaLog(message)
@@ -1943,6 +1949,7 @@ if (hasSingleInstanceLock && !quitRequest) app.whenReady().then(async () => {
   // The search page: songs by free text, from the catalogues the lookup already uses.
   ipcMain.handle('lyrics:find-songs', (_event, text: unknown) => searchSongs(text))
   ipcMain.handle('lyrics:romanize', (_event, lines: string[]) => romanizeLines(lines))
+  ipcMain.handle('lyrics:kana', (_event, lines: string[]) => { kanaRowWanted = true; return kanaLines(lines) })
   ipcMain.handle('lyrics:export', async (_event, filename: string, content: string) => {
     if (!mainWindow) return null
     // One save dialog for a lyric track (.lrc) and for the library backup (.json).

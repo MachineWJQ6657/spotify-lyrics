@@ -8,6 +8,11 @@ import { CHANGELOG_EN } from '../i18n/en/changelog'
 export interface ChangelogEntry { version: string; date: string; items: string[] }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '0.4.87', date: '2026-11-27', items: [
+    '新增假名行：在「歌词语言」里打开「假名」，日语歌词下面会多一行假名读音，汉字换成平假名，原来就是假名的部分和片假名词保持原样。主窗口、桌面歌词和「查歌词」页都会显示。',
+    '假名读音由程序按词典生成，和自动生成的罗马音用同一套读音；词典不认识的生僻字会保留汉字。整行本来就没有汉字的歌词不重复显示。',
+    '打开了「假名」或「Romaji」而歌曲不是日语时，开关上标「这首没有」，下面不再出现去网上找翻译的提示。'
+  ] },
   { version: '0.4.86', date: '2026-11-27', items: [
     '「歌词语言」的开关改成一行一个：以前两个并排，旁边的开关标着「这首没有」时会把另一个挤窄，「日本語」被挤成两行。现在语言名在左、说明在右，不再换行。'
   ] },

@@ -23,6 +23,8 @@ export function languageAvailability(document: LyricsDocument | null | undefined
   const inLanguage = document.tracks.filter(track => track.language === code && track.lines.some(line => line.text.trim()))
   if (inLanguage.some(track => track.kind !== 'original')) return 'switchable'
   if (inLanguage.length) return 'original'
+  // The kana row is made from a Japanese original whenever it is shown.
+  if (code === 'kana') return document.tracks.some(track => track.kind === 'original' && track.language === 'ja' && track.lines.length) ? 'switchable' : 'missing'
   // Romaji is generated a moment after a Japanese song's lyrics arrive.
   if (code === 'romaji' && document.tracks.some(track => track.kind === 'original' && track.language === 'ja')) return 'unknown'
   return 'missing'

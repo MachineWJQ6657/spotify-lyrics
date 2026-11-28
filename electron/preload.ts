@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('syllable', {
     search: (query: unknown) => ipcRenderer.invoke('lyrics:search', query),
     findSongs: (text: string) => ipcRenderer.invoke('lyrics:find-songs', text),
     romanize: (lines: string[]) => ipcRenderer.invoke('lyrics:romanize', lines),
+    kana: (lines: string[]) => ipcRenderer.invoke('lyrics:kana', lines),
     export: (filename: string, content: string) => ipcRenderer.invoke('lyrics:export', filename, content)
   },
   overlay: {

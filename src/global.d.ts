@@ -38,6 +38,8 @@ interface SyllableApi {
     /** Songs matching free text (the search page). */
     findSongs(text: string): Promise<{ hits: import('./lib/song-reader').SongHit[]; failed: Array<'lrclib' | 'netease'> }>
     romanize(lines: string[]): Promise<string[]>
+    /** Each line as it is written in kana (kanji replaced by their reading). */
+    kana?(lines: string[]): Promise<string[]>
     export(filename: string, content: string): Promise<string | null>
   }
   overlay: {

@@ -173,6 +173,9 @@ const checks = {
     && entries.some(entry => /[\\/]renderer[\\/]assets[\\/]ja-en-lexicon-.*\.js$/.test(entry)),
   // 0.4.86, language switches are one to a row and a name never breaks: the old two columns of "1fr" were not equal columns
   languageSwitchRows: /\.language-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(rendererCss) && /\.language-grid button span\s*\{[^}]*white-space:\s*nowrap/.test(rendererCss),
+  // 0.4.87, the kana row: the dictionary worker gives each line as written in kana from the same analysis as the romaji; the windows make the row for the view and never save it
+  kanaRow: main.includes('"lyrics:kana"') && main.includes('romanizeWords(tokens, toRomaji, true)') && main.includes('written = false') && main.includes('kanaRowWanted')
+    && renderer.includes('function useKanaRow(') && renderer.includes('function kanaTrack(') && rendererCss.includes('.lyric-secondary.kana') && rendererCss.includes('.overlay-secondary.kana'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

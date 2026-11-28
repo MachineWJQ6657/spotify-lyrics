@@ -2,6 +2,7 @@
 export const SETTINGS: Record<string, string> = {
   // Settings panel
   '日本語': 'Japanese',
+  '假名': 'Kana',
   '中文': 'Chinese',
   '正在浏览器中等待授权…': 'Waiting for authorization in the browser…',
   '已连接 Spotify': 'Connected to Spotify',

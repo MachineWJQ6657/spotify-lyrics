@@ -4,13 +4,13 @@ English · [中文](README.md)
 
 Syllable is a desktop lyrics client for Spotify on Windows. Play a song in the Spotify desktop app and Syllable finds synced lyrics for it, showing them line by line in its main window and in a transparent, always-on-top overlay. The original, a Chinese translation and Japanese romaji can be shown together.
 
-Current version: 0.4.86
+Current version: 0.4.87
 
 ## Features
 
 - **Works out of the box**: reads the playback state of the Spotify desktop app on Windows directly, with no developer account. Connecting the Spotify Web API is optional.
 - **Automatic lyric matching**: asks LRCLIB, NetEase Cloud Music and Kugou at once and picks the best match by title, artist, length and the words themselves. The source menu next to the song title switches sources by hand.
-- **Several lyric tracks**: original, Chinese translation and romaji (readings for Japanese lyrics are generated with Kuromoji) side by side, with the translation aligned to each line of the original.
+- **Several lyric tracks**: original, Chinese translation, romaji and kana (readings for Japanese lyrics are generated with Kuromoji; the kana row writes kanji in hiragana) side by side, with the translation aligned to each line of the original.
 - **Desktop lyrics**: a transparent, always-on-top overlay you can drag and resize. When locked, clicks pass through it. Font size, weight, colour, outline, background and alignment are adjustable; it can preview the next line and hide while paused.
 - **Automatic listening calibration**: for Japanese, Chinese and English songs the app listens to a few passages and shifts the lyrics earlier or later as a whole (needs a local recognition model, which is not part of this repository).
 - **Find lyrics**: read lyrics without playing anything. Search by title or artist, or open a song from the library.

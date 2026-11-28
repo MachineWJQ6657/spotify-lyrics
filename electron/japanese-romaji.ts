@@ -5,15 +5,22 @@ import type { JapaneseWord } from './romanizer'
  * kanji run plus its bracket is replaced by the kana before dictionary
  * analysis. Self-contained: serialized into the dictionary worker. */
 export function applyFuriganaReadings(line: string): string {
-  return line.replace(/[\p{Script=Han}々]+[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー]+)[)）]/gu, '$1')
+  // Some lyric files write common kanji with the look-alike radical characters
+  // (⾒ U+2F92 for 見, ⽇ for 日), which no dictionary knows: put the kanji back.
+  return line.replace(/[\u2e80-\u2fdf]/g, character => character.normalize('NFKC')).replace(/[\p{Script=Han}々]+[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー]+)[)）]/gu, '$1')
 }
 
 /** Keep readings together until conjugations have been joined. Romanizing
  * 待っ and て separately loses the pending small tsu before they can combine.
  * This function is also serialized into the dictionary worker, so it must
  * have no runtime dependencies other than the explicitly supplied converter
- * (every table below lives inside the function body for that reason). */
-export function romanizeJapaneseWords(tokens: JapaneseWord[], convert: (reading: string) => string): string {
+ * (every table below lives inside the function body for that reason).
+ *
+ * With `written` the line comes back as it is written in kana instead: every
+ * word with kanji is replaced by its reading in hiragana, everything else
+ * (kana, spaces, Latin text, punctuation) stays as it stands. Both outputs use
+ * the same reading corrections, so the kana row and the romaji row agree. */
+export function romanizeJapaneseWords(tokens: JapaneseWord[], convert: (reading: string) => string, written = false): string {
   // IPADIC splits number+counter words and a few lyric words into pieces whose
   // isolated readings are wrong (一人 → イチ+ニン, 精々 → キヨシ+々). Checked
   // against NetEase's human romaji across a real 84-song playlist.
@@ -54,11 +61,48 @@ export function romanizeJapaneseWords(tokens: JapaneseWord[], convert: (reading:
   }
   // Reading (not pronunciation) keeps kanji long vowels as written: 太陽 is
   // "taiyou", not "taiyoo". Particles still follow pronunciation (は→wa, へ→e).
-  const readingOf = (token: JapaneseWord, previous: JapaneseWord | undefined, next: JapaneseWord | undefined) => {
+  // Readings the dictionary gets wrong in lyrics, whatever the output.
+  const correctedReading = (token: JapaneseWord, previous: JapaneseWord | undefined, next: JapaneseWord | undefined) => {
     if (token.surface_form === '風' && previous && demonstratives.has(previous.surface_form)) return 'フウ'
-    // 何だ/何で/何の are sung "nan da", "nan de", "nan no".
-    if (token.surface_form === '何' && /^[ダデノド]/.test(next?.reading ?? next?.pronunciation ?? '')) return 'ナン'
+    // 何だ/何で/何の/何て are sung "nan da", "nan de", "nan no", "nan te".
+    if (token.surface_form === '何' && /^[ダデノドテ]/.test(next?.reading ?? next?.pronunciation ?? '')) return 'ナン'
     if (token.pos === '名詞' && standalone[token.surface_form]) return standalone[token.surface_form]
+    return undefined
+  }
+  if (written) {
+    const kanji = /[\p{Script=Han}々]/u
+    const hiragana = (reading: string) => reading.replace(/[ァ-ヶ]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60))
+    let line = ''
+    let previousReading = ''
+    for (let index = 0; index < merged.length; index += 1) {
+      const token = merged[index]
+      const surface = token.surface_form
+      if (surface === '々') {
+        // Repeats a preceding single kanji; after anything else its reading is unknown and the mark stays.
+        line += previousReading && /^\p{Script=Han}$/u.test(merged[index - 1]?.surface_form ?? '') ? previousReading : surface
+        continue
+      }
+      previousReading = ''
+      // Kana is already kana: は stays は (not "wa"), カタカナ stays as the lyric has it.
+      if (!kanji.test(surface)) { line += surface; continue }
+      const reading = correctedReading(token, merged[index - 1], merged[index + 1]) ?? token.reading ?? token.pronunciation ?? ''
+      // A word the dictionary does not know keeps its kanji: better than a row with a hole in it.
+      if (!/^[\p{Script=Katakana}\p{Script=Hiragana}ー]+$/u.test(reading)) { line += surface; continue }
+      previousReading = hiragana(reading)
+      // Only the kanji of a word are replaced: バス停 is バスてい, and okurigana stays as the lyric writes it.
+      // The kana of the word are found in its reading, and what lies between them is the reading of the kanji.
+      const parts = surface.match(/[\p{Script=Han}々]+|[^\p{Script=Han}々]+/gu) ?? [surface]
+      const spelled = parts.every(part => kanji.test(part) || /^[\p{Script=Katakana}\p{Script=Hiragana}ー]+$/u.test(part))
+        ? new RegExp(`^${parts.map(part => kanji.test(part) ? '(.+)' : hiragana(part)).join('')}$`, 'u').exec(previousReading) : null
+      if (!spelled) { line += previousReading; continue }
+      let group = 0
+      line += parts.map(part => kanji.test(part) ? spelled[group += 1] : part).join('')
+    }
+    return line.trim()
+  }
+  const readingOf = (token: JapaneseWord, previous: JapaneseWord | undefined, next: JapaneseWord | undefined) => {
+    const corrected = correctedReading(token, previous, next)
+    if (corrected) return corrected
     if (token.pos === '助詞') return token.pronunciation || token.reading || token.surface_form
     const reading = token.reading || token.pronunciation
     // A word without a dictionary reading that still contains kanji would print

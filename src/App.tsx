@@ -16,6 +16,7 @@ import { InfoView } from './components/InfoView'
 import { useAppStore } from './store/useAppStore'
 import { usePlaybackConnection } from './hooks/usePlayback'
 import { useWindowSync } from './hooks/useWindowSync'
+import { useKanaRow } from './hooks/useKanaRow'
 import { decodeLyricFile, importLyricFiles, importMessage } from './lib/lyrics-import'
 import { hasKana, scriptPresentation } from './lib/script'
 import { BrandMark } from './components/BrandMark'
@@ -61,6 +62,8 @@ export function App() {
   const { playback, lyrics, settings, demoMode, localConnected, editorOpen, setEditorOpen, setLyrics, patchSettings, retryCurrentLyrics, setLyricsSource, sessionCalibration } = useAppStore()
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const lyricOffset = displayLyricsOffset(activeLyrics, demoMode ? settings.offsetMs : 0, settings.listenOffset !== false)
+  // What the lyric list shows: the document plus the kana row made for the view (hooks/useKanaRow.ts). Everything that edits or saves keeps using the document itself.
+  const shownLyrics = useKanaRow(activeLyrics, settings.enabledLanguages)
   const manual = currentSessionCalibration(sessionCalibration, playback, activeLyrics)
   const [view, setView] = useState<AppView>('now')
   // A dot on the help page until the list of recent updates there has been opened.
@@ -190,7 +193,7 @@ export function App() {
         </div>
         <div className={`lyric-card ${settings.mainAlignment === 'center' ? 'lyrics-centered' : ''}`}>
           <div className={`card-watermark tone-${status.tone}`} title={status.title}>{status.tone === 'listening' ? <span className="listen-pulse" /> : <Sparkles size={14} />} {status.label}</div>
-        <ClockedLyricsStage playback={playback} document={activeLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics}
+        <ClockedLyricsStage playback={playback} document={shownLyrics} offsetMs={lyricOffset} sessionCalibration={sessionCalibration} enabled={settings.enabledLanguages} romanization={settings.romanization} onRetry={retryCurrentLyrics}
           onSeekLine={seekLine} seekLabel={seekLabel} onSearch={openEditor} />
         </div>
         </>}

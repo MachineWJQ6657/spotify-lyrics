@@ -12,7 +12,7 @@ import type { LyricsDocument } from '../types'
 import { t, tk } from '../lib/i18n'
 
 const languageOptions = [
-  { code: 'ja', label: tk('日本語') }, { code: 'romaji', label: 'Romaji' },
+  { code: 'ja', label: tk('日本語') }, { code: 'kana', label: tk('假名') }, { code: 'romaji', label: 'Romaji' },
   { code: 'zh-Hans', label: tk('中文') }, { code: 'en', label: 'English' }
 ]
 
@@ -35,9 +35,12 @@ function Range({ value, min, max, step = 1, onChange, label, disabled = false }:
  * nothing changes there for a language the song lacks (most songs have no
  * English translation), or for the language the song is in (always shown).
  */
+const READING_LANGUAGES = new Set(['kana', 'romaji'])
+
 export function LanguageSwitches({ document, enabled, onToggle, onPaste, onSearch }: { document: LyricsDocument | null; enabled: string[]; onToggle(code: string): void; onPaste?(code: string): void; onSearch?(code: string): void }) {
   const states = languageOptions.map(item => ({ ...item, name: t(item.label), selected: enabled.includes(item.code), state: languageAvailability(document, item.code) }))
-  const missing = states.filter(item => item.selected && item.state === 'missing').map(item => item.name)
+  // Named below the switches: translations the song lacks. Readings (kana, romaji) exist for Japanese songs only and nothing can be done about them elsewhere, so the mark on the switch says enough.
+  const missing = states.filter(item => item.selected && item.state === 'missing' && !READING_LANGUAGES.has(item.code)).map(item => item.name)
   // A translation the song lacks can be brought in from a web page.
   const pasteable = onPaste ? states.filter(item => item.selected && item.state === 'missing' && item.code in PASTE_LANGUAGES) : []
   // One that was pasted can be pasted again (another page, a better translation).

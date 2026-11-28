@@ -1,5 +1,10 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.87': [
+    'New: a kana row. Switch on "Kana" under "Lyric languages" and Japanese lyrics get a row of kana below each line: kanji become hiragana, and what was already kana, katakana words included, stays as written. It shows in the main window, in desktop lyrics and on the "Find lyrics" page.',
+    'The readings are made by the app from a dictionary, the same ones the generated romaji uses; a rare character the dictionary does not know keeps its kanji. A line without any kanji is not repeated.',
+    'With "Kana" or "Romaji" on and a song that is not Japanese, the switch is marked "not here" and the note below no longer suggests looking for a translation on the web.'
+  ],
   '0.4.86': [
     'The switches under "Lyric languages" are now one to a row. Side by side, a switch marked "not here" took room from the one next to it and its name broke into two lines. The name is now on the left and what is said about it on the right, on one line.'
   ],

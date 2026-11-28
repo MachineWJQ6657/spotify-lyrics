@@ -9,6 +9,7 @@ import { hasKana, scriptPresentation } from '../lib/script'
 import { LYRICS_SOURCES, lyricsSourceIdOf } from '../lib/lyrics-source'
 import { localizeLabel, sourceLabel } from '../lib/source-label'
 import { t, tk } from '../lib/i18n'
+import { useKanaRow } from '../hooks/useKanaRow'
 
 const CATALOGUE_LABEL: Record<string, string> = { lrclib: 'LRCLIB', netease: tk('网易云音乐') }
 /** Songs of the library offered before and while typing. */
@@ -44,6 +45,7 @@ function Reader() {
   const savedId = reading.origin === 'library' ? reading.document?.trackId : undefined
   const saved = useAppStore(state => savedId ? state.library[savedId] : undefined)
   const document = saved ?? reading.document
+  const shownDocument = useKanaRow(document ?? null, settings.enabledLanguages)
   const track = document?.track
   const name = track?.name ?? reading.hit?.name ?? ''
   const artist = track?.artist ?? reading.hit?.artist ?? ''
@@ -100,7 +102,7 @@ function Reader() {
       {reading.status === 'loading' ? <div className="empty-lyrics"><span className="spinner" /><p>{t('正在查找歌词…')}</p></div>
         : reading.status === 'missing' ? <div className="empty-lyrics"><AlertCircle size={24} /><h3>{t('没有找到这首歌的歌词')}</h3><p>{t('几个歌词源都没有收录。可以返回换一个版本，或者换个写法再搜。')}</p><div className="empty-actions"><button className="quiet" onClick={close}><ArrowLeft size={14} />{t('返回结果')}</button></div></div>
         : reading.status === 'failed' ? <div className="empty-lyrics"><AlertCircle size={24} /><h3>{t('歌词源暂时没有响应')}</h3><p>{t('网络或歌词源出了点问题。')}</p><div className="empty-actions">{reading.hit && <button onClick={() => void openHit(reading.hit!, true)}><RefreshCw size={14} />{t('重试')}</button>}<button className="quiet" onClick={close}><ArrowLeft size={14} />{t('返回结果')}</button></div></div>
-        : <LyricsStage key={reading.key} reading document={document ?? null} positionMs={-1} enabled={settings.enabledLanguages} romanization={settings.romanization} />}
+        : <LyricsStage key={reading.key} reading document={shownDocument} positionMs={-1} enabled={settings.enabledLanguages} romanization={settings.romanization} />}
     </div>
   </>
 }

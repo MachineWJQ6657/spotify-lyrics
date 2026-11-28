@@ -22,6 +22,8 @@ rm -rf "$P"; cp -r "$ROOT/.qa-test-profile" "$P"; rm -f "$P/lockfile" "$P/error.
 (nohup $EXE "--user-data-dir=$P" --remote-debugging-port=9333 --disable-features=CalculateNativeWinOcclusion $MODE "--syllable-qa-log=$ROOT/.qa-scratch/smoke.log" > "$ROOT/.qa-scratch/smoke.out" 2>&1 &)
 sleep 12
 node scripts/qa/cdp.mjs eval "=index.html" "JSON.stringify({ v: document.querySelector('.version')?.textContent, screenX, badge: document.querySelector('.source-badge em')?.textContent, groups: document.querySelectorAll('.lyric-group').length })"
+# The packaged dictionary worker: one line read into kana (expected: えきまであるいていく).
+node scripts/qa/cdp.mjs eval "=index.html" "window.syllable.lyrics.kana(['駅まで歩いて行く']).then(rows => 'packaged kana: ' + rows[0]).catch(error => 'packaged kana FAILED: ' + error.message)"
 node scripts/qa/ui-sweep.mjs 2>&1 | tail -1
 node scripts/qa/cdp.mjs eval "=index.html" "window.syllable.overlay.show()" > /dev/null; sleep 2.5
 grep -E "overlay (shown|show failed)" "$ROOT/.qa-scratch/smoke.log" | tail -1 | cut -c1-120

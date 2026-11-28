@@ -214,6 +214,9 @@ body, button, input, textarea, select { font-family: 'Segoe UI Variable Text', '
 .lyric-secondary.romanization { color: rgba(255, 255, 255, .62); font-size: 15px; letter-spacing: .01em; }
 .lyric-group.active .lyric-secondary.translation { color: rgba(255, 255, 255, .88); }
 .lyric-group.active .lyric-secondary.romanization { color: var(--sy-accent-text); }
+/* The kana row is a reading like romaji and takes its colours; it is set in the lyric's own Japanese face at the size of a translation row. */
+.lyric-secondary.kana { color: rgba(255, 255, 255, .62); }
+.lyric-group.active .lyric-secondary.kana { color: var(--sy-accent-text); }
 
 /* Lyric text can be selected (the row menu copies the selection); the rest of the window cannot. */
 .lyrics-viewport .lyric-primary, .lyrics-viewport .lyric-secondary { user-select: text; }

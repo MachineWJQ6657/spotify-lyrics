@@ -8,6 +8,7 @@ import { glideScroll } from '../lib/glide-scroll'
 import { findLineMatches, nearestMatch, stepMatch } from '../lib/find-lyrics'
 import { rowText, songText } from '../lib/copy-lyrics'
 import { t } from '../lib/i18n'
+import { languagePresentation } from '../lib/script'
 
 interface Props { document: LyricsDocument | null; positionMs: number; enabled: string[]; romanization: boolean; onRetry?: () => void;
   onHeardLine?: (originalTrackId: string, lineIndex: number) => void; onClearCalibration?: () => void; calibrationLabel?: string
@@ -46,8 +47,8 @@ const LineGroup = memo(function LineGroup({ line, language, index, active, past,
     } : undefined}>
     <div lang={language === 'ja' ? 'ja' : language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`lyric-primary ${active ? 'karaoke-line' : ''} ${baseClass}`}>{line.words?.length ? line.words.map((word, wordIndex) => <span className={positionMs >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line.text || <Music2 size={22} />}</div>
     {secondary.map(({ track, line: sibling }) => {
-      const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
-      return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`lyric-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling.text}</div>
+      const shown = languagePresentation(track.language)
+      return <div lang={shown.lang} className={`lyric-secondary ${track.kind} ${shown.className}`} key={track.id}>{sibling.text}</div>
     })}
     {seekable && seekLabel && <span className="lyric-seek-hint" aria-hidden="true"><Play size={10} fill="currentColor" />{seekLabel}</span>}
     {onHeard && <button className="lyric-heard-button" aria-label={t('将第 {line} 行设为现在开始', { line: index + 1 })} onClick={() => onHeard(index)}>{t('这句现在开始')}</button>}

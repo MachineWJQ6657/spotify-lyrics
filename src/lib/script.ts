@@ -12,7 +12,8 @@ export function scriptPresentation(value: string, context = '', knownLanguage?: 
 }
 
 export function languagePresentation(language: string) {
-  if (language === 'ja') return { className: 'japanese-grid', lang: 'ja' }
+  // The kana row is Japanese text too.
+  if (language === 'ja' || language === 'kana') return { className: 'japanese-grid', lang: 'ja' }
   if (language === 'zh-Hans') return { className: 'chinese-text', lang: 'zh-CN' }
   return { className: 'latin-text', lang: 'en' }
 }

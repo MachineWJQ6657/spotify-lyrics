@@ -80,6 +80,8 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
         await analyzer.init()
         const toRomaji = workerData.mode === 'romanize' ? require(workerData.wanakanaPath).toRomaji : undefined
         const output = []
+        // The same analysis also gives each line as it is written in kana.
+        const kana = []
         for (const line of workerData.lines) {
           // Only romanization reads the provider's printed furigana; analysis
           // keeps the original surface text for position-sensitive consumers.
@@ -95,8 +97,9 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
             continue
           }
           output.push(romanizeWords(tokens, toRomaji))
+          kana.push(romanizeWords(tokens, toRomaji, true))
         }
-        parentPort.postMessage({ output })
+        parentPort.postMessage(workerData.mode === 'romanize' ? { output, kana } : { output })
       })().catch(error => parentPort.postMessage({ error: error && error.message ? error.message : String(error) }))
     `
     const worker = new Worker(workerSource, {
@@ -150,7 +153,11 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
     }
     finishActive = finish
     const timer = setTimeout(() => finish(undefined, new Error(t('日文分析超时'))), 20_000)
-    worker.once('message', (message: { output?: JobOutput[M]; error?: string } | null) => {
+    worker.once('message', (message: { output?: JobOutput[M]; kana?: unknown; error?: string } | null) => {
+      // Only a complete one-to-one answer is remembered: a short one would put readings on the wrong lines.
+      if (message && Array.isArray(message.kana) && message.kana.length === input.length) {
+        input.forEach((line, index) => { const value = (message.kana as unknown[])[index]; if (typeof value === 'string') rememberKana(line, value) })
+      }
       if (message && typeof message === 'object' && Array.isArray(message.output)) finish(message.output)
       else finish(undefined, new Error(message?.error || t('日文分析失败')))
     })
@@ -173,6 +180,14 @@ function analyze<M extends JobMode>(mode: M, lines: string[], options?: { signal
 // romaji instant at the song change. Bounded LRU; failures are never cached.
 const ROMANIZED_LINE_LIMIT = 4000
 const romanizedLines = new Map<string, string>()
+
+const kanaOfLines = new Map<string, string>()
+
+function rememberKana(line: string, value: string) {
+  kanaOfLines.delete(line)
+  kanaOfLines.set(line, value)
+  if (kanaOfLines.size > ROMANIZED_LINE_LIMIT) kanaOfLines.delete(kanaOfLines.keys().next().value!)
+}
 
 function rememberRomanized(line: string, value: string) {
   romanizedLines.delete(line)
@@ -201,8 +216,27 @@ export function romanizeLines(lines: string[]): Promise<string[]> {
   return task
 }
 
+/**
+ * Each line as it is written in kana: words with kanji become their reading in
+ * hiragana, the rest stays (see romanizeJapaneseWords). It comes out of the
+ * same job as the romaji, so a song that had its romaji made in this session
+ * needs no second dictionary, and the other way round.
+ */
+export function kanaLines(lines: string[]): Promise<string[]> {
+  const remembered = (from: string[]) => from.every(line => kanaOfLines.has(line)) ? from.map(line => kanaOfLines.get(line)!) : undefined
+  const ready = remembered(lines)
+  if (ready) return Promise.resolve(ready)
+  const snapshot = [...lines]
+  return analyze('romanize', snapshot).then(output => {
+    if (output.length === snapshot.length) snapshot.forEach((line, index) => rememberRomanized(line, output[index] ?? ''))
+    const made = remembered(snapshot)
+    if (!made) throw new Error(t('日文分析失败'))
+    return made
+  })
+}
+
 /** Test hook: forget cached readings. */
-export function clearRomanizedLineCache() { romanizedLines.clear() }
+export function clearRomanizedLineCache() { romanizedLines.clear(); kanaOfLines.clear() }
 
 /** Word order is authoritative; Kuromoji's word_position is deliberately omitted. */
 export function analyzeJapaneseLines(lines: string[], options?: { signal?: AbortSignal }): Promise<JapaneseWord[][]> {

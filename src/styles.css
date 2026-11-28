@@ -167,6 +167,8 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell) { min-width
 .overlay-shell .overlay-secondary { width: fit-content; max-width: 100%; color: #fff; font-family: inherit; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
 .overlay-shell.center .overlay-primary, .overlay-shell.center .overlay-secondary { margin-left: auto; margin-right: auto; }
 .overlay-shell .overlay-secondary.romanization { color: #b8f5cc; font-size: 16px; }
+/* The kana row: a reading, in the colour of the romaji row. */
+.overlay-shell .overlay-secondary.kana { color: #b8f5cc; }
 .overlay-shell.effect-shadow .overlay-primary { text-shadow: 0 3px 12px rgba(0,0,0,.92), 0 1px 2px rgba(0,0,0,.95); }
 /* Small secondary lines need a solid local edge, not a broad blurry halo.
    Paint the outline behind the fill so it cannot eat thin CJK/Latin stems.

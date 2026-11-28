@@ -93,5 +93,53 @@ describe('Japanese readings composed before romanization', () => {
   it('works as a serialized worker function without its module scope', () => {
     const isolated = new Function(`return (${romanizeJapaneseWords.toString()})`)() as typeof romanizeJapaneseWords
     expect(isolated([word('行っ', 'イッ', '動詞'), word('た', 'タ', '助動詞')], toRomaji)).toBe('itta')
+    expect(isolated([read('行っ', 'イッ', 'イッ', '動詞'), read('た', 'タ', 'タ', '助動詞')], toRomaji, true)).toBe('いった')
+  })
+})
+
+describe('a line as it is written in kana', () => {
+  const read = (surface_form: string, reading?: string, pronunciation = reading, pos = '名詞'): JapaneseWord => ({ surface_form, reading, pronunciation, pos })
+  const kana = (tokens: JapaneseWord[]) => romanizeJapaneseWords(tokens, toRomaji, true)
+  it('replaces words with kanji by their reading and leaves kana, spaces and Latin text as they stand', () => {
+    expect(kana([read('秋', 'アキ'), read('に', 'ニ', 'ニ', '助詞'), read('なっ', 'ナッ', 'ナッ', '動詞'), read('て', 'テ', 'テ', '助詞'),
+      read(' '), read('冬', 'フユ'), read('に', 'ニ', 'ニ', '助詞'), read('なっ', 'ナッ', 'ナッ', '動詞'), read('て', 'テ', 'テ', '助詞')])).toBe('あきになって ふゆになって')
+    expect(kana([read('君', 'キミ'), read('は', 'ハ', 'ワ', '助詞'), read(' '), read('Love'), read('。', '。', '。', '記号')])).toBe('きみは Love。')
+  })
+  it('writes particles and long vowels as they are written, not as they are spoken', () => {
+    // は stays は; 太陽 is たいよう (the romaji row says "wa" and "taiyou").
+    expect(kana([read('太陽', 'タイヨウ', 'タイヨー'), read('は', 'ハ', 'ワ', '助詞'), read('実は', 'ジツハ', 'ジツワ', '接続詞')])).toBe('たいようはじつは')
+    expect(kana([read('東京', 'トウキョウ', 'トーキョー'), read('へ', 'ヘ', 'エ', '助詞')])).toBe('とうきょうへ')
+  })
+  it('keeps katakana words in katakana and replaces only the kanji of a word', () => {
+    expect(kana([read('パーティー', 'パーティー'), read('の', 'ノ', 'ノ', '助詞'), read('思い出', 'オモイデ')])).toBe('パーティーのおもいで')
+    // The kana inside a word stay as the lyric writes them.
+    expect(kana([read('バス停', 'バステイ')])).toBe('バスてい')
+    expect(kana([read('ド真ん中', 'ドマンナカ')])).toBe('ドまんなか')
+    expect(kana([read('言い合い', 'イイアイ')])).toBe('いいあい')
+    // A reading that does not spell the word's own kana is used whole.
+    expect(kana([read('今日は', 'コンニチワ')])).toBe('こんにちわ')
+  })
+  it('reads look-alike radical characters as the kanji they stand for', () => {
+    expect(applyFuriganaReadings('まだ\u2f92ていない景\u2f8a')).toBe('まだ見ていない景色')
+  })
+  it('uses the same corrected readings as the romaji row', () => {
+    expect(kana([read('一', 'イチ'), read('人', 'ニン'), read('で', 'デ', 'デ', '助詞')])).toBe('ひとりで')
+    expect(kana([read('春風', 'シュンプウ', 'シュンプー')])).toBe('はるかぜ')
+    expect(kana([read('獣', 'シシ'), read('の', 'ノ', 'ノ', '助詞'), read('他', 'タ')])).toBe('けもののほか')
+    expect(kana([read('何', 'ナニ'), read('で', 'デ', 'デ', '助詞')])).toBe('なんで')
+    expect(kana([read('何', 'ナニ'), read('て', 'テ', 'テ', '助詞'), read('こと', 'コト')])).toBe('なんてこと')
+    expect(kana([read('何', 'ナニ'), read('も', 'モ', 'モ', '助詞')])).toBe('なにも')
+    expect(kana([read('精', 'キヨシ'), read('々')])).toBe('せいぜい')
+  })
+  it('repeats the reading of a single kanji for the iteration mark', () => {
+    expect(kana([read('日', 'ヒ'), read('々')])).toBe('ひひ')
+    expect(kana([read('時々', 'トキドキ')])).toBe('ときどき')
+  })
+  it('keeps the kanji of a word the dictionary cannot read', () => {
+    expect(kana([read('騒'), read('めき', 'メキ', 'メキ', '動詞')])).toBe('騒めき')
+    expect(kana([{ surface_form: '黄昏', reading: '*', pos: '名詞' }, read('に', 'ニ', 'ニ', '助詞')])).toBe('黄昏に')
+  })
+  it('gives nothing for an empty line', () => {
+    expect(kana([])).toBe('')
   })
 })

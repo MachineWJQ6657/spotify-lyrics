@@ -46,6 +46,21 @@ describe('settings panel', () => {
     expect(idle).not.toContain('language-note')
   })
 
+  it('has a kana switch, and does not send the listener looking for readings a song cannot have', () => {
+    const lines = [{ startMs: 0, text: 'a' }, { startMs: 1000, text: 'b' }]
+    const japanese = { trackId: 't', tracks: [{ id: 'o', language: 'ja', label: '日本語', kind: 'original', source: 's', lines }] } as LyricsDocument
+    const on = renderToStaticMarkup(<LanguageSwitches document={japanese} enabled={['ja', 'kana']} onToggle={() => {}} onPaste={() => {}} />)
+    expect(on).toContain('<button class="selected" aria-pressed="true"><i></i><span>假名</span><svg')
+    expect(on).not.toContain('language-note')
+    // An English song has neither kana nor romaji: the switches say so, nothing below asks for a translation.
+    const english = { trackId: 't', tracks: [{ id: 'o', language: 'en', label: 'English', kind: 'original', source: 's', lines }] } as LyricsDocument
+    const other = renderToStaticMarkup(<LanguageSwitches document={english} enabled={['kana', 'romaji']} onToggle={() => {}} onPaste={() => {}} />)
+    expect(other).toContain('<span>假名</span><em>这首没有</em>')
+    expect(other).toContain('<span>Romaji</span><em>这首没有</em>')
+    expect(other).not.toContain('language-note')
+    expect(other).not.toContain('language-actions')
+  })
+
   it('offers to bring a missing translation in from a web page, and to paste one again', () => {
     const lines = [{ startMs: 0, text: 'a' }, { startMs: 1000, text: 'b' }]
     const song = (...extra: LyricsDocument['tracks']) => ({ trackId: 't', tracks: [{ id: 'o', language: 'ja', label: '日本語', kind: 'original', source: 's', lines }, ...extra] } as LyricsDocument)

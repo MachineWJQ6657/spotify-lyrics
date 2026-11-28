@@ -9,7 +9,8 @@ import { useWindowSync } from './hooks/useWindowSync'
 import { displayLyricsOffset } from './lib/listened-offset'
 import { displayedLyricPosition } from './lib/session-calibration'
 import { FIT_START, fitSearchStep, hidesWhilePaused, overlayContent, PAUSED_HIDE_DELAY_MS, upcomingLine, type FitSearch } from './lib/overlay-content'
-import { scriptPresentation } from './lib/script'
+import { languagePresentation, scriptPresentation } from './lib/script'
+import { useKanaRow } from './hooks/useKanaRow'
 import { msUntilNextLyricChange, wallDelayMs } from './lib/lyric-clock'
 import { activeAcousticAnchor } from './lib/clock'
 
@@ -22,7 +23,9 @@ export function Overlay() {
   }, [settingsReady])
   const activeLyrics = !playback?.track || lyrics?.trackId === playback.track.id ? lyrics : null
   const offsetMs = displayLyricsOffset(activeLyrics, playback?.playbackSource === 'demo' ? settings.offsetMs : 0, settings.listenOffset !== false)
-  const tracks = useMemo(() => visibleTracks(activeLyrics, settings.enabledLanguages, settings.romanization), [activeLyrics, settings.enabledLanguages, settings.romanization])
+  // The kana row is made for the view, not kept in the document (hooks/useKanaRow.ts).
+  const shownLyrics = useKanaRow(activeLyrics, settings.enabledLanguages)
+  const tracks = useMemo(() => visibleTracks(shownLyrics, settings.enabledLanguages, settings.romanization), [shownLyrics, settings.enabledLanguages, settings.romanization])
   const base = tracks.find(track => track.kind === 'original') ?? tracks[0]
   // Wake when the next line or word starts (at most 500 ms apart), not on a
   // fixed 80 ms tick: lines switch on time and idle lines cost ~2 renders/s.
@@ -251,8 +254,8 @@ export function Overlay() {
             {content.subtitle && <div lang={scriptPresentation(content.subtitle).lang} className={`overlay-secondary artist ${scriptPresentation(content.subtitle).className}`}>{content.subtitle}</div>}
           </> : <div lang={base?.language === 'ja' ? 'ja' : base?.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-primary karaoke-line ${baseClass}`}>{line?.words?.length ? line.words.map((word, wordIndex) => <span className={position >= word.startMs ? 'sung' : ''} key={`${word.startMs}-${wordIndex}`}>{word.text}</span>) : line?.text?.trim() || '♪'}</div>}
           {content.kind !== 'title' && secondaries.map(({ track, line: sibling }) => {
-            const trackClass = track.language === 'ja' ? 'japanese-grid' : track.language === 'zh-Hans' ? 'chinese-text' : 'latin-text'
-            return <div lang={track.language === 'ja' ? 'ja' : track.language === 'zh-Hans' ? 'zh-CN' : 'en'} className={`overlay-secondary ${track.kind} ${trackClass}`} key={track.id}>{sibling?.text}</div>
+            const shown = languagePresentation(track.language)
+            return <div lang={shown.lang} className={`overlay-secondary ${track.kind} ${shown.className}`} key={track.id}>{sibling?.text}</div>
           })}
           {activeLyrics?.untimedOriginal && <div className={`overlay-secondary ${currentLanguage() === 'en' ? 'latin-text' : 'chinese-text'}`} lang={currentLanguage() === 'en' ? 'en' : 'zh-CN'}>{t('暂无可信时间轴 · 原文可在客户端查看')}</div>}
         </div>

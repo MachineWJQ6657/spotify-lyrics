@@ -142,7 +142,7 @@ export function alignSecondaryTrack(baseLines: LyricLine[], secondaryLines: Lyri
 }
 
 /** Languages the settings can switch on and off. A track in any other one (a custom translation) has no switch and is always shown. */
-const SWITCHED_LANGUAGES = new Set(['ja', 'romaji', 'zh-Hans', 'en'])
+const SWITCHED_LANGUAGES = new Set(['ja', 'kana', 'romaji', 'zh-Hans', 'en'])
 
 export function visibleTracks(document: LyricsDocument | null, enabled: string[], romanization: boolean) {
   if (!document) return []
@@ -150,8 +150,8 @@ export function visibleTracks(document: LyricsDocument | null, enabled: string[]
   const creditTimes = new Set(document.tracks.filter(track => track.kind === 'original')
     .flatMap(track => track.lines.filter(line => isLyricCredit(line.text)).map(line => line.startMs)))
   // Providers list supplemental tracks in whatever order they answered; show
-  // them in one fixed order: original, romaji, then translations.
-  const rank = (track: LyricTrack) => track.kind === 'original' ? 0 : track.kind === 'romanization' ? 1 : 2
+  // them in one fixed order: original, its readings (kana, then romaji), then translations.
+  const rank = (track: LyricTrack) => track.kind === 'original' ? 0 : track.kind === 'kana' ? 1 : track.kind === 'romanization' ? 2 : 3
   return [...document.tracks].sort((left, right) => rank(left) - rank(right))
     // The source-language track is the alignment anchor and must never be
     // replaced by a selected translation merely because its language toggle is

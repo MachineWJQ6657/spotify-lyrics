@@ -3,7 +3,7 @@ export type LanguageCode = 'ja' | 'romaji' | 'zh-Hans' | 'en' | string
 export interface LyricWord { text: string; startMs: number; endMs?: number }
 export interface LyricLine { startMs: number; endMs?: number; text: string; words?: LyricWord[] }
 export interface LyricTrack {
-  id: string; language: LanguageCode; label: string; kind: 'original' | 'translation' | 'romanization'; lines: LyricLine[]; source: string
+  id: string; language: LanguageCode; label: string; kind: 'original' | 'translation' | 'romanization' | 'kana'; lines: LyricLine[]; source: string
   /** Generated readings only. Provider or explicitly edited romaji retain ownership. */
   generatedRomanizationRevision?: number
 }

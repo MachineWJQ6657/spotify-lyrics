@@ -1,5 +1,9 @@
 /** English release notes by version, shown on the help page in English; a version without an entry shows the Chinese notes. */
 export const CHANGELOG_EN: Record<string, string[]> = {
+  '0.4.88': [
+    'Desktop lyrics can have a color for each row: under "Row colors" in the overlay settings there is a swatch for the original, kana, romaji, translation and the next line. A row you have not changed keeps its color, and "Restore defaults" brings back the original colors in one click.',
+    'The former "Text color" choices (white / Spotify green / warm white) only ever colored the song title shown before the first line and never the lyric rows; "Row colors" replaces them, and the title follows the color of the original.'
+  ],
   '0.4.87': [
     'New: a kana row. Switch on "Kana" under "Lyric languages" and Japanese lyrics get a row of kana below each line: kanji become hiragana, and what was already kana, katakana words included, stays as written. It shows in the main window, in desktop lyrics and on the "Find lyrics" page.',
     'The readings are made by the app from a dictionary, the same ones the generated romaji uses; a rare character the dictionary does not know keeps its kanji. A line without any kanji is not repeated.',

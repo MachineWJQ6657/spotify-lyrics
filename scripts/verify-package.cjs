@@ -176,6 +176,10 @@ const checks = {
   // 0.4.87, the kana row: the dictionary worker gives each line as written in kana from the same analysis as the romaji; the windows make the row for the view and never save it
   kanaRow: main.includes('"lyrics:kana"') && main.includes('romanizeWords(tokens, toRomaji, true)') && main.includes('written = false') && main.includes('kanaRowWanted')
     && renderer.includes('function useKanaRow(') && renderer.includes('function kanaTrack(') && rendererCss.includes('.lyric-secondary.kana') && rendererCss.includes('.overlay-secondary.kana'),
+  // 0.4.88, a colour per overlay row: the settings hold only rows the listener changed, the overlay sets one CSS variable per such row, and the style sheet falls back to each row's former colour
+  overlayRowColors: renderer.includes('function overlayColorVariables(') && renderer.includes('--overlay-color-') && renderer.includes('color-rows') && renderer.includes('label-action')
+    && rendererCss.includes('var(--overlay-color-original') && rendererCss.includes('var(--overlay-color-kana') && rendererCss.includes('var(--overlay-color-romaji')
+    && rendererCss.includes('var(--overlay-color-translation') && rendererCss.includes('var(--overlay-color-next') && rendererCss.includes('.color-row'),
   staticListeningIndicator: /\.listen-pulse\s*\{/.test(rendererCss) && !/\.listen-pulse\s*\{[^}]*animation/.test(rendererCss),
   nextTrackPrefetch: main.includes('/v1/me/player/queue') && main.includes('lyrics prefetch: next=') && main.includes('prefetched before the song change') && main.includes('rememberRomanized'),
   providerRequestBudget: main.includes('function lrclibTimelineHealthy(') && main.includes('function fetchKugouByKeyword(') && main.includes('function fetchKugouByFileHash('),

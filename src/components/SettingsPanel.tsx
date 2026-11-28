@@ -8,7 +8,8 @@ import { listenStatus } from '../lib/listen-status'
 import { languageAvailability } from '../lib/language-availability'
 import { PASTE_LANGUAGES, PasteTranslation, searchTranslation } from './PasteTranslation'
 import { pastedTrackId } from '../lib/pasted-translation'
-import type { LyricsDocument } from '../types'
+import type { AppSettings, LyricsDocument } from '../types'
+import { hasOverlayColors, OVERLAY_ROWS, overlayRowColor, withOverlayColor } from '../lib/overlay-colors'
 import { t, tk } from '../lib/i18n'
 
 const languageOptions = [
@@ -35,6 +36,26 @@ function Range({ value, min, max, step = 1, onChange, label, disabled = false }:
  * nothing changes there for a language the song lacks (most songs have no
  * English translation), or for the language the song is in (always shown).
  */
+/**
+ * A colour for each row of the desktop lyrics (lib/overlay-colors.ts). Every
+ * swatch shows the colour the row has now, default or chosen; "restore
+ * defaults" forgets the choices.
+ */
+export function OverlayColorRows({ colors, onChange }: { colors: AppSettings['overlayColors']; onChange(next: AppSettings['overlayColors']): void }) {
+  return <>
+    <div className="setting-label top-gap"><span>{t('各行颜色')}</span><button className="label-action" disabled={!hasOverlayColors(colors)} onClick={() => onChange(undefined)}><RotateCcw size={12} />{t('恢复默认')}</button></div>
+    <div className="color-rows">{OVERLAY_ROWS.map(item => {
+      const color = overlayRowColor(colors, item.row)
+      const name = t(item.label)
+      return <label className="color-row" key={item.row}>
+        <input type="color" value={color} aria-label={t('{row}的颜色', { row: name })} onChange={event => onChange(withOverlayColor(colors, item.row, event.target.value))} />
+        <span>{name}</span>
+        <code>{color.toUpperCase()}</code>
+      </label>
+    })}</div>
+  </>
+}
+
 const READING_LANGUAGES = new Set(['kana', 'romaji'])
 
 export function LanguageSwitches({ document, enabled, onToggle, onPaste, onSearch }: { document: LyricsDocument | null; enabled: string[]; onToggle(code: string): void; onPaste?(code: string): void; onSearch?(code: string): void }) {
@@ -219,8 +240,7 @@ export const SettingsPanel = memo(function SettingsPanel({ onCollapse }: { onCol
         <section>
           <label className="setting-label">{t('文字效果')}</label>
           <div className="segmented three"><button className={settings.textEffect === 'none' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'none' })}>{t('纯文字')}</button><button className={settings.textEffect === 'shadow' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'shadow' })}>{t('柔和阴影')}</button><button className={settings.textEffect === 'outline' ? 'active' : ''} onClick={() => patchSettings({ textEffect: 'outline' })}>{t('清晰描边')}</button></div>
-          <label className="setting-label top-gap">{t('文字颜色')}</label>
-          <div className="segmented three"><button className={settings.textColor === 'white' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'white' })}>{t('纯白')}</button><button className={settings.textColor === 'green' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'green' })}>{t('Spotify 绿')}</button><button className={settings.textColor === 'warm' ? 'active' : ''} onClick={() => patchSettings({ textColor: 'warm' })}>{t('暖白')}</button></div>
+          <OverlayColorRows colors={settings.overlayColors} onChange={overlayColors => patchSettings({ overlayColors })} />
           <label className="setting-label top-gap">{t('文字对齐')}</label>
           <div className="segmented"><button className={settings.alignment === 'left' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'left' })}>{t('左对齐')}</button><button className={settings.alignment === 'center' ? 'active' : ''} onClick={() => patchSettings({ alignment: 'center' })}>{t('居中')}</button></div>
           <label className="setting-label top-gap">{t('文字不透明度')} <small>{settings.textOpacity}%</small></label>

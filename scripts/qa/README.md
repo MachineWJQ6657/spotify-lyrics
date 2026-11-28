@@ -40,6 +40,13 @@ Checks that need no audio:
   scrolls smoothly and ends centred, that a right-click keeps the list
   following, that Esc closes the find bar from anywhere, and that lyric text
   can be selected. Run it after changes to `LyricsStage.tsx`.
+- `node scripts/qa/verify-overlay-colors.mjs [screenshot prefix]` checks the
+  overlay's row colours through the settings panel: the defaults, a chosen
+  colour arriving in the overlay window while the other rows keep theirs, and
+  "restore defaults". It needs a visible instance with a song on screen (the
+  overlay is not shown in the windowless mode) and puts the colours and the
+  panel tab back. Run it after changes to `overlay-colors.ts`, the overlay
+  rules in `styles.css`, or `Overlay.tsx`.
 - `node scripts/qa/verify-browse.mjs ["query"] [screenshot prefix]` walks the
   "查歌词" page: searches a song by text (live requests to LRCLIB and
   NetEase), opens the first hit and checks the reader (from the top, every

@@ -429,3 +429,15 @@ html:has(.overlay-controls-shell), body:has(.overlay-controls-shell),
    Overlay.tsx publishes no hit regions while hidden, so the window passes all input through. */
 .overlay-shell.position-locked .overlay-surface { transition: opacity 240ms ease; }
 .overlay-shell.idle-hidden .overlay-surface { opacity: 0; visibility: hidden; transition: opacity 600ms ease, visibility 0s linear 600ms; }
+
+/* 0.4.88 overlay: a colour per row (settings, "文字颜色"). A variable exists only
+   for a row the listener changed; each fallback is the colour the row had
+   before, so nothing changes until a colour is chosen. The song title shown
+   before the first line follows the original's colour. */
+.overlay-shell .overlay-primary.karaoke-line { color: var(--overlay-color-original, #fff); }
+.overlay-shell .overlay-primary.title-card { color: var(--overlay-color-original, var(--overlay-text-color)); }
+.overlay-shell .karaoke-line span.sung { color: var(--overlay-color-original, var(--spotify)); }
+.overlay-shell .overlay-secondary.kana { color: var(--overlay-color-kana, #b8f5cc); }
+.overlay-shell .overlay-secondary.romanization { color: var(--overlay-color-romaji, #b8f5cc); }
+.overlay-shell .overlay-secondary.translation { color: var(--overlay-color-translation, #fff); }
+.overlay-shell .overlay-secondary.next-line { color: var(--overlay-color-next, #fff); }

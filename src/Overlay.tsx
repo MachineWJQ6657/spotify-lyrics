@@ -11,6 +11,7 @@ import { displayedLyricPosition } from './lib/session-calibration'
 import { FIT_START, fitSearchStep, hidesWhilePaused, overlayContent, PAUSED_HIDE_DELAY_MS, upcomingLine, type FitSearch } from './lib/overlay-content'
 import { languagePresentation, scriptPresentation } from './lib/script'
 import { useKanaRow } from './hooks/useKanaRow'
+import { overlayColorVariables } from './lib/overlay-colors'
 import { msUntilNextLyricChange, wallDelayMs } from './lib/lyric-clock'
 import { activeAcousticAnchor } from './lib/clock'
 
@@ -240,7 +241,9 @@ export function Overlay() {
     '--overlay-bg-opacity': settings.backgroundOpacity / 100, '--overlay-text-opacity': settings.textOpacity / 100,
     '--overlay-radius': `${settings.cornerRadius}px`, '--overlay-line-height': settings.lineHeight / 100,
     '--overlay-font-weight': settings.fontWeight, '--overlay-fit': fit,
-    '--overlay-text-color': settings.textColor === 'green' ? '#1ed760' : settings.textColor === 'warm' ? '#fff4e6' : '#ffffff'
+    '--overlay-text-color': settings.textColor === 'green' ? '#1ed760' : settings.textColor === 'warm' ? '#fff4e6' : '#ffffff',
+    // One variable per row the listener gave a colour; the style sheet falls back to each row's own colour.
+    ...overlayColorVariables(settings.overlayColors)
   } as React.CSSProperties
 
   return <div className={`overlay-shell ${settings.alignment} effect-${settings.textEffect} ${settings.backgroundEnabled ? 'has-background' : 'no-background'} ${settings.positionLocked ? 'position-locked' : ''} ${hiddenWhilePaused ? 'idle-hidden' : ''}`} style={overlayStyle} onPointerEnter={() => window.syllable.overlay.setControlsHover(true)} onPointerLeave={() => window.syllable.overlay.setControlsHover(false)}>

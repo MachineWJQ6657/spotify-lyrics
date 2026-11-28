@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { LanguageSwitches, rangeFill, SettingsPanel } from './SettingsPanel'
+import { LanguageSwitches, OverlayColorRows, rangeFill, SettingsPanel } from './SettingsPanel'
 import type { LyricsDocument } from '../types'
 
 describe('settings panel', () => {
@@ -78,6 +78,19 @@ describe('settings panel', () => {
     expect(pasted).not.toContain('上网查找')
     // A translation that came from a provider or a file is not offered for replacement here.
     expect(render(song({ id: 'z', language: 'en', label: 'English', kind: 'translation', source: 's', lines }), ['ja', 'en'])).not.toContain('language-actions')
+  })
+
+  it('offers a colour for each row of the desktop lyrics, and the way back to the defaults', () => {
+    const untouched = renderToStaticMarkup(<OverlayColorRows colors={undefined} onChange={() => {}} />)
+    for (const [name, color] of [['原文', '#ffffff'], ['假名', '#b8f5cc'], ['罗马音', '#b8f5cc'], ['翻译', '#ffffff'], ['下一句', '#ffffff']]) {
+      expect(untouched).toContain(`<input type="color" aria-label="${name}的颜色" value="${color}"/><span>${name}</span><code>${color.toUpperCase()}</code>`)
+    }
+    // Nothing to restore while every row has its default colour.
+    expect(untouched).toMatch(/<button class="label-action" disabled="">.*恢复默认<\/button>/)
+    const chosen = renderToStaticMarkup(<OverlayColorRows colors={{ translation: '#ffd166' }} onChange={() => {}} />)
+    expect(chosen).toContain('value="#ffd166"/><span>翻译</span><code>#FFD166</code>')
+    expect(chosen).toContain('value="#ffffff"/><span>原文</span>')
+    expect(chosen).toMatch(/<button class="label-action">.*恢复默认<\/button>/)
   })
 
   it('fills range tracks up to the thumb', () => {

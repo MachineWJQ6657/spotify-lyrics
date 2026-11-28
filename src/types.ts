@@ -149,7 +149,10 @@ export interface AppSettings {
   backgroundOpacity: number
   textOpacity: number
   textEffect: 'none' | 'shadow' | 'outline'
+  /** Colours the song title shown before the first line; lyric rows never followed it. Kept as that fallback (see overlayColors). */
   textColor: 'white' | 'green' | 'warm'
+  /** A colour (#rrggbb) for a row of the desktop lyrics; a row without one keeps its default (lib/overlay-colors.ts). */
+  overlayColors?: Partial<Record<'original' | 'kana' | 'romaji' | 'translation' | 'next', string>>
   fontWeight: number
   lineHeight: number
   cornerRadius: number
